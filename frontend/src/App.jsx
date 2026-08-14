@@ -2893,8 +2893,13 @@ export default function App() {
   const handleUpdateModalClose = useCallback(() => {
     const st = String(updateInfo?.status || "");
     const isForce = String(updateInfo?.update_mode || "").toLowerCase() === "force";
-    // force：发现更新后或下载中不可关闭
-    if (isForce && (st === "available" || st === "downloading" || st === "downloaded")) {
+    const isAutoInstall = updateInfo?.auto_install !== false;
+    // 自动安装开始后不可关闭弹窗；force 更新在确认阶段也不可跳过。
+    if (
+      st === "downloading" ||
+      st === "installing" ||
+      ((isForce || isAutoInstall) && st === "available")
+    ) {
       return;
     }
     updateModalDismissedRef.current = true;
@@ -2910,7 +2915,7 @@ export default function App() {
     const resume = startupUpdateWaitRef.current;
     startupUpdateWaitRef.current = null;
     resume?.();
-  }, [updateInfo?.status, updateInfo?.update_mode]);
+  }, [updateInfo?.status, updateInfo?.update_mode, updateInfo?.auto_install]);
 
   const handleUpdateConfirm = useCallback(() => {
     updateControllerRef.current?.confirm?.();
@@ -2975,7 +2980,12 @@ export default function App() {
           latest_version: incomingLatest || prev?.latest_version || null,
           release_notes: incomingNotes || prev?.release_notes || "",
           update_mode: incomingMode || prev?.update_mode || "normal",
+          auto_install:
+            typeof statusPayload?.auto_install === "boolean"
+              ? statusPayload.auto_install
+              : prev?.auto_install ?? true,
           progress: statusPayload?.progress || null,
+          error_stage: statusPayload?.error_stage || "",
           error:
             statusPayload?.error === "dev-mode"
               ? t("settings.updateDevModeError")
@@ -2994,7 +3004,7 @@ export default function App() {
           return;
         }
 
-        if (status === "available" || status === "downloading" || status === "downloaded") {
+        if (status === "available" || status === "downloading" || status === "installing") {
           if (status === "available") void markUpdateChecked();
           setUpdateModalManual(isManual);
           setUpdateModalOpen(true);

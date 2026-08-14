@@ -13,14 +13,15 @@ export function normalizeUpdateMode(value) {
 
 /**
  * Tauri updater 检查/下载控制器。
- * 状态：checking / available / downloading / downloaded / not-available / error / cancelled
+ * 状态：checking / available / downloading / installing / not-available / error / cancelled
  *
- * 发现更新后会停在 available，等待 confirm() 再下载；defer()/cancel() 表示稍后再说。
+ * 默认在发现更新后自动下载并安装。传入 autoInstall: false 时会停在 available，
+ * 等待 confirm() 再继续；defer()/cancel() 表示稍后再说。
  * force 模式下 defer/cancel 在开始下载前会被忽略。
  *
- * 注意：Tauri 的 downloadAndInstall 无法中断进行中的下载。
+ * 注意：Tauri updater 无法中断已经开始的下载；Windows 会在安装器成功启动后退出当前进程。
  */
-export function createDesktopUpdateCheck(onStatus) {
+export function createDesktopUpdateCheck(onStatus, { autoInstall = true } = {}) {
   let cancelled = false;
   let updateMode = "normal";
   let confirmWait = null;
@@ -76,25 +77,28 @@ export function createDesktopUpdateCheck(onStatus) {
       latest_version: latest,
       release_notes: notes,
       update_mode: updateMode,
+      auto_install: autoInstall,
     };
     emit({ status: "available", ...base });
 
-    const choice = await waitForUserChoice();
-    if (cancelled || choice !== "install") {
-      try {
-        await update.close();
-      } catch {
-        // ignore
+    if (!autoInstall) {
+      const choice = await waitForUserChoice();
+      if (cancelled || choice !== "install") {
+        try {
+          await update.close();
+        } catch {
+          // ignore
+        }
+        emit({ status: "cancelled", ...base });
+        return;
       }
-      emit({ status: "cancelled", ...base });
-      return;
     }
 
     startedDownload = true;
     let total = 0;
     let received = 0;
     try {
-      await update.downloadAndInstall((event) => {
+      await update.download((event) => {
         if (event.event === "Started") {
           total = Number(event.data?.contentLength) || 0;
           emit({ status: "downloading", ...base, progress: { percent: 0 } });
@@ -105,27 +109,36 @@ export function createDesktopUpdateCheck(onStatus) {
             ...base,
             progress: { percent: total > 0 ? (received / total) * 100 : NaN },
           });
-        } else if (event.event === "Finished") {
-          emit({ status: "downloaded", ...base });
         }
       });
     } catch (error) {
-      emit({ status: "error", ...base, error: String(error?.message || error) });
+      emit({
+        status: "error",
+        ...base,
+        error_stage: "download",
+        error: String(error?.message || error),
+      });
       return;
     }
 
-    emit({ status: "downloaded", ...base });
+    emit({ status: "installing", ...base });
     try {
+      await update.install();
+      // Windows 上 install() 成功启动 NSIS 后，Tauri updater 会直接退出当前进程。
+      // 其他平台或测试环境若返回，则显式重启以载入新版本。
       await relaunch();
-    } catch {
-      // 安装器已接管进程时 relaunch 可能失败，忽略
+    } catch (error) {
+      emit({
+        status: "error",
+        ...base,
+        error_stage: "install",
+        error: String(error?.message || error),
+      });
     }
   };
 
   return {
-    start: () => {
-      void run();
-    },
+    start: () => run(),
     /** 用户确认立即更新 */
     confirm: () => {
       resolveChoice("install");

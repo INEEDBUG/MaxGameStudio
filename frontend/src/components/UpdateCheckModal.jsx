@@ -17,12 +17,24 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
   const hasPercent = Number.isFinite(percent);
   const upToDate = status === "not-available";
   const isAvailable = status === "available";
-  const isDownloading = status === "downloading" || status === "downloaded";
-  const forceLocked = isForce && (isAvailable || isDownloading);
+  const isUpdating = status === "downloading" || status === "installing";
+  const isAutoInstall = info.auto_install !== false;
+  const forceLocked = isUpdating || (isForce && isAvailable) || (isAutoInstall && isAvailable);
 
   let body = null;
   if (err || status === "error") {
-    body = <p className="text-[12px] text-red-400">{err || t("app.updateConnectFail")}</p>;
+    body = (
+      <div className="space-y-2">
+        <p className="text-[12px] font-semibold text-red-400">
+          {info.error_stage === "install"
+            ? t("dialog.updateInstallFailed")
+            : info.error_stage === "download"
+              ? t("dialog.updateDownloadFailed")
+              : t("app.updateConnectFail")}
+        </p>
+        {err ? <p className="break-words text-[11px] text-zinc-400">{err}</p> : null}
+      </div>
+    );
   } else if (status === "checking") {
     body = <p className="text-sm text-zinc-300">{t("settings.updateChecking")}</p>;
   } else if (upToDate) {
@@ -32,6 +44,8 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
       <div className="space-y-2">
         {isForce ? (
           <p className="text-sm font-semibold text-cs2-orange">{t("dialog.updateForceRequired")}</p>
+        ) : isAutoInstall ? (
+          <p className="text-sm text-zinc-300">{t("dialog.updateDownloadingStart")}</p>
         ) : (
           <p className="text-sm text-zinc-300">{t("dialog.updateAvailablePrompt")}</p>
         )}
@@ -52,8 +66,8 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
         </div>
       </div>
     );
-  } else if (status === "downloaded") {
-    body = <p className="text-sm text-zinc-300">{t("dialog.updateDownloaded")}</p>;
+  } else if (status === "installing") {
+    body = <p className="text-sm text-zinc-300">{t("dialog.updateInstalling")}</p>;
   } else if (status === "cancelled") {
     body = <p className="text-sm text-zinc-300">{t("dialog.updateCancelled")}</p>;
   }
@@ -107,7 +121,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
           ) : null}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-4 py-2">
-          {isAvailable ? (
+          {isAvailable && !isAutoInstall ? (
             <>
               {!isForce ? (
                 <button
@@ -126,16 +140,6 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
                 {t("dialog.updateNow")}
               </button>
             </>
-          ) : null}
-          {!isForce && status === "downloading" ? (
-            <button
-              type="button"
-              className="text-[11px] font-semibold text-cs2-orange hover:opacity-90"
-              onClick={() => onCancel?.()}
-              title={t("dialog.updateStopHint")}
-            >
-              {t("dialog.updateStop")}
-            </button>
           ) : null}
           {!forceLocked && !isAvailable ? (
             <button
