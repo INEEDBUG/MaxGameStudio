@@ -1,12 +1,12 @@
 {
-  "version": "2.5.14",
+  "version": "2.5.15",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-08-25T11:27:08.214Z",
+  "pub_date": "2026-08-25T11:53:58.427Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2tYU2pCRGxsZGs4SUJJUG9rZ0s4NWVtNmV1VjFaVGNhU084aVczR0VORk50ekNhTCtCZG56RWZnNFlzcnd6NnhhUC9FUjJ6REswQmZTV0EwODQ2ckFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjU3MjE1CWZpbGU6Q1MyIFVsdGltYXRlIEluc2lnaHQgU3R1ZGlvXzIuNS4xNF94NjQtc2V0dXAuZXhlCmFTK1IvWG1oSXllNW55TzVJMHlFZ0xCWURRNkgrQjd0OW4wOFlsdDk2Z0dtRkE3ODhJdGNxNUcwa2dWRUswY3dxaVVMRnV2S0locXdMS0Y2T0FhVkRnPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v2.5.14/CS2.Ultimate.Insight.Studio_2.5.14_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3RTUzIvZjN2dGlXTkpmMDNxSDY0VjVsemxJWG9scHdhTUs4Y0MzWTMzRmlJREpxSW9zcWFXMW44Vm5NdWx2QjF3N3ExU0RVeUtTQTZOS2U1di80YWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjU4ODM0CWZpbGU6Q1MyIFVsdGltYXRlIEluc2lnaHQgU3R1ZGlvXzIuNS4xNV94NjQtc2V0dXAuZXhlCnNmWTZWK25JSW5VQXRXTGJhTUhCQVlHVFBHanVCVDR1eC92QW00SWZLazhNYjFWU3R4NWdYR0RUbXJoaDFtVHR0akRZcmNtbnZ1Q1F5OFk5bUZVUURBPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v2.5.15/CS2.Ultimate.Insight.Studio_2.5.15_x64-setup.exe"
     }
   }
 }
