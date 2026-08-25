@@ -40,7 +40,7 @@ export default function CustomTitleBar() {
         <button
           type="button"
           aria-label="打开日志目录"
-          title="打开日志目录（%APPDATA%\\CS2 Insight Agent\\data\\logs）"
+          title="打开 MaxGameStudio 日志目录"
           onClick={() => runWindowAction(() => API.post("config/open-logs"))}
           className="flex h-full w-11 items-center justify-center text-cs2-text-secondary transition-[background-color,color,transform] duration-150 hover:bg-cs2-bg-hover hover:text-cs2-text-primary active:scale-[0.94]"
         >

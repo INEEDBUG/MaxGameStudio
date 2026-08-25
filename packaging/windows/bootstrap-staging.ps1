@@ -34,7 +34,7 @@ try {
   if (-not $DemoparserWheel.Trim()) {
     throw "DemoparserWheel is required; refusing to stage a runtime with the stock parser."
   }
-  Write-Host "[CS2 Insight Agent] Downloading embedded Python (this may take a few minutes)..."
+  Write-Host "[MaxGameStudio] Downloading embedded Python (this may take a few minutes)..."
   $curl = Join-Path $env:SystemRoot "System32\curl.exe"
   if (Test-Path $curl) {
     & $curl -fsSL --connect-timeout 30 --max-time 0 --retry 2 --retry-delay 1 -o $tarball $meta.tarball_url
@@ -42,7 +42,7 @@ try {
   } else {
     Invoke-WebRequest -Uri $meta.tarball_url -OutFile $tarball -UseBasicParsing
   }
-  Write-Host "[CS2 Insight Agent] Verifying Python tarball SHA256..."
+  Write-Host "[MaxGameStudio] Verifying Python tarball SHA256..."
   $hash = (Get-FileHash -Path $tarball -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($hash -ne $meta.sha256.ToLowerInvariant()) {
     throw "Python tarball SHA256 mismatch: expected $($meta.sha256) got $hash"
@@ -62,17 +62,17 @@ try {
   & $uv.Source export --project $repoRoot --frozen --no-dev --no-emit-project `
     --no-emit-package demoparser2 --output-file $runtimeRequirements
   if ($LASTEXITCODE -ne 0) { throw "Exporting the locked backend runtime failed: $LASTEXITCODE" }
-  Write-Host "[CS2 Insight Agent] Installing locked Python runtime with uv..."
+  Write-Host "[MaxGameStudio] Installing locked Python runtime with uv..."
   & $uv.Source pip install --python $py --requirements $runtimeRequirements --compile-bytecode
   if ($LASTEXITCODE -ne 0) { throw "locked backend runtime install failed: $LASTEXITCODE" }
   $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
-  Write-Host "[CS2 Insight Agent] Installing patched demoparser wheel..."
+  Write-Host "[MaxGameStudio] Installing patched demoparser wheel..."
   & $uv.Source pip install --python $py --no-deps $leanWheel --compile-bytecode
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed: $LASTEXITCODE" }
   $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
   & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed: $LASTEXITCODE" }
-  Write-Host "[CS2 Insight Agent] Trimming Python runtime to reduce installer size..."
+  Write-Host "[MaxGameStudio] Trimming Python runtime to reduce installer size..."
   foreach ($rel in @(
       "Lib\test",
       "Lib\idle_test",
@@ -133,7 +133,7 @@ try {
   New-Item -ItemType Directory -Path $scriptsDst -Force | Out-Null
   Copy-Item -Path (Join-Path $PSScriptRoot "install-optional-ffmpeg.ps1") -Destination (Join-Path $scriptsDst "install-optional-ffmpeg.ps1") -Force
   Copy-Item -Path (Join-Path $PSScriptRoot "ffmpeg-redist.json") -Destination (Join-Path $scriptsDst "ffmpeg-redist.json") -Force
-  Copy-Item -Path (Join-Path $PSScriptRoot "launch-cs2-insight.cmd") -Destination (Join-Path $staging "CS2 Insight Agent.cmd") -Force
+  Copy-Item -Path (Join-Path $PSScriptRoot "launch-cs2-insight.cmd") -Destination (Join-Path $staging "MaxGameStudio.cmd") -Force
   Copy-Item -Path (Join-Path $PSScriptRoot "Launch-CS2Insight.ps1") -Destination (Join-Path $staging "Launch-CS2Insight.ps1") -Force
   Copy-Item -Path (Join-Path $PSScriptRoot "app-icon.ico") -Destination (Join-Path $staging "app-icon.ico") -Force
 } finally {

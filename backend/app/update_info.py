@@ -19,7 +19,7 @@ from packaging.version import InvalidVersion, Version
 _GITHUB_OWNER_REPO = (os.environ.get("CS2_INSIGHT_RELEASE_REPO") or "INEEDBUG/CS2-Ultimate-Insight-Studio-Private").strip()
 GITHUB_LATEST_API = f"https://api.github.com/repos/{_GITHUB_OWNER_REPO}/releases/latest"
 GITHUB_RELEASE_LATEST_PAGE = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/latest"
-_USER_AGENT = "CS2-Insight-Agent-UpdateCheck/1.0"
+_USER_AGENT = "MaxGameStudio-UpdateCheck/1.0"
 _RE_RELEASE_TAG_PATH = re.compile(r"/releases/tag/([^/?#]+)\s*$", re.IGNORECASE)
 _RE_GITHUB_URL = re.compile(r"https://github\.com/[^\s\"']+", re.IGNORECASE)
 
@@ -90,6 +90,8 @@ def pick_download_urls(assets: list[dict[str, Any]], version_without_v: str) -> 
     setup_url: Optional[str] = None
     zip_url: Optional[str] = None
     setup_names = {
+        f"MaxGameStudio_{version_without_v}_x64-setup.exe",
+        f"MaxGameStudio-{version_without_v}-Setup.exe",
         f"CS2.Insight.Agent.Setup.{version_without_v}.exe",
         f"CS2 Insight Agent Setup {version_without_v}.exe",
         f"CS2InsightAgent-{version_without_v}-Setup.exe",
@@ -137,7 +139,7 @@ def _read_windows_uninstall_display_version() -> Optional[str]:
         (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
         (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
     )
-    want_name = "CS2 Insight Agent"
+    accepted_names = {"MaxGameStudio", "CS2 Insight Agent"}
     for hive, sub in uninstall_roots:
         try:
             key = winreg.OpenKey(hive, sub)
@@ -158,7 +160,7 @@ def _read_windows_uninstall_display_version() -> Optional[str]:
                         disp, _ = winreg.QueryValueEx(sk, "DisplayName")
                     except OSError:
                         continue
-                    if str(disp).strip() != want_name:
+                    if str(disp).strip() not in accepted_names:
                         continue
                     ver, _ = winreg.QueryValueEx(sk, "DisplayVersion")
                     return str(ver).strip() or None
@@ -297,7 +299,7 @@ def _guess_download_urls(tag_raw: str, tag_norm: str) -> tuple[str, None]:
     enc_tag = quote(tag_raw, safe="")
     base = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/download/{enc_tag}"
     return (
-        f"{base}/CS2.Insight.Agent.Setup.{tag_norm}.exe",
+        f"{base}/MaxGameStudio_{tag_norm}_x64-setup.exe",
         None,
     )
 
@@ -331,7 +333,7 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
         "html_url": release_page,
         "body": "",
         "assets": [
-            {"name": f"CS2.Insight.Agent.Setup.{tag_norm}.exe", "browser_download_url": setup_u},
+            {"name": f"MaxGameStudio_{tag_norm}_x64-setup.exe", "browser_download_url": setup_u},
         ],
     }
 

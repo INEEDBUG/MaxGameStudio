@@ -12,14 +12,14 @@ $OutputEncoding = $cs2Utf8
 
 $appRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $appRoot) {
-  Write-Host "[CS2 Insight Agent] Cannot resolve install directory." -ForegroundColor Red
+  Write-Host "[MaxGameStudio] Cannot resolve install directory." -ForegroundColor Red
   Read-Host "Press Enter to exit"
   exit 1
 }
 Set-Location -LiteralPath $appRoot
 try {
   if ($Host.UI -and $Host.UI.RawUI) {
-    $Host.UI.RawUI.WindowTitle = "CS2 Insight Agent"
+    $Host.UI.RawUI.WindowTitle = "MaxGameStudio"
   }
 } catch {
 }
@@ -42,7 +42,7 @@ if ($env:CS2_INSIGHT_PORT) {
 $openUrl = "http://$($hostOnly):$port/"
 
 if (-not (Test-Path -LiteralPath $py)) {
-  Write-Host "[CS2 Insight Agent] python.exe not found: $py" -ForegroundColor Red
+  Write-Host "[MaxGameStudio] python.exe not found: $py" -ForegroundColor Red
   Read-Host "Press Enter to exit"
   exit 1
 }
@@ -64,7 +64,7 @@ try {
     }
   } -ArgumentList $openUrl
 } catch {
-  Write-Warning "[CS2 Insight Agent] Could not start browser waiter job: $($_.Exception.Message). Open $openUrl manually when the server is ready."
+  Write-Warning "[MaxGameStudio] Could not start browser waiter job: $($_.Exception.Message). Open $openUrl manually when the server is ready."
 }
 
 $pushed = $false
@@ -79,7 +79,7 @@ try {
     throw "python exited with code $LASTEXITCODE"
   }
 } catch {
-  Write-Host "[CS2 Insight Agent] $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "[MaxGameStudio] $($_.Exception.Message)" -ForegroundColor Red
   if ($_.ScriptStackTrace) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed }
   Read-Host "Press Enter to exit"
   exit 1

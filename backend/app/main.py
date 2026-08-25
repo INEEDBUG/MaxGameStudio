@@ -1,4 +1,4 @@
-"""FastAPI 主入口 — CS2 Insight Agent 后端 API"""
+"""FastAPI 主入口 — MaxGameStudio 后端 API。"""
 
 from __future__ import annotations
 
@@ -341,7 +341,7 @@ async def lifespan(_: FastAPI):
     cfg = load_config()
     removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
     if removed_gsi_configs:
-        logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
+        logger.info("Removed %d stale MaxGameStudio GSI config(s)", len(removed_gsi_configs))
     demo_watcher = DemoWatcher(
         cfg.demo_watch_paths or [],
         _enqueue_demo_path,
@@ -373,7 +373,7 @@ async def lifespan(_: FastAPI):
             _FAULT_LOG_FILE.close()
 
 
-app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
+app = FastAPI(title="MaxGameStudio", version=APP_VERSION, lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
@@ -3482,7 +3482,7 @@ async def delete_demo_replay_cache():
 
 @app.get("/api/demo/radar-map/{map_name}")
 async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
-    """Serve the bundled Insight Agent overhead radar used by 2D replay."""
+    """Serve the bundled MaxGameStudio overhead radar used by 2D replay."""
     map_key = str(map_name or "").strip().lower()
     if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
         raise HTTPException(400, "Invalid map name")
@@ -3519,7 +3519,7 @@ async def get_demo_utility_mask(map_name: str, layer: Optional[str] = None):
 
 @app.post("/api/demo/replay")
 async def get_demo_replay(req: DemoReplayRequest):
-    """Return one active-round 2D replay from the original Insight Agent parser."""
+    """Return one active-round 2D replay from the MaxGameStudio parser."""
     if req.end_tick <= req.start_tick:
         raise HTTPException(422, "end_tick must be greater than start_tick")
     max_span = int(req.tick_rate * 10 * 60)
@@ -3912,7 +3912,7 @@ async def get_demo_replay_effects(req: DemoReplayRequest):
 
 @app.post("/api/demo/player-review")
 async def review_demo_player(req: PlayerAnalysisReviewRequest):
-    """Generate a player-level review from the current Insight Agent parse."""
+    """Generate a player-level review from the current MaxGameStudio parse."""
     cfg = load_config()
     if not (
         llm_api_key_configured(cfg.llm.api_key)

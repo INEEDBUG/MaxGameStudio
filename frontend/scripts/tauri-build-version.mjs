@@ -24,8 +24,13 @@ const buildEnv = {
 // `tauri signer generate`. The default key uses an empty password, which
 // PowerShell cannot express as an env var ($env:X = "" deletes it), so wire
 // both variables here where empty values survive.
-const defaultUpdaterKey = join(homedir(), ".tauri", "cs2-insight-agent.key");
-if (!buildEnv.TAURI_SIGNING_PRIVATE_KEY && existsSync(defaultUpdaterKey)) {
+const updaterKeyCandidates = [
+  join(homedir(), ".tauri", "max-game-studio.key"),
+  // Legacy filename retained so existing maintainer machines keep signing.
+  join(homedir(), ".tauri", "cs2-insight-agent.key"),
+];
+const defaultUpdaterKey = updaterKeyCandidates.find((candidate) => existsSync(candidate));
+if (!buildEnv.TAURI_SIGNING_PRIVATE_KEY && defaultUpdaterKey) {
   buildEnv.TAURI_SIGNING_PRIVATE_KEY = defaultUpdaterKey;
 }
 if (buildEnv.TAURI_SIGNING_PRIVATE_KEY_PASSWORD === undefined) {

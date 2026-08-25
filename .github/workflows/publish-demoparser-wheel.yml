@@ -64,7 +64,7 @@ jobs:
           make_latest: false
           overwrite_files: false
           body: |
-            Patched CPython 3.12 x64 runtime used by CS2 Insight Agent.
+            Patched CPython 3.12 x64 runtime used by MaxGameStudio.
 
             The accompanying SHA256 file is verified by
             `packaging/demoparser-lean/setup-backend-dev.ps1` before installation.

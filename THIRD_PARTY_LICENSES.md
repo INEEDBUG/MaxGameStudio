@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-CS2 Insight Agent 在编译与运行时依赖以下开源组件。常规编译依赖主要使用 MIT / BSD / Apache-2.0 / ISC 等宽松型许可证；另有下文单独列出的可选 GPL 工具。项目主体仍使用 **PolyForm Noncommercial 1.0.0**。
+MaxGameStudio 在编译与运行时依赖以下开源组件。常规编译依赖主要使用 MIT / BSD / Apache-2.0 / ISC 等宽松型许可证；另有下文单独列出的可选 GPL 工具。项目主体仍使用 **PolyForm Noncommercial 1.0.0**。
 
 分发本项目编译产物（便携包 / 安装包 / Docker 镜像等）时，请保留各自的版权声明与许可证全文。具体许可证文本可在每个依赖包源码中的 `LICENSE` 文件查阅。
 

@@ -24,14 +24,14 @@ README_FILENAME = "恢复说明.txt"
 RECORDING_STATE_VERSION = 1
 MANIFEST_VERSION = 4
 
-RECOVERY_README_TEXT = """这是 CS2 Insight Agent 在录制前自动保存的玩家原始配置。
+RECOVERY_README_TEXT = """这是 MaxGameStudio 在录制前自动保存的玩家原始配置。
 
 如果软件异常退出，导致 CS2 键位、画面设置或控制台参数没有恢复，请使用软件内的“一键恢复玩家配置”功能。
 
 恢复前请注意：
 
 1. 请先关闭 CS2。
-2. 然后打开 CS2 Insight Agent。
+2. 然后打开 MaxGameStudio。
 3. 在软件提示中点击“一键恢复玩家配置”。
 4. 恢复完成后重新进入 CS2。
 

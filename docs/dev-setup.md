@@ -108,6 +108,8 @@ if (-not $wheel) {
 }
 
 # Force a fresh, lean repo-root python\ runtime for the installer.
+# The CS2_INSIGHT_* variable names are legacy build identifiers retained for
+# compatibility with the packaging scripts; do not rename them here.
 $env:CS2_INSIGHT_DEMOPARSER_WHEEL = $wheel.FullName
 $env:CS2_INSIGHT_REFRESH_PYTHON = "1"
 
@@ -130,8 +132,8 @@ Python runtime, compiles the Tauri executable, creates the NSIS installer, and
 validates the final Windows bundle. The outputs are:
 
 ```text
-frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe
-frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe.sig
+frontend/src-tauri/target/release/bundle/nsis/MaxGameStudio_<version>_x64-setup.exe
+frontend/src-tauri/target/release/bundle/nsis/MaxGameStudio_<version>_x64-setup.exe.sig
 ```
 
 The `.sig` updater signature is produced only when an updater private key is
@@ -169,7 +171,7 @@ up securely:
 Push-Location frontend
 try {
     node .\node_modules\@tauri-apps\cli\tauri.js signer generate `
-        -w "$env:USERPROFILE\.tauri\cs2-insight-agent.key"
+        -w "$env:USERPROFILE\.tauri\max-game-studio.key"
 } finally {
     Pop-Location
 }

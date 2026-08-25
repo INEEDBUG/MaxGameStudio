@@ -1,6 +1,6 @@
 ﻿param(
-  [string]$FfmpegPath = "D:\CodexProject\CS2-Ultimate-Insight-Studio-Private\.tmp-video-tools\ffmpeg-9.0-essentials_build\bin\ffmpeg.exe",
-  [string]$OutputPath = "D:\CodexProject\CS2-Ultimate-Insight-Studio-Private\.tmp-release\CS2-Ultimate-Insight-Studio-v2.4.6-intro.mp4"
+  [string]$FfmpegPath = "D:\CodexProject\MaxGameStudio\.tmp-video-tools\ffmpeg-9.0-essentials_build\bin\ffmpeg.exe",
+  [string]$OutputPath = "D:\CodexProject\MaxGameStudio\.tmp-release\MaxGameStudio-v2.4.6-intro.mp4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force $work | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $OutputPath -Parent) | Out-Null
 
 $segments = @(
-  @{ Image="getting-started.png"; Text="你有没有遇到过这种情况：CS2 客户端提示比赛回放已经过期，但右下角仍然能复制一条官匹分享链接；普通下载器不认识它，想管理 Demo，又不想为了一个桌面工具再部署数据库。CS2 Ultimate Insight Studio，就是从这个真实问题开始做出来的一套本地工作台。" },
+  @{ Image="getting-started.png"; Text="你有没有遇到过这种情况：CS2 客户端提示比赛回放已经过期，但右下角仍然能复制一条官匹分享链接；普通下载器不认识它，想管理 Demo，又不想为了一个桌面工具再部署数据库。MaxGameStudio，就是从这个真实问题开始做出来的一套本地工作台。" },
   @{ Image="official-demo-download.png"; Text="把 CS2 分享出来的链接交给软件，它会完成链接识别、下载任务和本地 Demo 管理。数据使用轻量的 SQLite 保存在电脑上，不要求单独安装 PostgreSQL。你也可以监听常用下载目录，把官匹、完美、五 E 或其他来源的 Demo 集中到一个资料库。" },
   @{ Image="demo-analysis.png"; Text="Demo 解析完成以后，第一屏不再是藏得很深的功能入口，而是整场计分板。比分、KDA、ADR、KAST、爆头率、首杀、AWP 击杀和道具伤害都放在一起。每位玩家还会获得 S 到 D 的表现等级，以及优势和下一步优化方向，让你第一眼就知道这一局发生了什么。" },
   @{ Image="analysis-history.png"; Text="已经解析过的比赛会进入本地历史分析。关掉软件再回来，仍然可以直接重新打开最近的结果，不用为了看旧比赛重复跑一次完整解析。基础分析和二 D 回放缓存是两个阶段，第一次打开某场比赛的二 D 回放会稍慢，之后命中缓存就会快很多。" },

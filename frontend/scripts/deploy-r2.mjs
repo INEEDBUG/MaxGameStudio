@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 /**
  * 发布 Tauri NSIS 构建产物到 Cloudflare R2：
- *   - `CS2 Insight Agent_<ver>_x64-setup.exe` — 完整安装包（同时是更新包）
+ *   - `MaxGameStudio_<ver>_x64-setup.exe` — 完整安装包（同时是更新包）
  *   - `latest.json` — Tauri updater 清单（签名来自同名 .sig 文件）
  *   - `latest.yml`  — electron-updater 桥接清单：旧 Electron 客户端会把
  *     Tauri 安装包当作更新下载并以 /S 静默执行，从而完成一次性迁移

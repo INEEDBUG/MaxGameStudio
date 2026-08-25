@@ -76,11 +76,11 @@ Function CS2_PrepareRunningApps
   StrCpy $R9 "cs2-insight-agent-desktop.exe"
   Call CS2_IsProcessRunning
   ${If} $R0 = 1
-    DetailPrint "等待正在退出的 CS2 Insight Agent 进程结束…"
+    DetailPrint "等待正在退出的 MaxGameStudio 进程结束…"
     StrCpy $R8 50
     Call CS2_WaitProcessGone
     ${If} $R0 = 1
-      DetailPrint "强制结束仍在运行的 CS2 Insight Agent…"
+      DetailPrint "强制结束仍在运行的 MaxGameStudio…"
       nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T'
       Pop $R0
       Pop $R1
@@ -88,7 +88,7 @@ Function CS2_PrepareRunningApps
       StrCpy $R9 "cs2-insight-agent-desktop.exe"
       Call CS2_IsProcessRunning
       ${If} $R0 = 1
-        StrCpy $R7 "无法结束仍在运行的 CS2 Insight Agent。$\r$\n$\r$\n请手动关闭应用（必要时在任务管理器结束进程），再重新运行安装程序。"
+        StrCpy $R7 "无法结束仍在运行的 MaxGameStudio。$\r$\n$\r$\n请手动关闭应用（必要时在任务管理器结束进程），再重新运行安装程序。"
         Call CS2_AbortMigrationInstall
       ${EndIf}
     ${EndIf}
@@ -107,11 +107,11 @@ Function CS2_PrepareRunningApps
   StrCpy $R9 "CS2 Insight Agent.exe"
   Call CS2_IsProcessRunning
   ${If} $R0 = 1
-    DetailPrint "等待旧版 CS2 Insight Agent (Electron) 退出…"
+    DetailPrint "等待旧版应用 (Electron) 退出…"
     StrCpy $R8 40
     Call CS2_WaitProcessGone
     ${If} $R0 = 1
-      StrCpy $R7 "检测到旧版 CS2 Insight Agent (Electron) 正在运行。$\r$\n$\r$\n为避免配置或数据库损坏，请先正常关闭旧版应用，再重新运行安装程序。"
+      StrCpy $R7 "检测到旧版应用 (Electron) 正在运行。$\r$\n$\r$\n为避免配置或数据库损坏，请先正常关闭旧版应用，再重新运行安装程序。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
   ${EndIf}
@@ -205,7 +205,7 @@ Function CS2_RunElectronUninstaller
   ; Inputs: $R8 = uninstall command. Fully silent by design: electron-builder's
   ; /S uninstall keeps the %APPDATA% user data in place, and the user asked for
   ; a no-questions upgrade path.
-  DetailPrint "正在静默卸载旧版 CS2 Insight Agent (Electron)…"
+  DetailPrint "正在静默卸载旧版应用 (Electron)…"
   ClearErrors
   ExecWait '$R8 /S' $R0
   ${If} ${Errors}
@@ -397,11 +397,11 @@ FunctionEnd
   ClearErrors
   ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export' $R0
   ${If} ${Errors}
-    StrCpy $R7 "Tauri 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
+    StrCpy $R7 "MaxGameStudio 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看应用数据目录中的 desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
   ${If} $R0 != 0
-    StrCpy $R7 "用户数据迁移校验失败（退出码 $R0）。旧数据仍然保留，应用不会以空配置启动。请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
+    StrCpy $R7 "用户数据迁移校验失败（退出码 $R0）。旧数据仍然保留，应用不会以空配置启动。请查看应用数据目录中的 desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
 

@@ -7,7 +7,7 @@
   If set: copy this folder to .\python\ (must contain python.exe), then install the uv-locked runtime.
 
 .PARAMETER OutDir
-  Output folder, default dist\CS2-Insight-Agent-portable
+  Output folder, default dist\MaxGameStudio-portable
 
 .PARAMETER SkipPnpm
   Skip pnpm install / build (use existing frontend\dist)
@@ -52,7 +52,7 @@ try {
     throw "Cannot locate git repository root. Ensure this script is inside a git working tree. Original error: $_"
 }
 if (-not $OutDir) {
-    $OutDir = Join-Path $Root "dist\CS2-Insight-Agent-portable"
+    $OutDir = Join-Path $Root "dist\MaxGameStudio-portable"
 }
 
 $ZipPath = "$OutDir.zip"
@@ -367,7 +367,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo CS2 Insight Agent
+echo MaxGameStudio
 echo Backend: http://127.0.0.1:%CS2_INSIGHT_PORT%
 echo Press Ctrl+C to stop
 echo.
@@ -416,7 +416,7 @@ exit /b 1
 '@
 
     $Readme = @"
-CS2 Insight Agent — 便携包使用说明
+MaxGameStudio — 便携包使用说明
 ================================
 
 本包已内置由 uv.lock 精确锁定的 Python 运行环境，无需再运行「安装依赖」。
@@ -477,7 +477,7 @@ exit /b 1
 
 :run
 echo.
-echo CS2 Insight Agent
+echo MaxGameStudio
 echo Backend: http://127.0.0.1:%CS2_INSIGHT_PORT%
 echo Press Ctrl+C to stop
 echo.
@@ -544,7 +544,7 @@ exit /b 1
 '@
 
     $Readme = @"
-CS2 Insight Agent — 便携包（精简：未内置 Python）
+MaxGameStudio — 便携包（精简：未内置 Python）
 ================================
 
 1. 请先双击「安装依赖.bat」安装 Python 依赖（需本机已安装 uv 与 64 位 Python 3.12）。
