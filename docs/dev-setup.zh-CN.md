@@ -104,6 +104,7 @@ if (-not $wheel) {
 }
 
 # 为安装包强制重建仓库根目录下精简的 python\ runtime。
+# CS2_INSIGHT_* 环境变量名属于为兼容构建脚本而保留的 legacy 标识，勿在此重命名。
 $env:CS2_INSIGHT_DEMOPARSER_WHEEL = $wheel.FullName
 $env:CS2_INSIGHT_REFRESH_PYTHON = "1"
 
@@ -125,8 +126,8 @@ try {
 可执行文件编译、NSIS 安装包生成以及最终 Windows bundle 验证。产物位于：
 
 ```text
-frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe
-frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe.sig
+frontend/src-tauri/target/release/bundle/nsis/MaxGameStudio_<version>_x64-setup.exe
+frontend/src-tauri/target/release/bundle/nsis/MaxGameStudio_<version>_x64-setup.exe.sig
 ```
 
 只有存在 updater 私钥时才会生成 `.sig` 更新签名。没有私钥时仍然可以在
@@ -162,7 +163,7 @@ try {
 Push-Location frontend
 try {
     node .\node_modules\@tauri-apps\cli\tauri.js signer generate `
-        -w "$env:USERPROFILE\.tauri\cs2-insight-agent.key"
+        -w "$env:USERPROFILE\.tauri\max-game-studio.key"
 } finally {
     Pop-Location
 }

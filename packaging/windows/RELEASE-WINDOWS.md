@@ -16,9 +16,9 @@ Python 后端与 demoparser2 等既有运行时依赖按锁定清单打入 resou
 
 客户端固定读取 `https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/latest.json`，后端“检查更新”也查询同一仓库的 `releases/latest`。两条路径必须保持一致，不能重新指向原始上游仓库。
 
-1. **更新签名密钥（一次性）**：`node node_modules/@tauri-apps/cli/tauri.js signer generate -w %USERPROFILE%\.tauri\cs2-insight-agent.key`。
+1. **更新签名密钥（一次性）**：`node node_modules/@tauri-apps/cli/tauri.js signer generate -w %USERPROFILE%\.tauri\max-game-studio.key`。
    公钥写入 `tauri.conf.json > plugins.updater.pubkey`；私钥务必备份，丢失后老客户端将无法再接受任何更新。
-2. **构建时签名**：`desktop:build:ver` 会自动使用 `%USERPROFILE%\.tauri\cs2-insight-agent.key`（空密码），并在 NSIS 包旁生成 `.sig` 更新签名：
+2. **构建时签名**：`desktop:build:ver` 会优先使用 `%USERPROFILE%\.tauri\max-game-studio.key`（空密码），并兼容已有的旧密钥文件；构建会在 NSIS 包旁生成 `.sig` 更新签名：
 
 ```powershell
 pnpm.cmd run desktop:build:ver -- 2.4.0
@@ -78,7 +78,7 @@ Windows GNU 构建的主程序会动态加载同目录的 `WebView2Loader.dll`�
 
 ## Electron → Tauri 原位升级
 
-旧 Electron 可以安装在 `C:\Program Files\CS2 Insight Agent`，Tauri 的 `currentUser` 安装默认位于 `%LOCALAPPDATA%\CS2 Insight Agent`。程序目录不同是预期行为；持久化数据统一落在 `%APPDATA%\CS2 Insight Agent\data`，不依赖程序安装目录。
+旧 Electron 与当前 Tauri 版本可能位于不同的安装目录，这是预期行为；持久化数据由内部兼容层统一迁移和读取，不依赖程序安装目录。
 
 NSIS 升级桥按以下顺序执行，任何迁移或校验失败都会中止，且不会先卸载旧程序：
 

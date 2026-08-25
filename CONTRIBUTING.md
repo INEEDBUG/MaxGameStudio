@@ -2,7 +2,7 @@
 
 简体中文 | [English](./CONTRIBUTING_EN.md)
 
-感谢你对 CS2 Insight Agent 的关注。本文说明分支策略与提交流程，对应 [Issue #76](https://github.com/DrEAmSs59/CS2-insight-agent/issues/76)。
+感谢你对 MaxGameStudio 的关注。本文说明分支策略与提交流程。
 
 ## 分支策略
 
@@ -77,7 +77,7 @@ git checkout -b fix/critical-bug main
 
 ## 报告问题
 
-- Bug 与功能请求：使用 [GitHub Issues](https://github.com/DrEAmSs59/CS2-insight-agent/issues)
+- Bug 与功能请求：使用 [MaxGameStudio GitHub Issues](https://github.com/INEEDBUG/MaxGameStudio/issues)
 - 先搜索是否已有重复 Issue
 - 安全相关问题请通过邮件联系维护者，勿在公开 Issue 中贴密钥或完整配置
 

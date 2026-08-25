@@ -101,7 +101,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cs2-insight-agent-backend"
+name = "max-game-studio-backend"
 version = "2.4.2"
 source = { virtual = "." }
 dependencies = [

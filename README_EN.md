@@ -20,14 +20,14 @@
   <a href="./CONTRIBUTING_EN.md">Contributing</a> •
   <a href="#key-features">Key Features</a> •
   <a href="#installation">Installation</a> •
-  <a href="#source-code-and-attribution">Source & Attribution</a> •
+  <a href="#reference-project-and-attribution">Reference Project</a> •
   <a href="#disclaimer">Disclaimer</a> •
   <a href="#license">License</a>
 </p>
 
-## Source Code and Attribution
+## Reference Project and Attribution
 
-- **Core code and desktop architecture:** [DrEAmSs59/CS2-insight-agent](https://github.com/DrEAmSs59/CS2-insight-agent). This derivative retains its commit history, authorship and PolyForm Noncommercial 1.0.0 license while adding official-match Demo retrieval, SQLite workflows, sensitivity and magnetic-input labs, and independent branding.
+- **Reference project:** See the [reference-project section in the Chinese README](./README.md#参考项目与致谢). It records the single reference-project entry requested for this product without presenting it as the source of MaxGameStudio's current desktop architecture or implementation.
 - **Official Demo workflow reference:** [akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager). Its PostgreSQL data layer is not used, and the full project was not merged into this repository.
 - **Steam Game Coordinator helper:** [akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0 (GPL-3.0), downloaded only after first-use consent and executed unmodified as a separate process.
 - **Share Code decoding:** a Python adaptation of [akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode) (MIT); its notice is retained at `third_party/licenses/csgo-sharecode-LICENSE.txt`.
@@ -62,7 +62,7 @@ This repository does not display upstream donation QR codes or solicit money on 
 - **Round Timeline** — Beyond auto-extracted clip cards, browse kill/death timelines by round to add specific shots, deaths, or entire rounds to the recording queue.
 - **Continuous Round Recording** — Record from round start to death or round end; select multiple rounds to combine into a longer clip.
 
-> **First-run performance:** base Demo analysis and 2D replay cache generation are separate stages. The first visit to a match's 2D replay also creates the whole-match Parquet cache, round binary trajectories, and smoke/fire effect cache, so it can take longer than reopening the same match. Cache hits read the local result directly. Upgrades do not delete existing replay caches under `%APPDATA%\CS2 Insight Agent\data\cache\demo-replay`.
+> **First-run performance:** base Demo analysis and 2D replay cache generation are separate stages. The first visit to a match's 2D replay also creates the whole-match Parquet cache, round binary trajectories, and smoke/fire effect cache, so it can take longer than reopening the same match. Cache hits read the local result directly. Upgrades do not delete existing replay caches from the application data directory.
 
 > **Steam credential safety:** recent-match discovery uses only the active local Steam client session. It does not read a Steam password, browser cookies, or a personal Web API key. The optional isolated Game Coordinator helper requires explicit first-use consent and is version- and SHA-512-pinned.
 
@@ -120,7 +120,7 @@ After installation, launch from desktop or start menu. **No browser or manual ba
 
 The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases are downloaded, verified and installed in place before the new version is relaunched. User settings, demo data and projects remain in the separate application-data directory. Release candidates carrying `-rc.N` are GitHub prereleases only: they do not update `updater/latest.json` and are never offered to stable clients. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
 
-> **Recommended: Installation path without Chinese characters.** e.g., `D:\CS2-Insight-Agent\` ✅, `D:\游戏工具\CS2-Insight-Agent\` ❌
+> **Recommended: Installation path without Chinese characters.** e.g., `D:\MaxGameStudio\` ✅, `D:\游戏工具\MaxGameStudio\` ❌
 
 ---
 
@@ -142,12 +142,11 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
    - [ ] Tactical Coach (Grenade Trajectory Analysis / Route Review)
 
 
-### Upstream contributors
+---
 
-<a href="https://github.com/DrEAmSs59/CS2-insight-agent/graphs/contributors">
-  View the contributors and original commit history of `DrEAmSs59/CS2-insight-agent`
-</a>
+## Contributors
 
+- **Codex** — development collaboration, implementation, and delivery auditing.
 
 ---
 

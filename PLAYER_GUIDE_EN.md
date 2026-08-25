@@ -1,6 +1,6 @@
-# 🎮 CS2 Insight Agent — Player Guide
+# 🎮 MaxGameStudio — Player Guide
 
-> **CS2 Insight Agent** is your personal CS2 highlight director and video-production tool.
+> **MaxGameStudio** is your personal CS2 highlight director and video-production tool.
 >
 > It parses CS2 demo files, finds highlights and funny fails, optionally adds AI scores and commentary, controls CS2 Replay and OBS to record clips automatically, and lets you arrange clips with BGM, intros, outros, and player cards into a finished compilation.
 
@@ -25,7 +25,7 @@
 
 Prefer a walkthrough? Watch the community video tutorial first:
 
-- [▶ BV1PcVj69ExZ — CS2 Insight Agent tutorial](https://www.bilibili.com/video/BV1PcVj69ExZ/)
+- [▶ BV1PcVj69ExZ — MaxGameStudio tutorial](https://www.bilibili.com/video/BV1PcVj69ExZ/)
 
 > [!TIP]
 > For a first setup, watch the video once, then use this guide to configure OBS and FFmpeg step by step.
@@ -40,7 +40,7 @@ Prefer a walkthrough? Watch the community video tutorial first:
 - [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
 
 > [!NOTE]
-> In these examples, the creator added the intro/outro BGM and team logo; the in-game clips were automatically edited by CS2 Insight Agent.
+> In these examples, the creator added the intro/outro BGM and team logo; the in-game clips were automatically edited by MaxGameStudio.
 
 ### End-to-end edited compilations
 
@@ -48,7 +48,7 @@ Prefer a walkthrough? Watch the community video tutorial first:
 - [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
 
 > [!NOTE]
-> In these examples, both the intro/outro BGM and the game clips were produced with CS2 Insight Agent.
+> In these examples, both the intro/outro BGM and the game clips were produced with MaxGameStudio.
 
 ---
 
@@ -92,8 +92,8 @@ Double-click the downloaded `.exe` and follow the installer prompts.
 > [!IMPORTANT]
 > Use an installation path without non-ASCII characters when possible. For example:
 >
-> - ✅ `D:\CS2-Insight-Agent\`
-> - ✅ `C:\Program Files\CS2-Insight-Agent\`
+> - ✅ `D:\MaxGameStudio\`
+> - ✅ `C:\Program Files\MaxGameStudio\`
 > - ⚠️ A path containing Chinese or other non-ASCII characters may cause compatibility problems.
 
 > [!NOTE]
@@ -101,7 +101,7 @@ Double-click the downloaded `.exe` and follow the installer prompts.
 
 ### Step 3: Launch it
 
-After installation, **CS2 Insight Agent** shortcuts are available from the desktop and Start menu.
+After installation, **MaxGameStudio** shortcuts are available from the desktop and Start menu.
 
 ---
 
@@ -125,7 +125,7 @@ Download [OBS Studio](https://obsproject.com/download), choose **Windows**, and 
 
 ### Step 2: Enable OBS WebSocket
 
-CS2 Insight uses OBS WebSocket to control recording.
+MaxGameStudio uses OBS WebSocket to control recording.
 
 1. Open **OBS Studio**.
 2. Choose **Tools** → **WebSocket Server Settings**.
@@ -133,9 +133,9 @@ CS2 Insight uses OBS WebSocket to control recording.
 4. Keep the default port, `4455`, unless you need a different one. Set or generate a password and save it.
 
 > [!TIP]
-> You can disable authentication and leave the password blank in CS2 Insight, but keeping authentication enabled is safer.
+> You can disable authentication and leave the password blank in MaxGameStudio, but keeping authentication enabled is safer.
 
-### Step 3: Connect OBS in CS2 Insight
+### Step 3: Connect OBS in MaxGameStudio
 
 Go to **Settings** → **Video Settings**.
 
@@ -150,7 +150,7 @@ Go to **Settings** → **Video Settings**.
    - Port: `4455`
    - Password: the WebSocket password you set in OBS
 3. Select **Configuration Check**. The app can launch OBS when needed and verifies both the executable path and WebSocket connection.
-4. After it connects, use **One-click Calibration** to inspect the recording setup. If necessary, use **One-click Repair**. It only manages the dedicated `CS2 Insight Recording` scene and can create its Game Capture source and correct common canvas/output resolution, stretch, recording-format, and recording-quality problems.
+4. After it connects, use **One-click Calibration** to inspect the recording setup. If necessary, use **One-click Repair**. It only manages the MaxGameStudio-dedicated scene; existing OBS profiles retain the legacy scene name `CS2 Insight Recording`. It can create that scene's Game Capture source and correct common canvas/output resolution, stretch, recording-format, and recording-quality problems.
 
 > [!TIP]
 > If calibration says the recording encoder changed, restart OBS before recording.
@@ -330,7 +330,7 @@ Add yourself and friends under **Settings** → **Followed Players** (up to 50 n
 **The app does not open, or I do not see a shortcut after installing.**
 
 - Confirm the installer reached completion rather than being closed early.
-- Look for CS2 Insight Agent in the Windows Start menu.
+- Look for MaxGameStudio in the Windows Start menu.
 - Run the installer again if necessary.
 
 **Windows SmartScreen appears when I start the app.**
@@ -347,7 +347,7 @@ Install the newest package from [this project's Releases page](https://github.co
 - Ensure OBS can open and that **Tools** → **WebSocket Server Settings** has WebSocket enabled.
 - Verify the port (normally `4455`) and password match in both apps.
 - Use OBS 28.0 or newer; older versions need obs-websocket installed separately.
-- As a diagnostic step, you may disable OBS authentication and leave the password blank in CS2 Insight.
+- As a diagnostic step, you may disable OBS authentication and leave the password blank in MaxGameStudio.
 
 **CS2 was not detected.**
 
@@ -375,8 +375,8 @@ POV HUD makes local demo footage look closer to a player's in-game view. Enable 
 **OBS records a black screen, or CS2 is not visible.**
 
 - Run OBS calibration again in **Settings** → **Video Settings**, then **restart OBS**.
-- Run OBS and CS2 Insight at the same privilege level; if needed, run OBS as administrator too.
-- Check the Game Capture source in the `CS2 Insight Recording` scene.
+- Run OBS and MaxGameStudio at the same privilege level; if needed, run OBS as administrator too.
+- Check the Game Capture source in the legacy `CS2 Insight Recording` scene.
 - With multiple displays, ensure the capture targets the display used by CS2.
 
 **There is no sound in the recording.**
@@ -386,8 +386,8 @@ POV HUD makes local demo footage look closer to a player's in-game view. Enable 
 
 **The exported file cannot be opened, moved, or sent.**
 
-- Avoid running CS2 Insight as administrator unless necessary; differing permissions can affect output files.
-- Close CS2 Insight and OBS before moving the file.
+- Avoid running MaxGameStudio as administrator unless necessary; differing permissions can affect output files.
+- Close MaxGameStudio and OBS before moving the file.
 - Try moving the file to another folder, then open it again.
 
 **The video has black bars or the game image is cropped.**
@@ -424,7 +424,7 @@ The app normally switches to the target player's first-person view. In the parse
 
 **Where are demos from 5E or Perfect World Arena?**
 
-Download them from each platform's Match History page. The downloaded `.dem` file can be dragged directly into CS2 Insight.
+Download them from each platform's Match History page. The downloaded `.dem` file can be dragged directly into MaxGameStudio.
 
 **Can I record clips from multiple demos in one queue?**
 
@@ -435,7 +435,7 @@ Yes. Add clips from different demos to the queue. The app groups them by demo, s
 ## 🎬 Quick Start Checklist
 
 ```text
-1. Download and install CS2 Insight Agent.
+1. Download and install MaxGameStudio.
 2. Start it from the desktop shortcut.
 3. In Settings, set the CS2 path under General Settings; configure and calibrate OBS under Video Settings.
 4. Drag in a demo, select a player, and start parsing.

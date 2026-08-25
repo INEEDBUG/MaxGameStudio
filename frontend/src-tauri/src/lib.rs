@@ -1136,7 +1136,7 @@ pub fn run() {
                         .message(format!(
                             "{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。"
                         ))
-                        .title("CS2 Insight Agent — 后端启动失败")
+                        .title("MaxGameStudio — 后端启动失败")
                         .kind(MessageDialogKind::Error)
                         .blocking_show();
                     handle.exit(1);
@@ -1145,7 +1145,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build CS2 Insight Agent desktop shell");
+        .expect("failed to build MaxGameStudio desktop shell");
 
     app.run(|handle, event| match event {
         RunEvent::WindowEvent {

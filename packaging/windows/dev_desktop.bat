@@ -15,7 +15,7 @@ if not exist "frontend\node_modules\.bin\tauri.cmd" (
 )
 
 cd /d "frontend"
-echo CS2 Insight Agent - Tauri hot-reload development
+echo MaxGameStudio - Tauri hot-reload development
 echo Frontend edits use Vite HMR; no NSIS installer will be built.
 call pnpm.cmd run desktop:dev
 exit /b %errorlevel%

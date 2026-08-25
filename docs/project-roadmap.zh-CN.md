@@ -1,8 +1,8 @@
-# CS2 Ultimate Insight Studio 开发记录
+# MaxGameStudio 开发记录
 
 ## 项目边界
 
-- 主体基于 `DrEAmSs59/CS2-insight-agent`，保留其 PolyForm Noncommercial 1.0.0 许可与原作者声明。
+- 参考项目与许可证记录统一放在根目录 README 的“参考项目与致谢”小节；本文不把参考项目描述为主体代码或桌面架构来源。
 - 参考 `akiver/cs-demo-manager` 的成熟工作流，但不复制其 PostgreSQL 数据层；当前项目继续使用已有 SQLite 数据库。
 - 功能分阶段落地：官匹 Demo 获取与自动入库 → 分析/回放整合 → 灵敏度测试与个性化建议 → 磁轴键盘测试与关联分析。
 - GitHub 仓库在开发完成前保持 Private；转为 Public 必须由项目所有者再次明确确认。
@@ -11,7 +11,7 @@
 
 已完成：
 
-- 建立私人仓库 `INEEDBUG/CS2-Ultimate-Insight-Studio`，保留 `upstream` 指向原项目。
+- 建立私人仓库 `INEEDBUG/MaxGameStudio`，项目远程与发布路径统一使用当前品牌。
 - 将用户提供的 `steam://rungame/...+csgo_download_match CSGO-...` 输入规范化并解码为 match ID、reservation ID 和 TV port。
 - 通过独立、按需下载的 `@akiver/boiler-writter` 与本机 Steam Game Coordinator 通信，读取 Valve 返回的真实 `.dem.bz2` 地址。
 - 对 npm 包做固定版本和 SHA-512 完整性校验，只提取白名单文件。
@@ -87,11 +87,11 @@
 
 已完成：
 
-- 用户可见名称统一为 `CS2 Ultimate Insight Studio`，桌面窗口标题和侧栏品牌同步更新。
+- 用户可见名称统一为 `MaxGameStudio`，桌面窗口标题和侧栏品牌同步更新。
 - 新增首次启动引导，直接提供 Demo 库、官匹下载、灵敏度实验室和磁轴输入实验室四个入口。
 - 引导完成状态仅写入本机 `localStorage`，不联网、不收集账户或测试数据。
-- 保留旧 Tauri identifier 与 `%APPDATA%\\CS2 Insight Agent\\data` 数据目录，避免品牌升级导致已有 SQLite、配置和备份丢失。
-- README 明确说明本项目是原 `DrEAmSs59/CS2-insight-agent` 的非商业衍生版本，并保留许可与作者归属。
+- 保留旧 Tauri identifier 与内部数据迁移兼容层，避免品牌升级导致已有 SQLite、配置和备份丢失。
+- README 仅保留一个参考项目链接，并继续保留必要的许可证与作者归属信息。
 
 验证：
 
@@ -103,7 +103,7 @@
 
 - 本机未安装 Rust/MSVC；为避免占用 C 盘，将正式构建迁移到 GitHub 托管的 Windows runner。
 - `Release Windows` 支持手动输入候选版本，手动运行只上传私人 artifact，不创建公开 Release。
-- 安装包品牌更新为 `CS2 Ultimate Insight Studio`，并停用原项目 R2 自动更新通道。
+- 安装包品牌更新为 `MaxGameStudio`，并停用旧版 R2 自动更新通道。
 - 当前候选为 `0.1.0-rc.2`：安装包 39,188,332 字节，内嵌 resources 87.19 MiB；rc.2 包含官匹过期/繁忙/Steam 状态分层诊断。
 - 本机 D 盘复核 SHA-256：`990dd4cc590576cc2f6a01af9a802d85052e7ee3b0a84a436d3d1df34bde8dc2`，与云端 `SHA256SUMS` 一致。
 

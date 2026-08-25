@@ -39,7 +39,7 @@ def test_update_check_targets_the_desktop_release_repository():
 def test_pick_download_urls():
     ver = "1.2.3"
     assets = [
-        {"name": f"CS2InsightAgent-{ver}-Setup.exe", "browser_download_url": "https://example/setup"},
+        {"name": f"MaxGameStudio_{ver}_x64-setup.exe", "browser_download_url": "https://example/setup"},
         {"name": f"CS2InsightAgent-{ver}-windows-amd64.zip", "browser_download_url": "https://example/zip"},
         {"name": "other.txt", "browser_download_url": "https://example/x"},
     ]
@@ -58,9 +58,9 @@ def test_pick_download_urls_current_electron_asset():
     assert zip_url is None
 
 
-def test_redirect_fallback_guesses_current_electron_asset():
+def test_redirect_fallback_guesses_current_max_game_studio_asset():
     setup, zip_url = _guess_download_urls("V2.2.4", "2.2.4")
-    assert setup.endswith("/V2.2.4/CS2.Insight.Agent.Setup.2.2.4.exe")
+    assert setup.endswith("/V2.2.4/MaxGameStudio_2.2.4_x64-setup.exe")
     assert zip_url is None
 
 

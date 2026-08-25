@@ -1,5 +1,5 @@
-#define MyAppName "CS2 Insight Agent"
-#define MyAppPublisher "CS2 Insight Agent"
+#define MyAppName "MaxGameStudio"
+#define MyAppPublisher "MaxGameStudio"
 #define MyAppURL "https://github.com/INEEDBUG/MaxGameStudio"
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
@@ -11,10 +11,10 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-DefaultDirName={localappdata}\CS2InsightAgent
+DefaultDirName={localappdata}\MaxGameStudio
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputBaseFilename=CS2InsightAgent-{#MyAppVersion}-Setup
+OutputBaseFilename=MaxGameStudio-{#MyAppVersion}-Setup
 SetupIconFile=app-icon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -74,14 +74,14 @@ begin
     if IsBadProgramFiles(WizardDirValue) then
     begin
       MsgBox('Installing under Program Files is not supported (folder is not writable for config and database).' + #13#10 +
-             'Please choose a folder under your user profile, e.g. %LocalAppData%\CS2InsightAgent.', mbError, MB_OK);
+             'Please choose a folder under your user profile, e.g. %LocalAppData%\MaxGameStudio.', mbError, MB_OK);
       Result := False;
       Exit;
     end;
     if not IsDirWritable(WizardDirValue) then
     begin
       MsgBox('This folder does not appear writable. Pick another install location.' + #13#10 + #13#10 +
-             'Tips: use a folder under your user profile (e.g. %LocalAppData%\CS2InsightAgent); avoid Program Files; if the path is correct, check antivirus or Windows Controlled Folder Access.',
+             'Tips: use a folder under your user profile (e.g. %LocalAppData%\MaxGameStudio); avoid Program Files; if the path is correct, check antivirus or Windows Controlled Folder Access.',
              mbError, MB_OK);
       Result := False;
     end;

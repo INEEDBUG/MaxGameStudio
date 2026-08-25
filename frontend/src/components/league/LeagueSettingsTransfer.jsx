@@ -1,7 +1,8 @@
 import { Download, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 
-const EXPORT_FORMAT = "cs2-ultimate-insight-studio/league-settings";
+const EXPORT_FORMAT = "max-game-studio/league-settings";
+const LEGACY_EXPORT_FORMAT = "cs2-ultimate-insight-studio/league-settings";
 const EXPORT_SCHEMA_VERSION = 1;
 const LEAGUE_AKARI_FORMAT = "league-akari-settings";
 const LEAGUE_AKARI_DATABASE_VERSION = 15;
@@ -108,9 +109,9 @@ export function parseLeagueSettingsImport(text, currentSettings = {}) {
   const allowed = new Set(Object.keys(currentSettings || {}));
   const imported = document?.type === LEAGUE_AKARI_FORMAT
     ? parseLeagueAkariSettings(document, allowed)
-    : document?.format === EXPORT_FORMAT ? document.settings : document;
+    : [EXPORT_FORMAT, LEGACY_EXPORT_FORMAT].includes(document?.format) ? document.settings : document;
   if (!isPlainObject(imported)) throw new Error("文件中没有有效的 League 设置对象");
-  if (document?.format === EXPORT_FORMAT && Number(document.schema_version) > EXPORT_SCHEMA_VERSION) {
+  if ([EXPORT_FORMAT, LEGACY_EXPORT_FORMAT].includes(document?.format) && Number(document.schema_version) > EXPORT_SCHEMA_VERSION) {
     throw new Error("该设置文件来自更新版本，当前客户端无法安全导入");
   }
   const sanitized = Object.fromEntries(Object.entries(stripSensitiveValues(imported))

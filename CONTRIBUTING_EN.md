@@ -2,7 +2,7 @@
 
 [简体中文](./CONTRIBUTING.md) | English
 
-Thanks for contributing to CS2 Insight Agent. This is a concise guide to the branch and pull-request workflow.
+Thanks for contributing to MaxGameStudio. This is a concise guide to the branch and pull-request workflow.
 
 ## Branches
 
@@ -34,4 +34,4 @@ See [developer.md](./docs/developer.md) for the development workflow and [dev-se
 
 ## Issues and license
 
-Use [GitHub Issues](https://github.com/DrEAmSs59/CS2-insight-agent/issues) for bugs and feature requests; search before filing. Report security concerns privately—do not post secrets or full configurations in public issues. By contributing, you license your changes under [PolyForm Noncommercial 1.0.0](./LICENSE).
+Use [MaxGameStudio GitHub Issues](https://github.com/INEEDBUG/MaxGameStudio/issues) for bugs and feature requests; search before filing. Report security concerns privately—do not post secrets or full configurations in public issues. By contributing, you license your changes under [PolyForm Noncommercial 1.0.0](./LICENSE).

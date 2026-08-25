@@ -133,7 +133,7 @@ jobs:
             exit 0
           }
           if (-not $env:WINDOWS_PFX_PASSWORD) { throw "WINDOWS_PFX_PASSWORD is required when WINDOWS_PFX_BASE64 is configured" }
-          $pfxPath = Join-Path $env:RUNNER_TEMP "cs2-insight-agent-code-signing.pfx"
+          $pfxPath = Join-Path $env:RUNNER_TEMP "max-game-studio-code-signing.pfx"
           try {
             $encoded = $env:WINDOWS_PFX_BASE64 -replace '-----BEGIN [^-]+-----', '' -replace '-----END [^-]+-----', '' -replace '\s', ''
             [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($encoded))

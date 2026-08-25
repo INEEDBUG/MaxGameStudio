@@ -2314,7 +2314,7 @@ class OBSDirector:
         gsi_path = gsi_config_path(cfg_dir)
         logger.info("GSI HTTP sink (gamestate cfg): %s -> %s", gsi_url, gsi_path)
         gsi_lines = [
-            '"CS2 Insight Agent"',
+            '"MaxGameStudio"',
             "{",
             f'  "uri" "{gsi_url}"',
             '  "timeout" "1.0"',

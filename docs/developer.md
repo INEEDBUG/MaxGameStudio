@@ -35,7 +35,7 @@ git checkout -b feat/my-change
 ## Project Structure
 
 ```
-CS2-insight-agent/
+MaxGameStudio/
 ├── backend/
 │   └── app/
 │       ├── main.py                    # FastAPI 入口（解析 / Demo 库 / GSI / 合辑导出等）

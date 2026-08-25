@@ -1,6 +1,6 @@
-# 🎮 CS2 Insight Agent — 玩家使用指南
+# 🎮 MaxGameStudio — 玩家使用指南
 
-> **CS2 洞察智能体** — 你的私人 CS2 高光导演 & 视频编排工具。
+> **MaxGameStudio** — 你的私人 CS2 高光导演 & 视频编排工具。
 >
 > 自动解析 Demo 录像，提取你的高光 / 下饭名场面，支持 AI 锐评打分，一键控制 OBS 全自动录制精彩片段，拖拉拽形式添加BGM/片头/片尾/玩家信息卡生成视频合集。
 
@@ -21,7 +21,7 @@
 
 不熟悉文字说明？可以先观看 B 站视频教程：
 
-- [▶ BV1PcVj69ExZ — CS2 Insight Agent 使用教程](https://www.bilibili.com/video/BV1PcVj69ExZ/)
+- [▶ BV1PcVj69ExZ — MaxGameStudio 使用教程](https://www.bilibili.com/video/BV1PcVj69ExZ/)
 
 > [!TIP]
 > 建议新手先看完视频教程，再按下方目录逐步配置 OBS、FFmpeg 等功能。
@@ -30,7 +30,7 @@
 
 ## 🎬 成片展示
 
-以下是社区 UP 主使用 CS2 Insight Agent 制作的成片示例，供参考最终效果：
+以下是社区 UP 主使用 MaxGameStudio 制作的成片示例，供参考最终效果：
 
 ### 游戏片段自动剪辑
 
@@ -38,7 +38,7 @@
 - [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
 
 > [!NOTE]
-> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 CS2 Insight Agent 自动剪辑。
+> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 MaxGameStudio 自动剪辑。
 
 ### 全链路剪辑合成
 
@@ -46,7 +46,7 @@
 - [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
 
 > [!NOTE]
-> 上述成片的片头片尾 BGM 及游戏片段**均由 CS2 Insight Agent 剪辑合成产出**。
+> 上述成片的片头片尾 BGM 及游戏片段**均由 MaxGameStudio 剪辑合成产出**。
 
 ---
 
@@ -91,16 +91,16 @@
 
 > [!IMPORTANT]
 > **建议安装路径不含中文字符。** 例如：
-> - ✅ `D:\CS2-Insight-Agent\`
-> - ✅ `C:\Program Files\CS2-Insight-Agent\`
-> - ❌ `D:\游戏工具\CS2洞察\` ← 中文路径可能导致问题
+> - ✅ `D:\MaxGameStudio\`
+> - ✅ `C:\Program Files\MaxGameStudio\`
+> - ❌ `D:\游戏工具\MaxGameStudio\` ← 中文路径可能导致问题
 
 > [!NOTE]
 > 部分电脑在首次运行安装包时，Windows 可能弹出「Windows 已保护你的电脑」的 SmartScreen 提示。这是因为程序尚未积累大量用户数量的信任记录，**并非病毒**。点击「更多信息」→「仍要运行」即可继续安装。
 
 ### 第三步：完成安装
 
-安装完成后，桌面和开始菜单会出现 **CS2 Insight Agent** 的快捷方式，安装完毕。
+安装完成后，桌面和开始菜单会出现 **MaxGameStudio** 的快捷方式，安装完毕。
 
 ---
 
@@ -108,7 +108,7 @@
 
 ### 启动程序
 
-双击桌面的 **CS2 Insight Agent** 快捷方式，程序会直接以桌面窗口的形式打开，**无需打开浏览器，也无需手动启动后端服务**。
+双击桌面的 **MaxGameStudio** 快捷方式，程序会直接以桌面窗口的形式打开，**无需打开浏览器，也无需手动启动后端服务**。
 
 程序启动后你将看到一个**深色电竞风格**的桌面界面，左侧是导航栏，右侧是主工作区。
 
@@ -143,7 +143,7 @@
 
 ### 第二步：开启 OBS WebSocket 服务
 
-CS2 Insight 通过 OBS 的 WebSocket 接口来远程控制 OBS 的录制功能。你需要在 OBS 里开启它：
+MaxGameStudio 通过 OBS 的 WebSocket 接口来远程控制 OBS 的录制功能。你需要在 OBS 里开启它：
 
 1. 打开 **OBS Studio**
 2. 点击顶部菜单栏 **「工具」→「WebSocket 服务器设置」**
@@ -153,13 +153,13 @@ CS2 Insight 通过 OBS 的 WebSocket 接口来远程控制 OBS 的录制功能�
 3. 在弹出的窗口中：
    - ✅ **勾选** 「启用 WebSocket 服务器」
    - **服务器端口**：默认 `4455`（不用改）
-   - **密码**：点「生成密码」自动生成一个，或自己设一个；**记住这个密码！** 后面要填到 CS2 Insight 里
+   - **密码**：点「生成密码」自动生成一个，或自己设一个；**记住这个密码！** 后面要填到 MaxGameStudio 里
 4. 点 **「确定」** 保存
 
 > [!TIP]
-> 如果你嫌麻烦，也可以取消勾选「启用认证」来去掉密码，这样 CS2 Insight 里密码留空就行。但出于安全考虑不推荐这么做。
+> 如果你嫌麻烦，也可以取消勾选「启用认证」来去掉密码，这样 MaxGameStudio 里密码留空就行。但出于安全考虑不推荐这么做。
 
-### 第三步：在 CS2 Insight 中完成 OBS 配置
+### 第三步：在 MaxGameStudio 中完成 OBS 配置
 
 在 **「设置」→「视频设置」** 中完成 OBS 配置；这里集中管理 OBS 的启动、WebSocket 连接和录制环境校准。
 
@@ -170,7 +170,7 @@ CS2 Insight 通过 OBS 的 WebSocket 接口来远程控制 OBS 的录制功能�
    - **端口**：`4455`（除非你在 OBS 中改过）
    - **密码**：填写刚才在 OBS 中设置的密码
 3. 点击 **「配置检查」**。程序会按需启动 OBS，并检查路径与 WebSocket 连接；连接成功后 OBS 配置即被验证。
-4. 连接成功后，在「一键校准」中查看状态；有问题时点击 **「一键修复」**。它只会操作 `CS2 Insight Recording` 专用场景，可自动创建场景和 Game Capture 源，并修正画布/输出分辨率、画面拉伸、录像格式和录像质量等常见问题。
+4. 连接成功后，在「一键校准」中查看状态；有问题时点击 **「一键修复」**。它只会操作 MaxGameStudio 专用场景；已有 OBS 配置中的场景名仍是 legacy 名称 `CS2 Insight Recording`，程序可自动创建该场景和 Game Capture 源，并修正画布/输出分辨率、画面拉伸、录像格式和录像质量等常见问题。
 
 > [!TIP]
 > 如果校准提示录像编码器已变更，请重启 OBS 后再开始录制。
@@ -210,7 +210,7 @@ AI 模式可以让大模型为你的每个高光/下饭片段生成**评分 (0-1
 4. 复制生成的 Key（以 `sk-` 开头的一串字符）
 5. 充值几块钱就够用很久了
 
-### 在 CS2 Insight 中配置 AI
+### 在 MaxGameStudio 中配置 AI
 
 1. 进入 **「设置」→「解析设置」**，在「分析模式」中选择 **「AI 洞察」**。
 2. 此时会显示「大模型（AI）」卡片，填写：
@@ -268,7 +268,7 @@ Demo 就是 CS2 的比赛录像文件（`.dem` 格式）。你可以从以下途
 
 ## 7. 一键自动录制
 
-这是 CS2 Insight 最硬核的功能——全自动控制 CS2 回放 + OBS 录制。
+这是 MaxGameStudio 最硬核的功能——全自动控制 CS2 回放 + OBS 录制。
 
 ### 前提条件
 
@@ -392,7 +392,7 @@ D:\ffmpeg\bin\ffmpeg.exe
 **Q：程序打不开 / 安装后没有快捷方式？**
 
 - 确认安装包已经正常运行到完成，而不是中途关闭了
-- 检查 Windows「开始菜单」中是否有 CS2 Insight Agent 的条目
+- 检查 Windows「开始菜单」中是否有 MaxGameStudio 的条目
 - 尝试重新运行安装包
 
 **Q：启动时弹出 Windows SmartScreen 警告？**
@@ -454,14 +454,14 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 `E:\Steam\steamapps\common\OBS Studio\bin\64bit\obs64.exe`
 - 连接配置内的主机地址为`localhost`，默认端口为`4455`，这两个不要乱动，默认端口在冲突可进行更改
 - 检查OBS → 工具 → websocket 服务器设置 → 启用
-- 确保agent内的端口与obs的websocket端口保持一致
-- 确保agent内与obs的websocket密码保持一致，必要时可取消身份验证或自己手填密码，不用随机生成的。
+- 确保 MaxGameStudio 内的端口与 OBS 的 WebSocket 端口保持一致
+- 确保 MaxGameStudio 内与 OBS 的 WebSocket 密码保持一致，必要时可取消身份验证或自己手填密码，不用随机生成的。
 
 **Q：录制时 CS2 没有画面 / OBS 录到黑屏？**
 
 - 在「设置」→「视频设置」重新进行 OBS 校准，**校准完毕后重启OBS(必须!)**
-- OBS 和 Agent 权限保持一致；必要时 OBS 管理员启动；
-- 检查 `CS2 Insight Recording` 场景的游戏捕获源；右键捕获源检查属性。
+- OBS 和 MaxGameStudio 权限保持一致；必要时 OBS 管理员启动；
+- 检查 MaxGameStudio 专用场景（已有配置中的 legacy 名称为 `CS2 Insight Recording`）的游戏捕获源；右键捕获源检查属性。
 - 如果使用了多显示器，确保 CS2 和 OBS 捕获的是同一个屏幕
 
 **Q：录制没声音 / CS2 没声音？**
@@ -471,9 +471,9 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 
 **Q：导出的视频打不开 / 视频文件异常 / 发群失败?**
 
-- Windows 权限或Agent 管理员启动导致输出文件权限异常
-- 尝试不以管理员身份启动 Agent
-- 尝试关掉 Agent/OBS 后再移动文件
+- Windows 权限或 MaxGameStudio 管理员启动导致输出文件权限异常
+- 尝试不以管理员身份启动 MaxGameStudio
+- 尝试关掉 MaxGameStudio/OBS 后再移动文件
 - 尝试将视频拖到其他文件夹再打开
 
 **Q：成片有黑边/游戏画面被裁切？**
@@ -492,7 +492,7 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 - OBS「设置 → 输出 → 录像质量」不能选「与串流画质相同」，请单独设置录像质量
 - 如果你的OBS输出模式为高级，校准OBS会校准不全
 解决方案：
-①将OBS输出模式从高级改为简单，再通过agent进行OBS校准，校准完毕后重启OBS
+①将 OBS 输出模式从高级改为简单，再通过 MaxGameStudio 进行 OBS 校准，校准完毕后重启 OBS
 ②OBS输出模式为高级的情况下，点击录制菜单，**视频编码器不要选择（使用直播编码器）**。
 
 **Q：录制时 CS2 停留在游戏主菜单？**
@@ -520,7 +520,7 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 
 - **5E**：5E 客户端 → 比赛记录 → 选择某场比赛 → 下载 Demo
 - **完美世界**：完美世界竞技平台 → 比赛记录 → 下载录像
-- 下载的 `.dem` 文件可以直接拖入 CS2 Insight 使用
+- 下载的 `.dem` 文件可以直接拖入 MaxGameStudio 使用
 
 **Q：可以同时录多场 Demo 的片段吗？**
 

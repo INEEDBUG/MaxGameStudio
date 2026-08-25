@@ -7,7 +7,7 @@ describe("League settings transfer", () => {
 
   it("exports settings without credential-like fields", () => {
     expect(buildLeagueSettingsExport({ automation_enabled: true, token: "secret", nested: { api_key: "secret", value: 2 } }, "2026-08-15T00:00:00.000Z")).toEqual({
-      format: "cs2-ultimate-insight-studio/league-settings",
+      format: "max-game-studio/league-settings",
       schema_version: 1,
       exported_at: "2026-08-15T00:00:00.000Z",
       settings: { automation_enabled: true, nested: { value: 2 } },

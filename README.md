@@ -23,14 +23,14 @@
   <a href="./CONTRIBUTING.md">贡献指南</a> •
   <a href="#核心功能">核心功能</a> •
   <a href="#安装">快速安装</a> •
-  <a href="#代码来源与致谢">代码来源</a> •
+  <a href="#参考项目与致谢">参考项目</a> •
   <a href="#声明">声明</a> •
   <a href="#License">License</a>
 </p>
 
-## 代码来源与致谢
+## 参考项目与致谢
 
-- **主体代码与桌面架构**：[DrEAmSs59/CS2-insight-agent](https://github.com/DrEAmSs59/CS2-insight-agent)。本项目保留其提交历史、作者归属及 PolyForm Noncommercial 1.0.0 许可，并在此基础上增加官匹 Demo 获取、SQLite 工作流、灵敏度实验室、磁轴输入实验室和独立品牌界面。
+- **参考项目**：[DrEAmSs59 原始项目](https://github.com/DrEAmSs59/CS2-insight-agent)。该链接仅用于记录参考来源；MaxGameStudio 的当前桌面架构、功能实现与品牌由本项目独立维护，不在此宣称主体代码或架构源于该项目。相关许可证与作者归属信息按仓库内许可证文件保留。
 - **官匹 Demo 工作流参考**：[akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager)。本项目没有采用它的 PostgreSQL 数据层，也没有把整个项目代码直接合并进来。
 - **Steam Game Coordinator 辅助程序**：[akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0（GPL-3.0）。它在用户首次明确同意后按需下载，并以未修改的独立进程运行。
 - **Share Code 解码代码**：[akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode)（MIT）的 Python 适配，许可证原文保存在 `third_party/licenses/csgo-sharecode-LICENSE.txt`。
@@ -106,7 +106,7 @@
 - **回合时间线** — 除自动挖出的片段卡片外，可按回合浏览击杀/死亡时间线，把某一枪、某一死或整回合画面直接加入录制队列。
 - **回合连续录制** — 支持从回合开局录到死亡或回合结束，可勾选若干回合拼成一条长片。
 
-> **关于首次解析耗时：** “Demo 基础分析”和“2D 回放缓存生成”是两个阶段。首次进入某场 Demo 的 2D 回放时，程序还需要生成整场 Parquet、当前回合二进制轨迹及烟雾/燃烧效果缓存，因此第一次会比再次打开更慢；缓存命中后会直接读取本地结果。升级版本不会删除 `%APPDATA%\CS2 Insight Agent\data\cache\demo-replay` 中已有的回放缓存。
+> **关于首次解析耗时：** “Demo 基础分析”和“2D 回放缓存生成”是两个阶段。首次进入某场 Demo 的 2D 回放时，程序还需要生成整场 Parquet、当前回合二进制轨迹及烟雾/燃烧效果缓存，因此第一次会比再次打开更慢；缓存命中后会直接读取本地结果。升级版本不会删除应用数据目录中已有的回放缓存。
 
 > **Steam 凭据安全：** 最近战绩功能只使用 Steam 客户端当前登录会话，不读取 Steam 密码、浏览器 Cookie 或个人 Web API Key。首次使用可选的独立 Game Coordinator 组件前会明确征求同意；组件版本与 SHA-512 固定，并与主程序隔离运行。
 
@@ -180,7 +180,7 @@ OBS 与 FFmpeg 仍由各自的运行时集成管理。
 
 测试版与正式更新通道严格隔离：带 `-rc.N` 的版本只作为 GitHub Prerelease 手动下载，不更新 `updater/latest.json`，也不会通过现有正式客户端推送。测试通过并转为正式版后，才会进入自动更新通道。
 
-> **建议安装路径不含中文字符。** 例如 `D:\CS2-Insight-Agent\` ✅，`D:\游戏工具\CS2-Insight-Agent\` ❌
+> **建议安装路径不含中文字符。** 例如 `D:\MaxGameStudio\` ✅，`D:\游戏工具\MaxGameStudio\` ❌
 
 ---
 
@@ -202,12 +202,11 @@ OBS 与 FFmpeg 仍由各自的运行时集成管理。
    - [ ] 战术教练（投掷物轨迹分析 / 路线复盘）
 
 
-### 上游贡献者
+---
 
-<a href="https://github.com/DrEAmSs59/CS2-insight-agent/graphs/contributors">
-  查看 `DrEAmSs59/CS2-insight-agent` 的贡献者与原始提交历史
-</a>
+## 贡献者
 
+- **Codex** — 开发协作、代码实现与交付审计。
 
 ---
 

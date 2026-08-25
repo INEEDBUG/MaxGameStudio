@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteLeaguePlayerTag, fetchLeaguePlayerTags, importLeaguePlayerTags, updateLeaguePlayerTag } from "../../api/leagueLabApi";
 import { getLeagueProfileIconUrl } from "../../api/api";
 
-const EXPORT_FORMAT = "cs2-ultimate-insight-studio/league-player-tags";
+const EXPORT_FORMAT = "max-game-studio/league-player-tags";
+const LEGACY_EXPORT_FORMAT = "cs2-ultimate-insight-studio/league-player-tags";
 const MAX_IMPORT_BYTES = 1024 * 1024;
 
 export function buildLeaguePlayerTagsExport(rows, exportedAt = new Date().toISOString()) {
@@ -28,7 +29,7 @@ export function parseLeaguePlayerTagsImport(text) {
   } catch {
     throw new Error("标签文件不是有效的 JSON");
   }
-  if (document?.format !== EXPORT_FORMAT || Number(document.schema_version) !== 1 || !Array.isArray(document.rows)) {
+  if (![EXPORT_FORMAT, LEGACY_EXPORT_FORMAT].includes(document?.format) || Number(document.schema_version) !== 1 || !Array.isArray(document.rows)) {
     throw new Error("无法识别该 League 玩家标签文件");
   }
   if (document.rows.length > 1000) throw new Error("标签文件超过 1000 条，已拒绝导入");

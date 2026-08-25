@@ -898,7 +898,7 @@ index 03dccfa..2eba449 100644
  pub const WEAPON_SKIN_NAME: u32 = 420420420;
  pub const WEAPON_ORIGINGAL_OWNER_ID: u32 = 6942000;
  pub const MY_WEAPONS_OFFSET: u32 = 500000;
-+// Flattened CUtlVector slots for utility area props (CS2 Insight Agent).
++// Flattened CUtlVector slots for utility area props (MaxGameStudio).
 +pub const VOXEL_FRAME_DATA_OFFSET: u32 = 700000;
 +pub const VOXEL_FRAME_DATA_MAX: u32 = 4096;
 +pub const FIRE_POSITIONS_OFFSET: u32 = 710000;

@@ -36,7 +36,7 @@ describe("LeaguePlayerTagManager", () => {
 
   it("uses a versioned import format and bounds imported values", () => {
     const exported = buildLeaguePlayerTagsExport([row], "2026-08-15T00:00:00.000Z");
-    expect(exported.format).toBe("cs2-ultimate-insight-studio/league-player-tags");
+    expect(exported.format).toBe("max-game-studio/league-player-tags");
     expect(exported.rows[0]).toMatchObject({ owner_puuid: "owner", puuid: "target", label: "可靠队友" });
     expect(parseLeaguePlayerTagsImport(JSON.stringify(exported))).toHaveLength(1);
     expect(() => parseLeaguePlayerTagsImport("{}" )).toThrow("无法识别");

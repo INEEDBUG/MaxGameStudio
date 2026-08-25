@@ -21,7 +21,7 @@ This document prevents the League integration from becoming a collection of unre
 
 | 检查项 | 实测结果 | 边界 |
 | --- | --- | --- |
-| 本地候选版 | `2.5.14-rc.40` 已安装到 `D:\CS2-Ultimate-Insight-Studio` | 本轮未推送 GitHub，也未正式发布 |
+| 本地候选版 | `2.5.14-rc.40` 已安装到 `D:\MaxGameStudio` | 本轮未推送 GitHub，也未正式发布 |
 | Tencent 客户端连接 | 真实 Tencent `GZ100` 客户端连接成功，LCU 事件流在线 | 仅证明连接与事件订阅，不等于所有流程写操作已通过 |
 | 战绩读取 | 成功读取 20 场当前账号战绩 | 仅按本轮真实账号结果记录 |
 | Tencent current-player-only 摘要 | 在缺少全队上下文时不再伪造参团率和伤害占比，界面显示 `—` | 不推断缺失的队伍统计 |

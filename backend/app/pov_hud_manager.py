@@ -239,11 +239,11 @@ class PovHudManager:
 
         if gameinfo_patched and not manifest_exists:
             warnings.append(
-                "检测到 gameinfo.gi 中存在 csgo/pov.vpk，但未找到 CS2 Insight Agent 的备份记录。请用户手动检查 gameinfo.gi。"
+                "检测到 gameinfo.gi 中存在 csgo/pov.vpk，但未找到 MaxGameStudio 的备份记录。请用户手动检查 gameinfo.gi。"
             )
 
         if pov_installed and not manifest_exists:
-            warnings.append("Detected pov.vpk without a CS2 Insight Agent restore manifest; manual inspection is required.")
+            warnings.append("Detected pov.vpk without a MaxGameStudio restore manifest; manual inspection is required.")
 
         needs_restore = bool(manifest_exists or gameinfo_patched or pov_installed)
 
@@ -316,7 +316,7 @@ class PovHudManager:
         pov_sha = sha256_file(pov_dst)
 
         manifest = {
-            "enabled_by": "CS2 Insight Agent",
+            "enabled_by": "MaxGameStudio",
             "feature": "experimental_pov",
             "installed_at": datetime.now(timezone.utc).isoformat(),
             "gameinfo_path": str(gi_path),

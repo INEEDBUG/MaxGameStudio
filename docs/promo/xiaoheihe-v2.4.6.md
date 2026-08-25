@@ -1,4 +1,4 @@
-# 小黑盒发布文稿｜CS2 Ultimate Insight Studio v2.4.6
+# 小黑盒发布文稿｜MaxGameStudio v2.4.6
 
 ## 推荐标题
 
@@ -13,7 +13,7 @@
 
 最开始，我只是遇到了一个很具体的问题：CS2 客户端里显示官匹比赛回放已经过期，但右下角还能复制出 `steam://rungame/730/.../+csgo_download_match` 这样的分享链接。普通下载器不认识它，已有 Demo 管理工具又需要额外安装 PostgreSQL。于是我想，能不能做一个更轻、更本地化，而且从下载到复盘都在同一个界面里的工具？
 
-这就是 **CS2 Ultimate Insight Studio**。它基于 CS2 Insight Agent 与 CS Demo Manager 的开源能力继续开发，使用本地 SQLite 保存数据，不要求用户单独部署 PostgreSQL。项目目前免费开源，数据默认留在电脑本地。
+这就是 **MaxGameStudio**。它使用本地 SQLite 保存数据，不要求用户单独部署 PostgreSQL。项目目前免费开源，数据默认留在电脑本地。
 
 > 配图 1：上手指南或官匹 Demo 下载（`getting-started.png` / `official-demo-download.png`）
 
@@ -61,12 +61,12 @@ Demo 解析出的多杀、残局、首杀和其他片段可以加入 OBS 录制�
 
 项目地址与最新版下载：
 
-- GitHub：<https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private>
-- Release：<https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/latest>
+- GitHub：<https://github.com/INEEDBUG/MaxGameStudio>
+- Release：<https://github.com/INEEDBUG/MaxGameStudio/releases/latest>
 
-Windows 用户下载 Release 里的 `CS2.Ultimate.Insight.Studio_*_x64-setup.exe` 即可，其他文件如果存在通常是校验或开发资产。项目仍在持续迭代，遇到 Demo 兼容性、地图资源或数据评价问题，欢迎带上脱敏后的日志在 GitHub 提 Issue。
+Windows 用户下载 Release 里的 `MaxGameStudio_*_x64-setup.exe` 即可，其他文件如果存在通常是校验或开发资产。项目仍在持续迭代，遇到 Demo 兼容性、地图资源或数据评价问题，欢迎带上脱敏后的日志在 GitHub 提 Issue。
 
-最后也感谢 CS2 Insight Agent、CS Demo Manager 以及它们依赖的开源项目。这个软件是在真实使用问题中一点点长出来的，希望它能让大家少折腾环境，多花时间复盘真正值得看的回合。
+最后也感谢本项目使用的开源组件与参考项目。这个软件是在真实使用问题中一点点长出来的，希望它能让大家少折腾环境，多花时间复盘真正值得看的回合。
 
 ## 推荐标签
 
