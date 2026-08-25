@@ -17,39 +17,6 @@
 
 ---
 
-## 📺 视频教程
-
-不熟悉文字说明？可以先观看 B 站视频教程：
-
-- [▶ BV1PcVj69ExZ — MaxGameStudio 使用教程](https://www.bilibili.com/video/BV1PcVj69ExZ/)
-
-> [!TIP]
-> 建议新手先看完视频教程，再按下方目录逐步配置 OBS、FFmpeg 等功能。
-
----
-
-## 🎬 成片展示
-
-以下是社区 UP 主使用 MaxGameStudio 制作的成片示例，供参考最终效果：
-
-### 游戏片段自动剪辑
-
-- [▶ BV1ZkGi6YENF](https://www.bilibili.com/video/BV1ZkGi6YENF/)
-- [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
-
-> [!NOTE]
-> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 MaxGameStudio 自动剪辑。
-
-### 全链路剪辑合成
-
-- [▶ BV1KF5s6nEed](https://www.bilibili.com/video/BV1KF5s6nEed/)
-- [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
-
-> [!NOTE]
-> 上述成片的片头片尾 BGM 及游戏片段**均由 MaxGameStudio 剪辑合成产出**。
-
----
-
 ## 📖 目录
 
 1. [你需要准备什么](#1-你需要准备什么)
@@ -123,7 +90,7 @@
 你的配置信息和 Demo 数据库**不会**因为更新而丢失。
 
 > [!TIP]
-> 也可以随时前往[本项目 Releases 页面](https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/releases)手动下载新版安装包覆盖安装，同样不影响已有配置和数据。
+> 也可以随时前往[本项目 Releases 页面](https://github.com/INEEDBUG/MaxGameStudio/releases)手动下载新版安装包覆盖安装，同样不影响已有配置和数据。
 
 ---
 
@@ -403,7 +370,7 @@ D:\ffmpeg\bin\ffmpeg.exe
 
 程序内置自动更新：启动后若检测到新版本，界面会弹出更新提示，点击下载并安装即可，配置和数据不会丢失。
 
-如需手动更新，也可以直接到[本项目 Releases 页面](https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/releases)下载新安装包重新安装，同样不影响已有配置和数据。
+如需手动更新，也可以直接到[本项目 Releases 页面](https://github.com/INEEDBUG/MaxGameStudio/releases)下载新安装包重新安装，同样不影响已有配置和数据。
 
 **Q：OBS 配置检查失败？**
 

@@ -95,7 +95,7 @@ if (process.platform === "win32") {
     releaseRoot,
     "bundle",
     "nsis",
-    `CS2 Ultimate Insight Studio_${version}_x64-setup.exe`,
+    `MaxGameStudio_${version}_x64-setup.exe`,
   );
   const updaterSignature = `${artifact}.sig`;
   if (!hasUpdaterSigningKey && existsSync(updaterSignature)) {

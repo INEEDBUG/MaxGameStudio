@@ -21,37 +21,6 @@
 
 ---
 
-## 📺 Video Tutorial
-
-Prefer a walkthrough? Watch the community video tutorial first:
-
-- [▶ BV1PcVj69ExZ — MaxGameStudio tutorial](https://www.bilibili.com/video/BV1PcVj69ExZ/)
-
-> [!TIP]
-> For a first setup, watch the video once, then use this guide to configure OBS and FFmpeg step by step.
-
----
-
-## 🎬 Example Output
-
-### Automatically edited game clips
-
-- [▶ BV1ZkGi6YENF](https://www.bilibili.com/video/BV1ZkGi6YENF/)
-- [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
-
-> [!NOTE]
-> In these examples, the creator added the intro/outro BGM and team logo; the in-game clips were automatically edited by MaxGameStudio.
-
-### End-to-end edited compilations
-
-- [▶ BV1KF5s6nEed](https://www.bilibili.com/video/BV1KF5s6nEed/)
-- [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
-
-> [!NOTE]
-> In these examples, both the intro/outro BGM and the game clips were produced with MaxGameStudio.
-
----
-
 ## Contents
 
 1. [What You Need](#1-what-you-need)
@@ -111,7 +80,7 @@ Double-click the desktop shortcut. The app opens as a desktop application: you d
 
 The app checks for updates at startup and every 15 minutes while it is running or in the tray. When a new signed release is available, it shows the version and release notes, downloads and verifies the package, performs the in-place upgrade, and relaunches the new version automatically. No second installer click is required, and your settings and demo-library data are retained.
 
-You can also install a newer installer from [this project's Releases page](https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/releases) over the existing version.
+You can also install a newer installer from [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases) over the existing version.
 
 ---
 
@@ -339,7 +308,7 @@ Confirm the installer came from the official Releases page, then use **More info
 
 **How do I update?**
 
-Install the newest package from [this project's Releases page](https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/releases). Existing settings and data are retained.
+Install the newest package from [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases). Existing settings and data are retained.
 
 **OBS Configuration Check fails.**
 

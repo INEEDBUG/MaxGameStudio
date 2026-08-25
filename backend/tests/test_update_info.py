@@ -32,8 +32,8 @@ def test_normalize_release_tag():
 
 
 def test_update_check_targets_the_desktop_release_repository():
-    assert update_info.GITHUB_LATEST_API == "https://api.github.com/repos/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/latest"
-    assert update_info.GITHUB_RELEASE_LATEST_PAGE == "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/latest"
+    assert update_info.GITHUB_LATEST_API == "https://api.github.com/repos/INEEDBUG/MaxGameStudio/releases/latest"
+    assert update_info.GITHUB_RELEASE_LATEST_PAGE == "https://github.com/INEEDBUG/MaxGameStudio/releases/latest"
 
 
 def test_pick_download_urls():
@@ -128,9 +128,9 @@ def test_build_update_payload_unknown_local_shows_latest():
 
 
 def test_mirror_wrap_and_unwrap():
-    orig = "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/latest"
+    orig = "https://github.com/INEEDBUG/MaxGameStudio/releases/latest"
     wrapped = mirror_wrap_url("https://ghfast.top", orig)
-    assert wrapped == "https://ghfast.top/https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/latest"
+    assert wrapped == "https://ghfast.top/https://github.com/INEEDBUG/MaxGameStudio/releases/latest"
     assert unwrap_github_url(wrapped).startswith("https://github.com/")
 
 
@@ -199,7 +199,7 @@ def test_on_mode_uses_mirror_only(monkeypatch):
 
 
 def test_parse_release_tag_from_url():
-    url = "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/releases/tag/v3.0.0"
+    url = "https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.0"
     assert _parse_release_tag_from_url(url) == "v3.0.0"
 
 

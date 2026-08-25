@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CS2 Ultimate Insight Studio",
+  "productName": "MaxGameStudio",
   "version": "2.4.2",
   "identifier": "com.cs2insightagent.app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "CS2 Ultimate Insight Studio",
+        "title": "MaxGameStudio",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
@@ -52,7 +52,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNBMjcwNkFBNUIwNEJGNDgKUldSSXZ3UmJxZ1luT25TSzY2Y2M3WGhDWlpVQWVScWdKbWhqOFlGL0p5QktEVEFScERlRVRmYWIK",
       "endpoints": [
-        "https://raw.githubusercontent.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/updater/latest.json"
+        "https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/latest.json"
       ],
       "windows": {
         "installMode": "passive"

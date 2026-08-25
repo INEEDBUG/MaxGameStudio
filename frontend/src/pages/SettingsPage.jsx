@@ -51,12 +51,12 @@ function openExternalLink(url) {
 
 const ISSUE_TEMPLATE_URLS = {
   zh: {
-    bug: "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/issues/new?template=bug_report.yml",
-    feature: "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/issues/new?template=feature_request.yml",
+    bug: "https://github.com/INEEDBUG/MaxGameStudio/issues/new?template=bug_report.yml",
+    feature: "https://github.com/INEEDBUG/MaxGameStudio/issues/new?template=feature_request.yml",
   },
   en: {
-    bug: "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/issues/new?template=bug_report_en.yml",
-    feature: "https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/issues/new?template=feature_request_en.yml",
+    bug: "https://github.com/INEEDBUG/MaxGameStudio/issues/new?template=bug_report_en.yml",
+    feature: "https://github.com/INEEDBUG/MaxGameStudio/issues/new?template=feature_request_en.yml",
   },
 };
 
@@ -902,7 +902,7 @@ export default function SettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => openExternalLink('https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio')}
+                    onClick={() => openExternalLink('https://github.com/INEEDBUG/MaxGameStudio')}
                     className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
                   >
                     <Github className="h-3.5 w-3.5" />
@@ -919,7 +919,7 @@ export default function SettingsPage() {
                 <div className="py-2.5 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => openExternalLink('https://github.com/INEEDBUG/CS2-Ultimate-Insight-Studio/issues')}
+                    onClick={() => openExternalLink('https://github.com/INEEDBUG/MaxGameStudio/issues')}
                     className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
                   >
                     <FolderOpen className="h-3.5 w-3.5" />

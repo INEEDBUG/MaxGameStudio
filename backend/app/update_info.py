@@ -16,7 +16,7 @@ from urllib.parse import quote, urlparse
 
 from packaging.version import InvalidVersion, Version
 
-_GITHUB_OWNER_REPO = (os.environ.get("CS2_INSIGHT_RELEASE_REPO") or "INEEDBUG/CS2-Ultimate-Insight-Studio-Private").strip()
+_GITHUB_OWNER_REPO = (os.environ.get("CS2_INSIGHT_RELEASE_REPO") or "INEEDBUG/MaxGameStudio").strip()
 GITHUB_LATEST_API = f"https://api.github.com/repos/{_GITHUB_OWNER_REPO}/releases/latest"
 GITHUB_RELEASE_LATEST_PAGE = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/latest"
 _USER_AGENT = "MaxGameStudio-UpdateCheck/1.0"

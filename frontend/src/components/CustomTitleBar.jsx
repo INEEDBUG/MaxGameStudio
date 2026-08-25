@@ -33,7 +33,7 @@ export default function CustomTitleBar() {
           className="mr-2 h-5 w-5"
           data-tauri-drag-region
         />
-        <span className="text-[12px] font-semibold tracking-[-0.01em]" data-tauri-drag-region>CS2 Ultimate Insight Studio</span>
+        <span className="text-[12px] font-semibold tracking-[-0.01em]" data-tauri-drag-region>MaxGameStudio</span>
       </div>
 
       <div className="flex h-full">

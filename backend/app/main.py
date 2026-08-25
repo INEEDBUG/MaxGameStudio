@@ -2687,7 +2687,7 @@ async def complete_steam_openid(request: Request, state: str = Query(..., min_le
         "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
         "<title>Steam 登录成功</title><body style='margin:0;background:#111318;color:#f4f6f8;font:16px system-ui;display:grid;place-items:center;min-height:100vh'>"
         "<main style='padding:32px;text-align:center'><h2 style='color:#66c0f4'>Steam 登录成功</h2>"
-        "<p>账号已安全返回 CS2 Ultimate Insight Studio。</p><p style='color:#8993a4'>现在可以关闭此窗口。</p></main></body>"
+        "<p>账号已安全返回 MaxGameStudio。</p><p style='color:#8993a4'>现在可以关闭此窗口。</p></main></body>"
     )
 
 

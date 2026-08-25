@@ -14,7 +14,7 @@ Python 后端与 demoparser2 等既有运行时依赖按锁定清单打入 resou
 
 ## 在线更新（Tauri updater + GitHub Releases）
 
-客户端固定读取 `https://raw.githubusercontent.com/INEEDBUG/CS2-Ultimate-Insight-Studio-Private/updater/latest.json`，后端“检查更新”也查询同一仓库的 `releases/latest`。两条路径必须保持一致，不能重新指向原始上游仓库。
+客户端固定读取 `https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/latest.json`，后端“检查更新”也查询同一仓库的 `releases/latest`。两条路径必须保持一致。
 
 1. **更新签名密钥（一次性）**：`node node_modules/@tauri-apps/cli/tauri.js signer generate -w %USERPROFILE%\.tauri\max-game-studio.key`。
    公钥写入 `tauri.conf.json > plugins.updater.pubkey`；私钥务必备份，丢失后老客户端将无法再接受任何更新。
@@ -50,7 +50,7 @@ try {
 发布构建不要使用不带版本的 `pnpm run desktop:build`；该命令只使用仓库默认版本，仅适合本地验证完整安装链。日常开发应使用 `desktop:dev`，提交前的无安装包检查使用 `desktop:check`。正式产物固定输出到：
 
 ```text
-frontend/src-tauri/target/release/bundle/nsis/CS2 Ultimate Insight Studio_<version>_x64-setup.exe
+frontend/src-tauri/target/release/bundle/nsis/MaxGameStudio_<version>_x64-setup.exe
 ```
 
 如果需要从锁定依赖重建正式精简 Python runtime，先构建 lean wheel，再强制刷新：
