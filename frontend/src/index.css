@@ -766,6 +766,142 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Compact, opaque and phase-focused auxiliary window. */
+.league-mini-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 340px;
+  min-height: 420px;
+  overflow: hidden;
+  background: #141416;
+  color: #e4e4e7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+}
+
+.mini-titlebar {
+  display: flex;
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1;
+  -webkit-app-region: drag;
+}
+
+.mini-titlebar-actions {
+  display: flex;
+  height: 28px;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.mini-titlebar-button {
+  display: grid;
+  width: 45px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: rgba(228, 228, 231, 0.68);
+  cursor: pointer;
+}
+
+.mini-titlebar-button:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.mini-titlebar-button.is-active { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.mini-titlebar-close:hover { background: #dc2626; }
+
+.mini-content {
+  box-sizing: border-box;
+  height: calc(100% - 28px);
+  overflow: hidden;
+  padding: 8px 12px;
+}
+
+.mini-content-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.28) transparent; }
+.mini-content-scroll::-webkit-scrollbar { width: 6px; }
+.mini-content-scroll::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(255, 255, 255, 0.28); }
+
+.mini-lounge-view { display: flex; height: 100%; min-height: 0; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; }
+.mini-lounge-center { display: flex; min-height: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.mini-map-icon { width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain; }
+.mini-map-icon-fallback { box-sizing: border-box; border-radius: 14px; color: rgba(211, 190, 120, 0.88); padding: 5px; }
+.mini-map-icon-placeholder { display: grid; place-items: center; border-radius: 16px; background: rgba(255, 255, 255, 0.06); color: rgba(228, 228, 231, 0.65); }
+.mini-primary-text { max-width: 280px; margin-bottom: 8px; overflow: hidden; color: rgba(245, 245, 247, 0.96); font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.mini-secondary-text { max-width: 280px; margin-bottom: 8px; color: rgba(161, 161, 170, 0.86); font-size: 12px; }
+
+.mini-card { box-sizing: border-box; margin-bottom: 4px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; background: #202023; padding: 8px; }
+.mini-operation-stack { display: grid; gap: 0; }
+.mini-operation-row { display: flex; min-height: 24px; align-items: center; gap: 6px; color: rgba(244, 244, 245, 0.86); font-size: 12px; }
+.mini-operation-row > span:first-child { min-width: 0; flex: 1; }
+.mini-operation-details { margin: 0 -8px; border-top: 1px solid rgba(255, 255, 255, 0.08); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.mini-operation-details > summary { padding: 4px 8px; cursor: pointer; list-style: none; }
+.mini-operation-details > summary::-webkit-details-marker { display: none; }
+.mini-chevron { order: 2; color: rgba(161, 161, 170, 0.75); }
+.mini-operation-details .mini-switch { order: 3; }
+.mini-popover-content { padding: 4px 8px 6px; }
+.mini-input-row { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 6px; color: rgba(161, 161, 170, 0.9); font-size: 11px; }
+.mini-input-row input { width: 58px; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; background: rgba(24, 24, 27, 0.9); color: #f4f4f5; padding: 3px 5px; text-align: right; }
+.mini-switch { display: flex; min-height: 24px; align-items: center; justify-content: space-between; gap: 8px; color: rgba(161, 161, 170, 0.9); font-size: 12px; }
+.mini-switch button[role="switch"] { flex: 0 0 auto; }
+
+.mini-button-row { display: flex; justify-content: center; gap: 4px; }
+.mini-button { min-height: 24px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: rgba(244, 244, 245, 0.9); cursor: pointer; font-size: 11px; padding: 3px 9px; }
+.mini-button:hover { background: rgba(255, 255, 255, 0.12); }
+.mini-button-primary { border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.14); color: #a7f3d0; }
+.mini-button-warning { border-color: rgba(245, 158, 11, 0.32); background: rgba(245, 158, 11, 0.12); color: #fde68a; }
+
+.mini-champ-select-view { min-height: 100%; }
+.mini-team-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin-bottom: 5px; }
+.mini-team-strip img, .mini-team-strip span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; background: rgba(255, 255, 255, 0.05); color: rgba(161, 161, 170, 0.72); font-size: 11px; object-fit: cover; }
+.mini-bench-card { display: flex; align-items: center; gap: 7px; }
+.mini-bench-main { display: flex; width: 52px; flex-shrink: 0; flex-direction: column; align-items: center; gap: 5px; }
+.mini-current-champion { width: 36px; height: 36px; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 999px; object-fit: cover; }
+.mini-current-placeholder { display: grid; place-items: center; background: rgba(255, 255, 255, 0.06); color: rgba(161, 161, 170, 0.9); font-size: 16px; }
+.mini-bench-buttons { display: flex; gap: 3px; }
+.mini-bench-buttons .mini-button { min-width: 24px; padding: 1px 4px; }
+.mini-bench-divider { width: 1px; align-self: stretch; background: rgba(255, 255, 255, 0.1); }
+.mini-bench-grid { display: grid; flex: 1; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.mini-bench-champion { display: block; width: 30px; height: 30px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 3px; background: rgba(255, 255, 255, 0.035); cursor: pointer; padding: 0; }
+.mini-bench-champion img { width: 100%; height: 100%; object-fit: cover; }
+.mini-bench-empty { cursor: default; }
+.mini-card-title { margin-bottom: 6px; color: rgba(245, 245, 247, 0.92); font-size: 13px; font-weight: 700; }
+.mini-timeline { max-height: 240px; overflow-y: auto; }
+.mini-timeline-item { display: flex; gap: 7px; padding: 3px 0; }
+.mini-timeline-dot { width: 6px; height: 6px; flex: 0 0 auto; margin-top: 5px; border-radius: 999px; background: rgba(161, 161, 170, 0.6); }
+.mini-timeline-item.is-active .mini-timeline-dot { background: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18); }
+.mini-timeline-item.is-complete .mini-timeline-dot { background: #34d399; }
+.mini-timeline-body { min-width: 0; flex: 1; }
+.mini-timeline-title { color: rgba(228, 228, 231, 0.86); font-size: 11px; }
+.mini-timeline-result { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(161, 161, 170, 0.72); font-size: 10px; }
+.mini-timeline-result img { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; }
+.mini-trade-row { border-top: 1px solid rgba(255, 255, 255, 0.08); padding: 6px 0 2px; }
+.mini-trade-label { display: flex; justify-content: space-between; gap: 5px; color: rgba(228, 228, 231, 0.82); font-size: 11px; }
+.mini-trade-label > span:last-child { color: rgba(161, 161, 170, 0.72); }
+.mini-muted { color: rgba(161, 161, 170, 0.72); font-size: 10px; }
+.mini-native-select { width: 100%; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; background: rgba(24, 24, 27, 0.95); color: #e4e4e7; font-size: 11px; padding: 4px 6px; }
+.mini-skin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
+.mini-skin-option { min-width: 0; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; background: rgba(24, 24, 27, 0.72); color: rgba(228, 228, 231, 0.82); cursor: pointer; padding: 0; text-align: left; }
+.mini-skin-option.is-selected { border-color: rgba(52, 211, 153, 0.75); }
+.mini-skin-option img { display: block; width: 100%; aspect-ratio: 16 / 9; background: #18181b; object-fit: cover; }
+.mini-skin-option span { display: block; overflow: hidden; padding: 3px 4px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.mini-placeholder { display: flex; height: 100%; min-height: 0; margin-top: -16px; flex-direction: column; align-items: center; justify-content: center; }
+.mini-akari-logo { position: relative; left: -8px; width: 80px; height: 80px; margin-bottom: 16px; color: rgba(255, 255, 255, 0.2); }
+.mini-placeholder-label { margin-top: 8px; color: rgba(161, 161, 170, 0.9); font-size: 14px; font-weight: 400; }
+.mini-placeholder-subtitle { margin-top: 6px; color: rgba(113, 113, 122, 0.9); font-size: 11px; }
+.mini-respawn { margin-top: 8px; border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 5px; background: rgba(244, 63, 94, 0.12); padding: 9px; text-align: center; }
+.mini-respawn-value { color: #fff; font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mini-details { color: rgba(228, 228, 231, 0.82); }
+.mini-details > summary { cursor: pointer; list-style: none; font-size: 11px; font-weight: 600; }
+.mini-details > summary::-webkit-details-marker { display: none; }
+.mini-details > summary span { margin-left: 4px; color: rgba(161, 161, 170, 0.62); font-size: 10px; font-weight: 400; }
+.mini-details-body { margin-top: 9px; }
+.mini-details-body > section { border-radius: 5px; padding: 8px; }
+.mini-account-warning { margin-bottom: 8px; border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px; background: rgba(245, 158, 11, 0.1); color: #fde68a; font-size: 10px; line-height: 1.5; padding: 6px; }
+.mini-message { margin-top: 6px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; background: rgba(255, 255, 255, 0.035); color: rgba(161, 161, 170, 0.86); font-size: 10px; line-height: 1.45; padding: 5px 7px; }
+
 ::selection {
   color: white;
   background: color-mix(in srgb, var(--cs2-accent) 72%, transparent);

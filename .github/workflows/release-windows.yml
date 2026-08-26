@@ -235,7 +235,7 @@ jobs:
         with:
           tag_name: ${{ steps.release_version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.release_version.outputs.tag }}
+          name: MaxGameStudio ${{ steps.release_version.outputs.tag }}
           files: frontend/src-tauri/target/release/bundle/nsis/*.exe
           generate_release_notes: true
         env:

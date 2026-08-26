@@ -47,6 +47,7 @@ export default {
   "nav.settings": "Settings",
   "nav.sensitivityLab": "Sensitivity Lab",
   "nav.inputLab": "Magnetic Input Lab",
+  "nav.leagueLab": "League Automation Lab",
   "nav.appearance": "Appearance",
   "nav.themeSystem": "Follow System",
   "nav.themeSystemHint": "Match Windows appearance",

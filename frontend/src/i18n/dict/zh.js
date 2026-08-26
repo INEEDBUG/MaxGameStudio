@@ -48,6 +48,7 @@ export default {
   "nav.settings": "设置",
   "nav.sensitivityLab": "灵敏度实验室",
   "nav.inputLab": "磁轴输入实验室",
+  "nav.leagueLab": "英雄联盟实验室",
   "nav.appearance": "外观",
   "nav.themeSystem": "跟随系统",
   "nav.themeSystemHint": "随 Windows 外观切换",

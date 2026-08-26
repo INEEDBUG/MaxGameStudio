@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaxGameStudio Mini</title>
+    <style>
+      html, body, #root { width: 100%; min-height: 100%; margin: 0; background: #141416; color: #e4e4e7; }
+      body { font-family: Inter, "Segoe UI", sans-serif; }
+      .mini-native-boot { box-sizing: border-box; display: grid; min-height: 100vh; place-items: center; padding: 20px; text-align: center; }
+      .mini-native-boot strong { display: block; margin-bottom: 6px; color: #d1fae5; font-size: 14px; }
+      .mini-native-boot span { color: #71717a; font-size: 11px; }
+      .mini-native-boot[data-error="true"] strong { color: #fca5a5; }
+    </style>
+    <script>
+      (() => {
+        const showBootError = (reason) => {
+          const root = document.getElementById("root");
+          if (!root || root.dataset.reactMounted === "true") return;
+          const message = reason instanceof Error ? reason.message : String(reason || "未知错误");
+          root.innerHTML = `<div class="mini-native-boot" data-error="true"><div><strong>Mini 面板加载失败</strong><span>${message.replace(/[&<>"']/g, (value) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[value])}</span></div></div>`;
+        };
+        window.addEventListener("error", (event) => showBootError(event.error || event.message));
+        window.addEventListener("unhandledrejection", (event) => showBootError(event.reason));
+      })();
+    </script>
+  </head>
+  <body class="bg-[#141416] text-white antialiased">
+    <div id="root"><div class="mini-native-boot"><div><strong>正在启动 Mini 面板</strong><span>正在连接本机服务…</span></div></div></div>
+    <script type="module" src="/src/mini.jsx"></script>
+  </body>
+</html>

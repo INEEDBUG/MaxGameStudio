@@ -4,6 +4,8 @@
 >
 > It parses CS2 demo files, finds highlights and funny fails, optionally adds AI scores and commentary, controls CS2 Replay and OBS to record clips automatically, and lets you arrange clips with BGM, intros, outros, and player cards into a finished compilation.
 
+> **One desktop app:** the CS2 workspace, League Lab, and VALORANT Lab are all built into MaxGameStudio and available from the same sidebar; no separate installation is required.
+
 <p align="center">
   <a href="./PLAYER_GUIDE.md">简体中文</a> | English
 </p>
@@ -18,6 +20,12 @@
 > - **Troubleshoot before reporting an issue.** Check the [FAQ](#10-faq) and the relevant section first. If the issue remains, report it to the developer with the details of your setup.
 > - **Support is maintained in spare time.** Replies may not be immediate, but reports are read when possible.
 > - **Optional support.** If the app saves you editing time, you can [buy the developer a coffee](#support-the-project). It is entirely optional.
+
+### 🧪 Lab Overview
+
+- **League Lab:** Connects to local Riot or WeGame/Tencent clients through LCU/SGP and provides explicitly gated game-flow helpers, champion/rune/summoner-spell configuration, player and match-history analysis, plus optional Mini, ongoing-game, and cooldown assistant windows. Account writes are protected by visible switches and confirmations; client credentials stay in memory and are excluded from exports and uploads.
+- **Valorant Lab:** Reads the local GPU, primary monitor, and refresh rate; after detection, it can preview and, after confirmation, apply `1568×1080` or a custom display mode with a keep/restore countdown. It never disables monitors automatically. The crosshair editor supports P/A/S profiles, live preview, import/export, and a local fallback; fallback saves are not claimed to be native-code equivalent.
+- The League integration was informed by LeagueAkari's (MIT) LCU and game-flow concepts. This project implements its own surface and retains the MIT notice and attribution at `third_party/licenses/LeagueAkari-LICENSE.txt`.
 
 ---
 

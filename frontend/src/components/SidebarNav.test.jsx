@@ -42,6 +42,8 @@ describe("SidebarNav", () => {
 
     expect(container.querySelector("aside")?.className).toContain("z-[60]");
     fireEvent.click(screen.getByRole("button", { name: "nav.themeSystem" }));
-    expect(screen.getByRole("menu", { name: "nav.appearance" })).toBeTruthy();
+    const menu = screen.getByRole("menu", { name: "nav.appearance" });
+    expect(menu).toBeTruthy();
+    expect(menu.className).not.toContain("backdrop-blur");
   });
 });

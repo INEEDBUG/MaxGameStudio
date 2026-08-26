@@ -74,7 +74,7 @@ function AppearanceMenu() {
         <div
           role="menu"
           aria-label={t("nav.appearance")}
-          className="absolute bottom-[calc(100%+8px)] left-0 z-[120] w-[248px] origin-bottom-left rounded-2xl border border-cs2-border-subtle bg-cs2-bg-elevated/95 p-1.5 shadow-[var(--cs2-shadow-lg)] backdrop-blur-2xl transition-[opacity,transform] duration-150"
+          className="absolute bottom-[calc(100%+8px)] left-0 z-[120] w-[248px] origin-bottom-left rounded-2xl border border-cs2-border-subtle bg-cs2-bg-elevated p-1.5 shadow-[var(--cs2-shadow-lg)] transition-[opacity,transform] duration-150"
         >
           <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cs2-text-muted">
             {t("nav.appearance")}
@@ -174,6 +174,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         <NavItem to="/sensitivity-lab" icon={Crosshair}>{t("nav.sensitivityLab")}</NavItem>
         <NavItem to="/input-lab" icon={Keyboard}>{t("nav.inputLab")}</NavItem>
         <NavItem to="/valorant-lab" icon={Gamepad2}>{t("nav.valorantLab")}</NavItem>
+        <NavItem to="/league-lab" icon={Gamepad2}>{t("nav.leagueLab")}</NavItem>
       </nav>
 
       <div className="mt-2 space-y-0.5 border-t border-cs2-border-subtle pt-2">

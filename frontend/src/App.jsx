@@ -59,6 +59,10 @@ import CustomTitleBar from "./components/CustomTitleBar";
 import DesktopCloseDialog from "./components/DesktopCloseDialog";
 import FirstRunWelcome, { shouldShowFirstRunWelcome } from "./components/FirstRunWelcome";
 import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter";
+import LeagueMiniAutoManager from "./components/LeagueMiniAutoManager";
+import LeagueGlobalShortcutManager from "./components/LeagueGlobalShortcutManager";
+import LeaguePresetShortcutManager from "./components/LeaguePresetShortcutManager";
+import LeagueAuxShortcutManager from "./components/LeagueAuxShortcutManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
@@ -75,6 +79,7 @@ const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const SensitivityLabPage = lazy(() => import("./pages/SensitivityLabPage"));
 const MagneticInputLabPage = lazy(() => import("./pages/MagneticInputLabPage"));
 const ValorantLabPage = lazy(() => import("./pages/ValorantLabPage"));
+const LeagueAutomationLabPage = lazy(() => import("./pages/LeagueAutomationLabPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
@@ -3317,6 +3322,10 @@ export default function App() {
   return (
     <AppShellProvider value={shell}>
       <div className="app-shell relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
+        <LeagueMiniAutoManager />
+        <LeagueGlobalShortcutManager />
+        <LeaguePresetShortcutManager />
+        <LeagueAuxShortcutManager />
         <CustomTitleBar />
         <DemoDownloadActivityCenter />
         <DesktopCloseDialog
@@ -3419,6 +3428,7 @@ export default function App() {
                 <Route path="/sensitivity-lab" element={<SensitivityLabPage />} />
                 <Route path="/input-lab" element={<MagneticInputLabPage />} />
                 <Route path="/valorant-lab" element={<ValorantLabPage />} />
+                <Route path="/league-lab" element={<LeagueAutomationLabPage />} />
                 <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
                 <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

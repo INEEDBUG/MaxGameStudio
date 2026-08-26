@@ -12,17 +12,565 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use tauri::window::Color;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn league_window_defaults(kind: &str) -> Option<(&'static str, f64, f64)> {
+    match kind {
+        "mini" => Some(("league-mini", 340.0, 420.0)),
+        "ongoing" => Some(("league-ongoing", 1360.0, 840.0)),
+        "cooldown" => Some(("league-cd-timer", 132.0, 252.0)),
+        _ => None,
+    }
+}
+
+/// `sync_league_mini` is called by a polling UI, so it also defends against
+/// stale or hand-written requests. Mini is a lounge/champ-select surface and
+/// must never be auto-shown for a game phase.
+fn mini_auto_context_allows_show(context: &str) -> bool {
+    matches!(
+        context.split(':').nth(1),
+        Some("Lobby") | Some("Matchmaking") | Some("ReadyCheck") | Some("ChampSelect")
+    )
+}
+
+#[tauri::command]
+async fn open_league_mini(app: AppHandle) -> Result<(), String> {
+    show_league_mini(app, true).await
+}
+
+async fn show_league_mini(app: AppHandle, request_focus: bool) -> Result<(), String> {
+    let mini = app.state::<LeagueMiniLifecycle>();
+    if request_focus {
+        mini.manually_hidden.store(false, Ordering::SeqCst);
+        mini.should_show.store(true, Ordering::SeqCst);
+        mini.focus_requested.store(true, Ordering::SeqCst);
+    }
+    if !mini.should_show.load(Ordering::SeqCst) || mini.manually_hidden.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    if mini.bootstrapping.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    if let Some(window) = app.get_webview_window("league-mini") {
+        // A dynamically-created WebView may exist before React has committed
+        // its first frame. Keep it hidden until the bootstrap explicitly
+        // acknowledges that it rendered either the panel or an error view.
+        if !mini.ready.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        if request_focus {
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    let content_protected = app
+        .state::<LeaguePrivacyLifecycle>()
+        .content_protected
+        .load(Ordering::SeqCst);
+    mini.bootstrapping.store(true, Ordering::SeqCst);
+    let build_result =
+        WebviewWindowBuilder::new(&app, "league-mini", WebviewUrl::App("mini.html".into()))
+            .title("MaxGameStudio Mini")
+            .inner_size(340.0, 420.0)
+            .min_inner_size(340.0, 420.0)
+            .resizable(true)
+            .maximizable(false)
+            .fullscreen(false)
+            .decorations(false)
+            .background_color(Color(20, 20, 22, 255))
+            .always_on_top(true)
+            .visible(false)
+            .focused(false)
+            .content_protected(content_protected)
+            .build();
+    if let Err(error) = build_result {
+        mini.bootstrapping.store(false, Ordering::SeqCst);
+        mini.ready.store(false, Ordering::SeqCst);
+        return Err(error.to_string());
+    }
+    // A previous auto-cycle may have destroyed the old WebView. Never carry
+    // its ready bit into the newly-created window.
+    mini.ready.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_league_ongoing(app: AppHandle) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueOngoingLifecycle>();
+    lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+    lifecycle.should_show.store(true, Ordering::SeqCst);
+    show_league_ongoing(app, true).await
+}
+
+async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueOngoingLifecycle>();
+    if request_focus {
+        lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+        lifecycle.should_show.store(true, Ordering::SeqCst);
+        lifecycle.focus_requested.store(true, Ordering::SeqCst);
+    }
+    if !lifecycle.should_show.load(Ordering::SeqCst)
+        || lifecycle.manually_hidden.load(Ordering::SeqCst)
+    {
+        return Ok(());
+    }
+    if lifecycle.bootstrapping.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    if let Some(window) = app.get_webview_window("league-ongoing") {
+        if !lifecycle.ready.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        if request_focus {
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    let content_protected = app
+        .state::<LeaguePrivacyLifecycle>()
+        .content_protected
+        .load(Ordering::SeqCst);
+    lifecycle.bootstrapping.store(true, Ordering::SeqCst);
+    let build_result = WebviewWindowBuilder::new(
+        &app,
+        "league-ongoing",
+        WebviewUrl::App("ongoing.html".into()),
+    )
+    .title("MaxGameStudio · League 实时对局")
+    .inner_size(1360.0, 840.0)
+    .min_inner_size(980.0, 640.0)
+    .resizable(true)
+    .decorations(true)
+    .background_color(Color(17, 18, 20, 255))
+    .visible(false)
+    .focused(false)
+    .content_protected(content_protected)
+    .build();
+    if let Err(error) = build_result {
+        lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+        lifecycle.ready.store(false, Ordering::SeqCst);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_league_cd_timer(app: AppHandle) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+    lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+    lifecycle.should_show.store(true, Ordering::SeqCst);
+    show_league_cd_timer(app).await
+}
+
+async fn show_league_cd_timer(app: AppHandle) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+    if !lifecycle.should_show.load(Ordering::SeqCst)
+        || lifecycle.manually_hidden.load(Ordering::SeqCst)
+    {
+        return Ok(());
+    }
+    if lifecycle.bootstrapping.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    if let Some(window) = app.get_webview_window("league-cd-timer") {
+        if !lifecycle.ready.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        window.show().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let content_protected = app
+        .state::<LeaguePrivacyLifecycle>()
+        .content_protected
+        .load(Ordering::SeqCst);
+    lifecycle.bootstrapping.store(true, Ordering::SeqCst);
+    let build_result = WebviewWindowBuilder::new(
+        &app,
+        "league-cd-timer",
+        WebviewUrl::App("cd-timer.html".into()),
+    )
+    .title("MaxGameStudio · League 技能计时器")
+    .inner_size(132.0, 252.0)
+    .min_inner_size(112.0, 220.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .focusable(false)
+    .background_color(Color(21, 21, 24, 255))
+    .visible(false)
+    .focused(false)
+    .skip_taskbar(true)
+    .shadow(false)
+    .content_protected(content_protected)
+    .build();
+    if let Err(error) = build_result {
+        lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+        lifecycle.ready.store(false, Ordering::SeqCst);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+/// Called by each auxiliary page after React has committed either its normal
+/// content or an error surface. A WebView existing is not enough: WebView2 can
+/// expose its native background before the first React paint, which is the
+/// source of the intermittent white/black auxiliary windows.
+#[tauri::command]
+fn mark_league_window_ready(app: AppHandle, kind: String) -> Result<(), String> {
+    let label = league_window_defaults(&kind)
+        .map(|(label, _, _)| label)
+        .ok_or_else(|| "unsupported League auxiliary window".to_string())?;
+
+    match kind.as_str() {
+        "mini" => {
+            let lifecycle = app.state::<LeagueMiniLifecycle>();
+            lifecycle.ready.store(true, Ordering::SeqCst);
+            lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+            if lifecycle.should_show.load(Ordering::SeqCst)
+                && !lifecycle.manually_hidden.load(Ordering::SeqCst)
+            {
+                if let Some(window) = app.get_webview_window(label) {
+                    window.show().map_err(|error| error.to_string())?;
+                    window.unminimize().map_err(|error| error.to_string())?;
+                    if lifecycle.focus_requested.swap(false, Ordering::SeqCst) {
+                        window.set_focus().map_err(|error| error.to_string())?;
+                    }
+                }
+            } else {
+                lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            }
+        }
+        "ongoing" => {
+            let lifecycle = app.state::<LeagueOngoingLifecycle>();
+            lifecycle.ready.store(true, Ordering::SeqCst);
+            lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+            if lifecycle.should_show.load(Ordering::SeqCst)
+                && !lifecycle.manually_hidden.load(Ordering::SeqCst)
+            {
+                if let Some(window) = app.get_webview_window(label) {
+                    window.show().map_err(|error| error.to_string())?;
+                    window.unminimize().map_err(|error| error.to_string())?;
+                    if lifecycle.focus_requested.swap(false, Ordering::SeqCst) {
+                        window.set_focus().map_err(|error| error.to_string())?;
+                    }
+                }
+            } else {
+                lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            }
+        }
+        "cooldown" => {
+            let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+            lifecycle.ready.store(true, Ordering::SeqCst);
+            lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+            if lifecycle.should_show.load(Ordering::SeqCst)
+                && !lifecycle.manually_hidden.load(Ordering::SeqCst)
+            {
+                if let Some(window) = app.get_webview_window(label) {
+                    window.show().map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        _ => unreachable!("League auxiliary window kind was validated above"),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn toggle_league_aux_window(
+    app: AppHandle,
+    kind: String,
+    visible: Option<bool>,
+) -> Result<(), String> {
+    let label = match kind.as_str() {
+        "mini" => "league-mini",
+        "ongoing" => "league-ongoing",
+        "cooldown" => "league-cd-timer",
+        _ => return Err("unsupported League auxiliary window".to_string()),
+    };
+    let current_visible = app
+        .get_webview_window(label)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+    let should_show = visible.unwrap_or(!current_visible);
+    match kind.as_str() {
+        "mini" => {
+            let lifecycle = app.state::<LeagueMiniLifecycle>();
+            lifecycle.should_show.store(should_show, Ordering::SeqCst);
+            lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            lifecycle
+                .manually_hidden
+                .store(!should_show, Ordering::SeqCst);
+        }
+        "ongoing" => {
+            let lifecycle = app.state::<LeagueOngoingLifecycle>();
+            lifecycle.should_show.store(should_show, Ordering::SeqCst);
+            lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            lifecycle
+                .manually_hidden
+                .store(!should_show, Ordering::SeqCst);
+        }
+        "cooldown" => {
+            let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+            lifecycle.should_show.store(should_show, Ordering::SeqCst);
+            lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            lifecycle
+                .manually_hidden
+                .store(!should_show, Ordering::SeqCst);
+        }
+        _ => unreachable!("League auxiliary window kind was validated above"),
+    }
+    if should_show {
+        match kind.as_str() {
+            "mini" => show_league_mini(app, false).await,
+            // Shortcut-triggered auxiliary windows must not steal focus from
+            // the game; the explicit toolbar command is the focused path.
+            "ongoing" => show_league_ongoing(app, false).await,
+            "cooldown" => show_league_cd_timer(app).await,
+            _ => unreachable!("League auxiliary window kind was validated above"),
+        }
+    } else if let Some(window) = app.get_webview_window(label) {
+        window.hide().map_err(|error| error.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn set_league_window_pinned(app: AppHandle, kind: String, pinned: bool) -> Result<(), String> {
+    let label = league_window_defaults(&kind)
+        .map(|(label, _, _)| label)
+        .ok_or_else(|| "unsupported League auxiliary window".to_string())?;
+    if let Some(window) = app.get_webview_window(label) {
+        window
+            .set_always_on_top(pinned)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn reset_league_window_position(app: AppHandle, kind: String) -> Result<(), String> {
+    let (label, width, height) = league_window_defaults(&kind)
+        .ok_or_else(|| "unsupported League auxiliary window".to_string())?;
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| "League auxiliary window is not open".to_string())?;
+    window
+        .set_size(LogicalSize::new(width, height))
+        .map_err(|error| error.to_string())?;
+    window.center().map_err(|error| error.to_string())?;
+    window.unminimize().map_err(|error| error.to_string())?;
+    match kind.as_str() {
+        "mini" => {
+            let lifecycle = app.state::<LeagueMiniLifecycle>();
+            lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+            lifecycle.should_show.store(true, Ordering::SeqCst);
+            if lifecycle.ready.load(Ordering::SeqCst) {
+                window.show().map_err(|error| error.to_string())?;
+            }
+        }
+        "ongoing" => {
+            let lifecycle = app.state::<LeagueOngoingLifecycle>();
+            lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+            lifecycle.should_show.store(true, Ordering::SeqCst);
+            if lifecycle.ready.load(Ordering::SeqCst) {
+                window.show().map_err(|error| error.to_string())?;
+            }
+        }
+        "cooldown" => {
+            let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+            lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+            lifecycle.should_show.store(true, Ordering::SeqCst);
+            if lifecycle.ready.load(Ordering::SeqCst) {
+                window.show().map_err(|error| error.to_string())?;
+            }
+        }
+        _ => {}
+    }
+    app.save_window_state(StateFlags::POSITION | StateFlags::SIZE)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn save_league_window_state_best_effort(app: &AppHandle) {
+    let _ = app.save_window_state(StateFlags::POSITION | StateFlags::SIZE);
+}
+
+#[tauri::command]
+fn persist_desktop_window_state(app: AppHandle) -> Result<(), String> {
+    app.save_window_state(StateFlags::POSITION | StateFlags::SIZE)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Default)]
+struct LeagueMiniLifecycle {
+    manually_hidden: AtomicBool,
+    should_show: AtomicBool,
+    bootstrapping: AtomicBool,
+    ready: AtomicBool,
+    focus_requested: AtomicBool,
+    context: Mutex<String>,
+}
+
+#[derive(Default)]
+struct LeagueOngoingLifecycle {
+    manually_hidden: AtomicBool,
+    should_show: AtomicBool,
+    bootstrapping: AtomicBool,
+    ready: AtomicBool,
+    focus_requested: AtomicBool,
+    context: Mutex<String>,
+}
+
+#[derive(Default)]
+struct LeagueCdTimerLifecycle {
+    manually_hidden: AtomicBool,
+    should_show: AtomicBool,
+    bootstrapping: AtomicBool,
+    ready: AtomicBool,
+    focus_requested: AtomicBool,
+    context: Mutex<String>,
+}
+
+#[derive(Default)]
+struct LeaguePrivacyLifecycle {
+    content_protected: AtomicBool,
+}
+
+#[tauri::command]
+fn set_league_content_protection(app: AppHandle, enabled: bool) -> Result<(), String> {
+    app.state::<LeaguePrivacyLifecycle>()
+        .content_protected
+        .store(enabled, Ordering::SeqCst);
+    for label in ["main", "league-mini", "league-ongoing", "league-cd-timer"] {
+        if let Some(window) = app.get_webview_window(label) {
+            window
+                .set_content_protected(enabled)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_league_mini(
+    app: AppHandle,
+    should_show: bool,
+    context: String,
+) -> Result<(), String> {
+    let mini = app.state::<LeagueMiniLifecycle>();
+    let should_show = should_show && mini_auto_context_allows_show(&context);
+    mini.should_show.store(should_show, Ordering::SeqCst);
+    {
+        let mut saved_context = mini
+            .context
+            .lock()
+            .map_err(|_| "mini lifecycle lock poisoned".to_string())?;
+        if *saved_context != context {
+            *saved_context = context;
+            mini.manually_hidden.store(false, Ordering::SeqCst);
+        }
+    }
+    if !should_show {
+        mini.focus_requested.store(false, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window("league-mini") {
+            // Do not keep a stale WebView2 surface alive across the game
+            // phase. Hiding it is normally enough, but an already-created
+            // Mini can retain a white native surface while its old route is
+            // still settling. Destroying it here makes InProgress a hard
+            // boundary; the next lounge phase creates a fresh, ready-gated
+            // WebView.
+            let _ = window.destroy();
+        }
+        mini.ready.store(false, Ordering::SeqCst);
+        mini.bootstrapping.store(false, Ordering::SeqCst);
+        return Ok(());
+    }
+    if mini.manually_hidden.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    show_league_mini(app, false).await
+}
+
+#[tauri::command]
+async fn sync_league_cd_timer(
+    app: AppHandle,
+    should_show: bool,
+    context: String,
+) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueCdTimerLifecycle>();
+    lifecycle.should_show.store(should_show, Ordering::SeqCst);
+    {
+        let mut saved_context = lifecycle
+            .context
+            .lock()
+            .map_err(|_| "cooldown timer lifecycle lock poisoned".to_string())?;
+        if *saved_context != context {
+            *saved_context = context;
+            lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+        }
+    }
+    if !should_show {
+        lifecycle.focus_requested.store(false, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window("league-cd-timer") {
+            window.hide().map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    if lifecycle.manually_hidden.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    show_league_cd_timer(app).await
+}
+
+#[tauri::command]
+async fn sync_league_ongoing(
+    app: AppHandle,
+    should_show: bool,
+    context: String,
+) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueOngoingLifecycle>();
+    lifecycle.should_show.store(should_show, Ordering::SeqCst);
+    {
+        let mut saved_context = lifecycle
+            .context
+            .lock()
+            .map_err(|_| "ongoing lifecycle lock poisoned".to_string())?;
+        if *saved_context != context {
+            *saved_context = context;
+            lifecycle.manually_hidden.store(false, Ordering::SeqCst);
+        }
+    }
+    if !should_show {
+        lifecycle.focus_requested.store(false, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window("league-ongoing") {
+            window.hide().map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    if lifecycle.manually_hidden.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    show_league_ongoing(app, false).await
+}
 
 struct BackendProcess {
     child: Mutex<Option<ManagedBackend>>,
@@ -112,6 +660,38 @@ fn hide_to_tray(handle: AppHandle) {
 #[tauri::command]
 fn quit_app(handle: AppHandle) {
     request_app_exit(&handle);
+}
+
+#[tauri::command]
+fn restart_as_administrator(handle: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                "Start-Sleep -Milliseconds 900; Start-Process -FilePath $args[0] -Verb RunAs",
+            ])
+            .arg(executable)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        request_app_exit(&handle);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = handle;
+        Err("管理员重启仅支持 Windows".to_string())
+    }
 }
 
 fn request_app_exit(handle: &AppHandle) {
@@ -481,8 +1061,19 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::POSITION | StateFlags::SIZE)
+                .with_filter(|label| label.starts_with("league-"))
+                .build(),
+        )
         .manage(BackendProcess::new().expect("failed to create desktop session token"))
         .manage(AppLifecycle::default())
+        .manage(LeagueMiniLifecycle::default())
+        .manage(LeagueOngoingLifecycle::default())
+        .manage(LeagueCdTimerLifecycle::default())
+        .manage(LeaguePrivacyLifecycle::default())
         .invoke_handler(tauri::generate_handler![
             read_legacy_ui_state,
             backend_session_token,
@@ -491,7 +1082,20 @@ pub fn run() {
             set_close_action,
             get_close_action,
             hide_to_tray,
-            quit_app
+            quit_app,
+            restart_as_administrator,
+            open_league_mini,
+            open_league_ongoing,
+            open_league_cd_timer,
+            toggle_league_aux_window,
+            mark_league_window_ready,
+            set_league_window_pinned,
+            reset_league_window_position,
+            persist_desktop_window_state,
+            sync_league_mini,
+            sync_league_ongoing,
+            sync_league_cd_timer,
+            set_league_content_protection
         ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
@@ -566,6 +1170,72 @@ pub fn run() {
                 }
             }
         }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == "league-mini" => {
+            if handle
+                .state::<AppLifecycle>()
+                .quitting
+                .load(Ordering::SeqCst)
+            {
+                return;
+            }
+            api.prevent_close();
+            let mini = handle.state::<LeagueMiniLifecycle>();
+            mini.manually_hidden.store(true, Ordering::SeqCst);
+            mini.should_show.store(false, Ordering::SeqCst);
+            mini.focus_requested.store(false, Ordering::SeqCst);
+            if let Some(window) = handle.get_webview_window(&label) {
+                let _ = window.hide();
+            }
+            save_league_window_state_best_effort(handle);
+        }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == "league-cd-timer" => {
+            if handle
+                .state::<AppLifecycle>()
+                .quitting
+                .load(Ordering::SeqCst)
+            {
+                return;
+            }
+            api.prevent_close();
+            let lifecycle = handle.state::<LeagueCdTimerLifecycle>();
+            lifecycle.manually_hidden.store(true, Ordering::SeqCst);
+            lifecycle.should_show.store(false, Ordering::SeqCst);
+            lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            if let Some(window) = handle.get_webview_window(&label) {
+                let _ = window.hide();
+            }
+            save_league_window_state_best_effort(handle);
+        }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == "league-ongoing" => {
+            if handle
+                .state::<AppLifecycle>()
+                .quitting
+                .load(Ordering::SeqCst)
+            {
+                return;
+            }
+            api.prevent_close();
+            let lifecycle = handle.state::<LeagueOngoingLifecycle>();
+            lifecycle.manually_hidden.store(true, Ordering::SeqCst);
+            lifecycle.should_show.store(false, Ordering::SeqCst);
+            lifecycle.focus_requested.store(false, Ordering::SeqCst);
+            if let Some(window) = handle.get_webview_window(&label) {
+                let _ = window.hide();
+            }
+            save_league_window_state_best_effort(handle);
+        }
         RunEvent::ExitRequested { code, api, .. } => {
             // The last window closing must not tear down the process while the
             // worker thread is still stopping the backend; explicit exit()
@@ -581,7 +1251,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{close_action_name, new_session_token, parse_close_action};
+    use super::{
+        close_action_name, league_window_defaults, mini_auto_context_allows_show,
+        new_session_token, parse_close_action,
+    };
 
     #[test]
     fn session_token_is_256_bit_hex() {
@@ -599,5 +1272,121 @@ mod tests {
             );
         }
         assert!(parse_close_action("unsupported").is_err());
+    }
+
+    #[test]
+    fn league_auxiliary_window_defaults_are_stable() {
+        assert_eq!(
+            league_window_defaults("mini"),
+            Some(("league-mini", 340.0, 420.0))
+        );
+        assert_eq!(
+            league_window_defaults("ongoing"),
+            Some(("league-ongoing", 1360.0, 840.0))
+        );
+        assert_eq!(
+            league_window_defaults("cooldown"),
+            Some(("league-cd-timer", 132.0, 252.0))
+        );
+        assert_eq!(league_window_defaults("unknown"), None);
+    }
+
+    #[test]
+    fn mini_auto_context_rejects_in_progress_and_unknown_phases() {
+        for context in [
+            "connected:InProgress:playing",
+            "connected:Reconnect:playing",
+            "connected:None:playing",
+            "offline:WaitingForStats:playing",
+            "connected::playing",
+        ] {
+            assert!(!mini_auto_context_allows_show(context), "{context}");
+        }
+        for context in [
+            "connected:Lobby:playing",
+            "connected:Matchmaking:playing",
+            "connected:ReadyCheck:playing",
+            "connected:ChampSelect:playing",
+        ] {
+            assert!(mini_auto_context_allows_show(context), "{context}");
+        }
+    }
+
+    #[test]
+    fn mini_auto_hide_destroys_the_stale_webview() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("async fn sync_league_mini")
+            .expect("mini sync command should exist");
+        let command = &source[start..];
+        let end = command
+            .find("#[tauri::command]")
+            .expect("next command should delimit mini sync command");
+        let command = &command[..end];
+        assert!(command.contains("window.destroy()"));
+        assert!(command.contains("mini.ready.store(false"));
+        assert!(command.contains("mini.bootstrapping.store(false"));
+    }
+
+    #[test]
+    fn league_html_aux_windows_are_created_hidden_before_react_ready() {
+        let source = include_str!("lib.rs");
+        for marker in [
+            "async fn show_league_mini",
+            "async fn show_league_ongoing",
+            "async fn show_league_cd_timer",
+        ] {
+            let start = source
+                .find(marker)
+                .expect("auxiliary window builder should exist");
+            let command = &source[start..];
+            let next = command.find("#[tauri::command]").unwrap_or(command.len());
+            let command = &command[..next];
+            assert!(command.contains(".visible(false)"));
+            assert!(
+                command.contains("!lifecycle.ready.load") || command.contains("!mini.ready.load")
+            );
+        }
+        assert!(source.contains("WebviewUrl::App(\"mini.html\".into())"));
+        assert!(source.contains("WebviewUrl::App(\"ongoing.html\".into())"));
+        assert!(source.contains("WebviewUrl::App(\"cd-timer.html\".into())"));
+    }
+
+    #[test]
+    fn league_html_aux_windows_recheck_desired_visibility_after_bootstrap() {
+        let source = include_str!("lib.rs");
+        for (marker, lifecycle) in [
+            ("async fn show_league_mini", "mini.should_show.load"),
+            ("async fn show_league_ongoing", "lifecycle.should_show.load"),
+            (
+                "async fn show_league_cd_timer",
+                "lifecycle.should_show.load",
+            ),
+        ] {
+            let start = source
+                .find(marker)
+                .expect("auxiliary show helper should exist");
+            let command = &source[start..];
+            let next = command.find("#[tauri::command]").unwrap_or(command.len());
+            let command = &command[..next];
+            assert!(command.contains(lifecycle));
+            assert!(command.contains("bootstrapping"));
+        }
+        assert!(source.contains("mini.should_show.store(should_show"));
+        assert!(source.contains("fn mark_league_window_ready"));
+        assert!(source.contains("lifecycle.ready.store(true"));
+    }
+
+    #[test]
+    fn ongoing_window_is_not_created_always_on_top() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("async fn show_league_ongoing")
+            .expect("ongoing window builder should exist");
+        let command = &source[start..];
+        let end = command
+            .find("#[tauri::command]")
+            .expect("next command should delimit ongoing builder");
+        assert!(!command[..end].contains(".always_on_top(true)"));
     }
 }
