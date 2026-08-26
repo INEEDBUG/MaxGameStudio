@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertPeX64, isGnuBuild, stageLibunwind } from "./tauri-native-runtime.mjs";
 
 const version = process.argv.slice(2).find((arg) => arg !== "--")?.trim();
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
@@ -11,6 +12,8 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 }
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const tauriRoot = join(frontendRoot, "src-tauri");
+const releaseRoot = join(tauriRoot, "target", "release");
 const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") || "PATH";
 const buildEnv = {
   ...process.env,
@@ -60,6 +63,12 @@ run(
   false,
 );
 
+const stagedLibunwind =
+  process.platform === "win32" ? stageLibunwind({ env: buildEnv, releaseRoot }) : null;
+if (stagedLibunwind) {
+  console.log(`[desktop] staged GNU libunwind.dll from ${stagedLibunwind.source}`);
+}
+
 const tauri = join(frontendRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
 const buildConfig = { version };
 const hasUpdaterSigningKey = Boolean(buildEnv.TAURI_SIGNING_PRIVATE_KEY);
@@ -86,9 +95,8 @@ run(
 );
 
 if (process.platform === "win32") {
-  const tauriRoot = join(frontendRoot, "src-tauri");
-  const releaseRoot = join(tauriRoot, "target", "release");
   const loader = join(releaseRoot, "WebView2Loader.dll");
+  const libunwind = join(releaseRoot, "libunwind.dll");
   const hook = join(tauriRoot, "windows", "upgrade-hooks.nsh");
   const generatedInstaller = join(releaseRoot, "nsis", "x64", "installer.nsi");
   const artifact = join(
@@ -101,20 +109,24 @@ if (process.platform === "win32") {
   if (!hasUpdaterSigningKey && existsSync(updaterSignature)) {
     rmSync(updaterSignature);
   }
-  const gnuBuild = /gnu/i.test(
-    [
-      buildEnv.RUSTUP_TOOLCHAIN,
-      buildEnv.CARGO_BUILD_TARGET,
-      buildEnv.HOST,
-    ].filter(Boolean).join(" "),
-  ) || existsSync(loader);
+  const gnuBuild = isGnuBuild(buildEnv);
 
   if (gnuBuild && !existsSync(loader)) {
     throw new Error(`GNU Tauri build is missing required runtime loader: ${loader}`);
   }
+  if (gnuBuild && !existsSync(libunwind)) {
+    throw new Error(`GNU Tauri build is missing required runtime library: ${libunwind}`);
+  }
+  if (gnuBuild) assertPeX64(libunwind);
+  if (!gnuBuild && existsSync(libunwind)) {
+    throw new Error(`Non-GNU Tauri build unexpectedly contains ${libunwind}`);
+  }
   const hookBody = readFileSync(hook, "utf8");
   if (gnuBuild && !hookBody.includes('File /a "/oname=WebView2Loader.dll"')) {
     throw new Error("NSIS hook does not install WebView2Loader.dll beside the Tauri executable");
+  }
+  if (gnuBuild && !hookBody.includes('File /a "/oname=libunwind.dll"')) {
+    throw new Error("NSIS hook does not install libunwind.dll beside the Tauri executable");
   }
   const installerBody = readFileSync(generatedInstaller, "utf8");
   if (!installerBody.includes("windows\\upgrade-hooks.nsh")) {

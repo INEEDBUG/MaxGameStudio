@@ -10,9 +10,10 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from html import unescape
 from pathlib import Path
 from typing import Any, Literal, Optional, Tuple
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 from packaging.version import InvalidVersion, Version
 
@@ -48,6 +49,26 @@ _UPDATE_RACE_TIMEOUT_SEC = _env_float("CS2_INSIGHT_UPDATE_RACE_TIMEOUT_SEC", 8.0
 _RELEASE_FILE = Path(__file__).resolve().parent / "release_version.txt"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOKEN_FILE_DEFAULT = _REPO_ROOT / ".cs2-insight-github-token"
+
+# Keep these in priority order.  The current MaxGameStudio installer is the
+# preferred asset, while the dotted legacy name is still present on older
+# GitHub Releases (GitHub normalizes the old Tauri filename's spaces to dots).
+_SETUP_ASSET_NAME_PATTERNS = (
+    "MaxGameStudio_{}_x64-setup.exe",
+    "CS2.Ultimate.Insight.Studio_{}_x64-setup.exe",
+    "CS2 Ultimate Insight Studio_{}_x64-setup.exe",
+    "MaxGameStudio-{}-Setup.exe",
+    "CS2.Insight.Agent.Setup.{}.exe",
+    "CS2 Insight Agent Setup {}.exe",
+    "CS2InsightAgent-{}-Setup.exe",
+)
+_ACCEPTED_UNINSTALL_DISPLAY_NAMES = frozenset(
+    {
+        "MaxGameStudio",
+        "CS2 Insight Agent",
+        "CS2 Ultimate Insight Studio",
+    }
+)
 
 LocalSource = Literal["file", "registry", "unknown"]
 
@@ -87,25 +108,23 @@ def unwrap_github_url(url: str) -> str:
 
 
 def pick_download_urls(assets: list[dict[str, Any]], version_without_v: str) -> tuple[Optional[str], Optional[str]]:
-    setup_url: Optional[str] = None
+    setup_names = tuple(pattern.format(version_without_v) for pattern in _SETUP_ASSET_NAME_PATTERNS)
+    setup_urls: dict[str, str] = {}
     zip_url: Optional[str] = None
-    setup_names = {
-        f"MaxGameStudio_{version_without_v}_x64-setup.exe",
-        f"MaxGameStudio-{version_without_v}-Setup.exe",
-        f"CS2.Insight.Agent.Setup.{version_without_v}.exe",
-        f"CS2 Insight Agent Setup {version_without_v}.exe",
-        f"CS2InsightAgent-{version_without_v}-Setup.exe",
-    }
     want_zip = f"CS2InsightAgent-{version_without_v}-windows-amd64.zip"
     for a in assets:
         name = str(a.get("name") or "")
         url = a.get("browser_download_url")
         if not url:
             continue
-        if name in setup_names:
-            setup_url = str(url)
+        if name in setup_names and name not in setup_urls:
+            # Preserve the first concrete URL for a name.  More importantly,
+            # resolve the ordered candidate list below instead of letting API
+            # asset order make a legacy or guessed URL win accidentally.
+            setup_urls[name] = str(url)
         elif name == want_zip:
-            zip_url = str(url)
+            zip_url = zip_url or str(url)
+    setup_url = next((setup_urls[name] for name in setup_names if name in setup_urls), None)
     return setup_url, zip_url
 
 
@@ -139,7 +158,7 @@ def _read_windows_uninstall_display_version() -> Optional[str]:
         (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
         (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
     )
-    accepted_names = {"MaxGameStudio", "CS2 Insight Agent"}
+    accepted_names = _ACCEPTED_UNINSTALL_DISPLAY_NAMES
     for hive, sub in uninstall_roots:
         try:
             key = winreg.OpenKey(hive, sub)
@@ -304,6 +323,54 @@ def _guess_download_urls(tag_raw: str, tag_norm: str) -> tuple[str, None]:
     )
 
 
+_RE_HTML_ATTRIBUTE = re.compile(r"(?:href|data-url)\s*=\s*(['\"])(.*?)\1", re.IGNORECASE | re.DOTALL)
+_RE_RELEASE_ASSET_PATH = re.compile(r"/releases/download/[^/]+/(.+)$", re.IGNORECASE)
+
+
+def _extract_release_assets_from_html(html_text: str, base_url: str) -> list[dict[str, str]]:
+    """Extract concrete GitHub release asset links from a release HTML fragment.
+
+    The REST API can be rate-limited while the public release page remains
+    available.  GitHub's page exposes the old dotted installer name in its
+    expanded-assets fragment, so use only links actually present in HTML.
+    Guessed URLs are deliberately handled by the caller only after this list
+    contains no recognized setup asset.
+    """
+    assets: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    canonical_base = unwrap_github_url(base_url)
+    expected_repo_path = f"/{_GITHUB_OWNER_REPO}/releases/download/".casefold()
+    for match in _RE_HTML_ATTRIBUTE.finditer(html_text or ""):
+        raw_href = unescape(match.group(2)).strip()
+        if not raw_href:
+            continue
+        candidate = urljoin(canonical_base, raw_href)
+        canonical = unwrap_github_url(candidate)
+        parsed = urlparse(canonical)
+        path = parsed.path
+        if parsed.netloc.casefold() != "github.com" or not path.casefold().startswith(expected_repo_path):
+            continue
+        path_match = _RE_RELEASE_ASSET_PATH.search(path)
+        if not path_match:
+            continue
+        encoded_name = path_match.group(1).split("?", 1)[0].split("#", 1)[0]
+        if not encoded_name:
+            continue
+        name = unquote(encoded_name)
+        if not name.lower().endswith((".exe", ".zip")):
+            continue
+        identity = (name, canonical)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        assets.append({"name": name, "browser_download_url": canonical})
+    return assets
+
+
+def _expanded_release_assets_url(tag_raw: str) -> str:
+    return f"https://github.com/{_GITHUB_OWNER_REPO}/releases/expanded_assets/{quote(tag_raw, safe='')}"
+
+
 def _fetch_latest_release_dict(mirror_prefix: str | None = None, *, timeout_sec: float = 4.0) -> dict[str, Any]:
     api_url = mirror_wrap_url(mirror_prefix, GITHUB_LATEST_API) if mirror_prefix else GITHUB_LATEST_API
     headers: dict[str, str] = {
@@ -324,17 +391,50 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
     req = urllib.request.Request(page_url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
         final_url = str(resp.url)
+        try:
+            page_body = resp.read().decode("utf-8", errors="replace")
+        except (AttributeError, OSError):
+            page_body = ""
     tag_raw = _parse_release_tag_from_url(final_url)
     tag_norm = normalize_release_tag(tag_raw)
-    setup_u, _ = _guess_download_urls(tag_raw, tag_norm)
     release_page = unwrap_github_url(final_url)
+    assets = _extract_release_assets_from_html(page_body, release_page)
+
+    # The main release page lazy-loads its assets from this fragment.  Fetch
+    # it only when no concrete setup asset was found, so an API/page fallback
+    # can never replace a real asset with a guessed current-brand URL.
+    setup_u, _ = pick_download_urls(assets, tag_norm)
+    if setup_u is None and page_body:
+        expanded_url = _expanded_release_assets_url(tag_raw)
+        expanded_request_url = mirror_wrap_url(mirror_prefix, expanded_url) if mirror_prefix else expanded_url
+        expanded_req = urllib.request.Request(expanded_request_url, headers={"User-Agent": _USER_AGENT})
+        try:
+            with urllib.request.urlopen(
+                expanded_req,
+                timeout=min(timeout_sec, _MIRROR_REDIRECT_TIMEOUT_SEC),
+            ) as expanded_resp:
+                expanded_body = expanded_resp.read().decode("utf-8", errors="replace")
+                assets.extend(_extract_release_assets_from_html(expanded_body, expanded_url))
+        except (AttributeError, UnicodeError, urllib.error.URLError, TimeoutError, OSError):
+            pass
+
+    setup_u, _ = pick_download_urls(assets, tag_norm)
+    if setup_u is None:
+        # Keep the historical best-effort fallback for pages that expose no
+        # asset links at all.  It is appended only after real assets were
+        # inspected, and therefore cannot override a legacy/current asset.
+        setup_u, _ = _guess_download_urls(tag_raw, tag_norm)
+        assets.append(
+            {
+                "name": f"MaxGameStudio_{tag_norm}_x64-setup.exe",
+                "browser_download_url": setup_u,
+            }
+        )
     return {
         "tag_name": tag_raw,
         "html_url": release_page,
         "body": "",
-        "assets": [
-            {"name": f"MaxGameStudio_{tag_norm}_x64-setup.exe", "browser_download_url": setup_u},
-        ],
+        "assets": assets,
     }
 
 

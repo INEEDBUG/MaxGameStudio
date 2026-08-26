@@ -91,6 +91,7 @@ from .steam_profiles import get_public_steam_avatar
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .training_api import get_training_db, router as training_router
+from .valorant_lab.api import router as valorant_lab_router
 from .demo_download_jobs import DemoDownloadJob, DemoDownloadJobManager
 from .lite_cut.db import LiteCutDB
 from .lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
@@ -378,6 +379,7 @@ app = FastAPI(title="MaxGameStudio", version=APP_VERSION, lifespan=lifespan)
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
 app.include_router(training_router)
+app.include_router(valorant_lab_router)
 
 app.add_middleware(
     CORSMiddleware,

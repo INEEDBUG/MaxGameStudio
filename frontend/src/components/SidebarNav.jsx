@@ -9,6 +9,7 @@ import {
   Clock3,
   Crosshair,
   Download,
+  Gamepad2,
   Keyboard,
   Laptop,
   Library,
@@ -172,6 +173,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         <div className="mt-3 px-2.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cs2-text-muted">{t("nav.sectionTools")}</div>
         <NavItem to="/sensitivity-lab" icon={Crosshair}>{t("nav.sensitivityLab")}</NavItem>
         <NavItem to="/input-lab" icon={Keyboard}>{t("nav.inputLab")}</NavItem>
+        <NavItem to="/valorant-lab" icon={Gamepad2}>{t("nav.valorantLab")}</NavItem>
       </nav>
 
       <div className="mt-2 space-y-0.5 border-t border-cs2-border-subtle pt-2">

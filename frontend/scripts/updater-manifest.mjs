@@ -13,8 +13,8 @@ export function createGithubUpdaterManifest({
   pubDate = new Date().toISOString(),
   updateMode = "normal",
 }) {
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`Invalid updater version: ${version}`);
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`Updater manifest requires a stable semantic version (x.y.z): ${version}`);
   }
   if (!/^[^/]+\/[^/]+$/.test(repository)) {
     throw new Error(`Invalid GitHub repository: ${repository}`);

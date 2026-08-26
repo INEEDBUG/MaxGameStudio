@@ -178,7 +178,7 @@ OBS 与 FFmpeg 仍由各自的运行时集成管理。
 
 从 `v2.5.9` 起，客户端通过签名更新通道检查新版本；从 `v2.5.11` 起，正式版会由 GitHub Actions 构建并发布。客户端启动时会检查一次，运行或驻留后台期间每 15 分钟继续检查；发现**正式版本**后会展示版本号和更新说明，并自动完成下载、签名校验、覆盖安装和新版重启。配置、Demo 数据库和工作区数据保存在独立的用户数据目录中，覆盖安装不会删除它们。Release 页面仍只保留一个面向普通用户的 Windows EXE。
 
-测试版与正式更新通道严格隔离：带 `-rc.N` 的版本只作为 GitHub Prerelease 手动下载，不更新 `updater/latest.json`，也不会通过现有正式客户端推送。测试通过并转为正式版后，才会进入自动更新通道。
+正式发布通道只接受严格的 `x.y.z` 稳定版本：GitHub Release、`updater/latest.json` 和 `updater` 分支不会接收任何带预发布后缀（例如 `-rc`、`-beta` 或 `-alpha`）的版本。测试版只能从 GitHub Prerelease 手动下载；`workflow_dispatch` 也只上传私有 Actions artifact，不会公开 Release。旧版线上安装包可能仍使用 `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`，客户端会继续识别该精确旧名，同时优先使用新命名的 `MaxGameStudio_<version>_x64-setup.exe`。
 
 > **建议安装路径不含中文字符。** 例如 `D:\MaxGameStudio\` ✅，`D:\游戏工具\MaxGameStudio\` ❌
 

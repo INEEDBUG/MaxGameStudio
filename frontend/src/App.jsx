@@ -74,6 +74,7 @@ const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
 const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const SensitivityLabPage = lazy(() => import("./pages/SensitivityLabPage"));
 const MagneticInputLabPage = lazy(() => import("./pages/MagneticInputLabPage"));
+const ValorantLabPage = lazy(() => import("./pages/ValorantLabPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
@@ -3417,6 +3418,7 @@ export default function App() {
                 <Route path="/match-history" element={<MatchHistoryPage />} />
                 <Route path="/sensitivity-lab" element={<SensitivityLabPage />} />
                 <Route path="/input-lab" element={<MagneticInputLabPage />} />
+                <Route path="/valorant-lab" element={<ValorantLabPage />} />
                 <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
                 <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

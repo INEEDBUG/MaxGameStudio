@@ -14,6 +14,7 @@ if str(_BACKEND) not in sys.path:
 from app import update_info
 from app.update_info import (
     _guess_download_urls,
+    _fetch_latest_release_dict_via_redirect,
     _github_api_token,
     _parse_release_tag_from_url,
     build_update_payload,
@@ -55,6 +56,99 @@ def test_pick_download_urls_current_electron_asset():
     ]
     setup, zip_url = pick_download_urls(assets, ver)
     assert setup == "https://example/electron"
+    assert zip_url is None
+
+
+def test_pick_download_urls_accepts_dotted_legacy_tauri_asset():
+    ver = "2.5.15"
+    assets = [
+        {
+            "name": f"CS2.Ultimate.Insight.Studio_{ver}_x64-setup.exe",
+            "browser_download_url": "https://example/legacy-setup",
+        },
+    ]
+    setup, zip_url = pick_download_urls(assets, ver)
+    assert setup == "https://example/legacy-setup"
+    assert zip_url is None
+
+
+def test_pick_download_urls_prefers_real_current_asset_over_legacy_order():
+    ver = "2.5.15"
+    assets = [
+        {
+            "name": f"CS2.Ultimate.Insight.Studio_{ver}_x64-setup.exe",
+            "browser_download_url": "https://example/legacy-setup",
+        },
+        {
+            "name": f"MaxGameStudio_{ver}_x64-setup.exe",
+            "browser_download_url": "https://example/current-setup",
+        },
+    ]
+    setup, zip_url = pick_download_urls(assets, ver)
+    assert setup == "https://example/current-setup"
+    assert zip_url is None
+
+
+def test_registry_display_name_compatibility_contains_only_exact_legacy_name():
+    assert "CS2 Ultimate Insight Studio" in update_info._ACCEPTED_UNINSTALL_DISPLAY_NAMES
+    assert "CS2 Ultimate Insight Studio Preview" not in update_info._ACCEPTED_UNINSTALL_DISPLAY_NAMES
+
+
+class _FakeHttpResponse:
+    def __init__(self, url: str, body: str):
+        self.url = url
+        self._body = body.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self):
+        return self._body
+
+
+def test_redirect_fallback_uses_real_legacy_asset_before_guessing_current_name():
+    tag = "v2.5.15"
+    legacy_name = "CS2.Ultimate.Insight.Studio_2.5.15_x64-setup.exe"
+    page = (
+        f'<a href="/INEEDBUG/MaxGameStudio/releases/download/{tag}/{legacy_name}" '
+        'rel="nofollow">legacy</a>'
+    )
+    response = _FakeHttpResponse(
+        f"https://github.com/INEEDBUG/MaxGameStudio/releases/tag/{tag}",
+        page,
+    )
+    with patch.object(update_info.urllib.request, "urlopen", return_value=response):
+        data = _fetch_latest_release_dict_via_redirect(timeout_sec=0.1)
+
+    setup, zip_url = pick_download_urls(data["assets"], "2.5.15")
+    assert setup == (
+        "https://github.com/INEEDBUG/MaxGameStudio/releases/download/"
+        f"{tag}/{legacy_name}"
+    )
+    assert zip_url is None
+    assert not any(asset["name"] == "MaxGameStudio_2.5.15_x64-setup.exe" for asset in data["assets"])
+
+
+def test_redirect_fallback_only_guesses_when_expanded_assets_have_no_real_setup():
+    tag = "v2.5.15"
+    responses = [
+        _FakeHttpResponse(
+            f"https://github.com/INEEDBUG/MaxGameStudio/releases/tag/{tag}",
+            '<include-fragment src="/INEEDBUG/MaxGameStudio/releases/expanded_assets/v2.5.15">',
+        ),
+        _FakeHttpResponse(
+            f"https://github.com/INEEDBUG/MaxGameStudio/releases/expanded_assets/{tag}",
+            '<p>No installer listed</p>',
+        ),
+    ]
+    with patch.object(update_info.urllib.request, "urlopen", side_effect=responses):
+        data = _fetch_latest_release_dict_via_redirect(timeout_sec=0.1)
+
+    setup, zip_url = pick_download_urls(data["assets"], "2.5.15")
+    assert setup.endswith(f"/{tag}/MaxGameStudio_2.5.15_x64-setup.exe")
     assert zip_url is None
 
 
