@@ -829,6 +829,42 @@ def test_ready_check_event_starts_real_timer_from_event(monkeypatch):
     assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
 
 
+def test_auto_accept_waiter_rechecks_an_early_windows_wake(monkeypatch):
+    """An early timer wake must not drop the pending accept action."""
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=1,
+    )
+    service.phase = "ReadyCheck"
+    service._accept_due_at = 10.0
+    clock = [9.0]
+    sleeps = []
+    calls = []
+
+    def monotonic():
+        return clock[0]
+
+    async def early_sleep(delay):
+        sleeps.append(delay)
+        # Model the Windows event loop waking halfway through the first wait.
+        # The second wait reaches the authoritative monotonic deadline.
+        clock[0] += delay / 2 if len(sleeps) == 1 else delay
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(league_lab.time, "monotonic", monotonic)
+    monkeypatch.setattr(league_lab.asyncio, "sleep", early_sleep)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._wait_and_auto_accept(1.0))
+
+    assert sleeps == [1.0, 0.5]
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
 def test_ready_check_auto_accept_requires_master_gate(monkeypatch):
     service = LeagueLabService()
     service.settings = LeagueLabSettings(

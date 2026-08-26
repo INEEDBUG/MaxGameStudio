@@ -1315,7 +1315,19 @@ class LeagueLabService:
 
     async def _wait_and_auto_accept(self, delay: float) -> None:
         try:
-            await asyncio.sleep(delay)
+            # ``asyncio.sleep`` may resume a fraction before the monotonic
+            # deadline on Windows.  A one-shot sleep would then make
+            # ``_try_auto_accept`` reject the action and clear the waiter,
+            # leaving acceptance to the much slower polling fallback.  Wait
+            # against the authoritative deadline until it is truly due.
+            while True:
+                due_at = self._accept_due_at
+                if due_at is None or due_at == float("inf"):
+                    return
+                remaining = due_at - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(remaining)
             await self._try_auto_accept()
         except asyncio.CancelledError:
             raise
