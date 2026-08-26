@@ -13,6 +13,8 @@
 <h3 align="center"><b>面向个人训练与复盘的本地 CS2 工作台</b> </h3>
 <h4 align="center">官匹 Demo 获取 · Demo 分析 · 灵敏度实验室 · 磁轴输入实验室</h4>
 
+> **一个 MaxGameStudio 桌面应用：** CS2 工作台、League 实验室与 VALORANT 实验室共用同一个 Tauri 客户端和侧栏入口；两个实验室不是独立安装的桌面程序。
+
 > [!WARNING]
 > **`2.5.14-rc.58` 是仅供测试的 Release Candidate。** 它不会写入正式版自动更新清单，当前正式客户端不会收到升级提示。需要参与测试的用户请从 [GitHub 预发布页面](https://github.com/INEEDBUG/MaxGameStudio/releases)手动下载安装；日常使用请继续保留正式版。
 
@@ -34,6 +36,7 @@
 - **官匹 Demo 工作流参考**：[akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager)。本项目没有采用它的 PostgreSQL 数据层，也没有把整个项目代码直接合并进来。
 - **Steam Game Coordinator 辅助程序**：[akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0（GPL-3.0）。它在用户首次明确同意后按需下载，并以未修改的独立进程运行。
 - **Share Code 解码代码**：[akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode)（MIT）的 Python 适配，许可证原文保存在 `third_party/licenses/csgo-sharecode-LICENSE.txt`。
+- **英雄联盟自动化参考**：[LeagueAkari](https://github.com/LeagueAkari/LeagueAkari)（MIT）提供了 LCU 与游戏流程等参考思路；本项目按 React/Tauri/FastAPI 架构独立实现，保留 MIT 许可证与致谢于 `third_party/licenses/LeagueAkari-LICENSE.txt`，不打包其 Electron/Vue 应用。
 - 完整第三方依赖与许可证边界见 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md)。
 
 本仓库不展示任何上游作者的收款码，也不代表上游作者募集赞助。新的橙色准星/数据脉冲图标为本项目原创资产，不使用 Valve 官方 CS2 标志。
@@ -122,6 +125,7 @@
 - **本机 CS2 CFG 预填** — 以只读方式扫描本地 Steam 账号的 CS2 配置，预填当前灵敏度、`m_yaw`、分辨率和画面比例；DPI 与显卡拉伸模式仍由用户确认。
 - **磁轴参数优化** — 根据异常重复边沿、保持抖动、A/D 重叠和方向切换延迟，分别给出触发行程、RT 按下及 RT 抬起的建议起点，并要求每次仅调整 `0.05–0.10 mm` 后复测。
 - **官匹输入安全提醒** — 普通 Rapid Trigger 可用于缩短按键复位；在 CS2 官匹中应关闭 Snap Tap、Rapid Tap、Snappy Tappy、SOCD/LKP 等自动反向输入功能。
+- **无畏契约实验室** — 独立的 VALORANT 工具页读取本机 GPU、主监视器与刷新率；检测通过后可为社区常用的 `1568×1080` 或自定义分辨率生成可回退预览。真实显示模式应用必须经过预览与明确风险确认，倒计时内可保留或恢复，软件不会自动禁用监视器。准心编辑器按 P/A/S 配置提供实时预览、严格后端编解码、导入导出和本机回退；后端不可用时只保存本机配置，不宣称与原生代码等价。
 - **英雄联盟实验室** — 与 CS2 功能共用同一个桌面客户端和托盘，通过本机 LCU/SGP 接口兼容 Riot 与 WeGame/Tencent 客户端。支持自动接受、按模式/位置选择与禁用英雄、抽卡子集约束与斗魂竞技场“勇敢举动”、备战席换取/重随、按普通/排位分路/ARAM/URF 等场景配置符文与召唤师技能、自动点赞、自动匹配/返回房间/掉线重连、完整队列邀请策略、登录后一次性恢复状态签名和排位名片、Riot ID 跨区玩家检索与目标区服 SGP 分页战绩、最近遇见、本地标签、100 场 SQLite 战绩收集、基础与 AND/OR 组合筛选及筛选预设、SGP 排位/战绩/藏品挑战、实时十人分析与组排推断、双方当前打野的首开/路线/早期抓人时间线画像、独立实时对局窗口，以及按阶段自动显示的置顶 Mini 面板、备战席/皮肤操作和可选复活倒计时。符文、召唤师技能与出装由本地英雄配置管理，不依赖 OP.GG 独立窗口。可选的敌方召唤师技能计时器会在支持的对局模式中自动显示，按技能急速修正冷却，支持滚轮校时和仅向当前前台 `League of Legends.exe` 双击右键发送报点。客户端工具箱还支持显式领取 `SELECT_REWARDS` 任务、`PENDING_SELECTION` 普通奖励、活动中心奖励与删除所选好友，以及队列资格检查/创建房间/离开房间、无尽狂潮英雄/地图/难度设置、资料背景皮肤/挂件、旗帜强调色、巅峰徽章、挑战代币和表情槽位工具：账号写入总开关默认开启并在界面显著提示，不预选、不随机挑选，每次写入都重新核对 LCU 当前状态并要求输入确认短语。另提供主播隐私别名与原生窗口捕获保护、LeagueClientUx 尺寸修复与居中、可逆的游戏设置文件只读/可写切换、仅针对当前前台游戏进程的双确认终止工具、安全的 League 设置 JSON 导出/导入，以及只生成不自动发送的近期表现、组排关系和打野侦察草稿。导出文件不会包含客户端凭据，导入后所有账号操作和自动套用总开关仍保持关闭。LCU、Riot Client 与 SGP 令牌只保存在运行内存，不写入磁盘、不上传；所有会影响账号、客户端或对局的自动操作默认关闭。
 
 - **League 客户端高级工具** — 可输入任意 Game ID，自动在 LCU 与当前区服 SGP 间选择数据源，预览双方完整结算数据和时间线摘要，并把历史阵容只读载入实时对局面板；本地玩家标签按当前登录账号隔离，支持搜索、分页、编辑、删除及 JSON 导入导出，直播隐私模式下默认遮挡；玩家中心还会按英雄聚合胜率、KDA、伤害/补刀效率、团队资源占比和分路分布，实时对局可调并发与组排阈值并显示连胜、近况、补刀、视野、单杀等标签；另可选配桌面全局终止快捷键，默认关闭，触发时仍强制验证前台进程必须是 `League of Legends.exe`。
@@ -178,7 +182,7 @@ OBS 与 FFmpeg 仍由各自的运行时集成管理。
 
 从 `v2.5.9` 起，客户端通过签名更新通道检查新版本；从 `v2.5.11` 起，正式版会由 GitHub Actions 构建并发布。客户端启动时会检查一次，运行或驻留后台期间每 15 分钟继续检查；发现**正式版本**后会展示版本号和更新说明，并自动完成下载、签名校验、覆盖安装和新版重启。配置、Demo 数据库和工作区数据保存在独立的用户数据目录中，覆盖安装不会删除它们。Release 页面仍只保留一个面向普通用户的 Windows EXE。
 
-测试版与正式更新通道严格隔离：带 `-rc.N` 的版本只作为 GitHub Prerelease 手动下载，不更新 `updater/latest.json`，也不会通过现有正式客户端推送。测试通过并转为正式版后，才会进入自动更新通道。
+正式发布通道只接受严格的 `x.y.z` 稳定版本：GitHub Release、`updater/latest.json` 和 `updater` 分支不会接收任何带预发布后缀（例如 `-rc`、`-beta` 或 `-alpha`）的版本。测试版只能从 GitHub Prerelease 手动下载；`workflow_dispatch` 也只上传私有 Actions artifact，不会公开 Release。旧版线上安装包可能仍使用 `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`，客户端会继续识别该精确旧名，同时优先使用新命名的 `MaxGameStudio_<version>_x64-setup.exe`。
 
 > **建议安装路径不含中文字符。** 例如 `D:\MaxGameStudio\` ✅，`D:\游戏工具\MaxGameStudio\` ❌
 
@@ -201,6 +205,12 @@ OBS 与 FFmpeg 仍由各自的运行时集成管理。
    - [X] 2D 玩家选择与单队战术视角
    - [ ] 战术教练（投掷物轨迹分析 / 路线复盘）
 
+
+---
+
+## 贡献者
+
+- **Codex** — 开发协作、代码实现与交付审计。
 
 ---
 

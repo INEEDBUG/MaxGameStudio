@@ -27,4 +27,15 @@ describe("GitHub updater manifest", () => {
       url: "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v2.5.9/MaxGameStudio_2.5.9_x64-setup.exe",
     });
   });
+
+  test("rejects prerelease versions from the formal updater manifest", () => {
+    expect(() =>
+      createGithubUpdaterManifest({
+        version: "2.5.16-rc.1",
+        repository: "INEEDBUG/MaxGameStudio",
+        installerName: "MaxGameStudio_2.5.16-rc.1_x64-setup.exe",
+        signature: "signed-payload",
+      }),
+    ).toThrow(/stable semantic version/);
+  });
 });

@@ -11,6 +11,7 @@ TAURI_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 def test_tauri_identifier_and_installer_hook_are_stable():
     config = json.loads((TAURI_ROOT / "tauri.conf.json").read_text(encoding="utf-8"))
 
+    assert config["productName"] == "MaxGameStudio"
     assert config["identifier"] == "com.cs2insightagent.app"
     assert config["build"]["beforeBuildCommand"] == "node node_modules/vite/bin/vite.js build"
     hook = config["bundle"]["windows"]["nsis"]["installerHooks"]
@@ -47,6 +48,9 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'FindFirst $0 $1 "$INSTDIR\\python\\Lib\\site-packages\\demoparser2-*.dist-info"' in hook
     assert 'RMDir /r "$INSTDIR\\python\\Lib\\site-packages\\demoparser2"' in hook
     assert "Call CS2_RemoveBundledDemoparser" in hook
+    assert 'Delete "$DESKTOP\\CS2 Ultimate Insight Studio.lnk"' in hook
+    assert 'Delete "$SMPROGRAMS\\CS2 Ultimate Insight Studio.lnk"' in hook
+    assert "Call CS2_RemoveLegacyBrandShortcuts" in hook
     assert "demoparser2-0.41.4+cs2insight1.dist-info" not in hook
     # The installed parser contract is checked before the app can be launched.
     assert 'backend\\app\\demoparser_runtime.py' in hook
@@ -70,6 +74,8 @@ def test_versioned_build_rejects_missing_webview2_loader_bundle():
     assert "createUpdaterArtifacts: false" in script
     assert "updater private key not found" in script
     assert "rmSync(updaterSignature)" in script
+    assert '!define PRODUCTNAME "MaxGameStudio"' in script
+    assert "does not create the branded desktop shortcut" in script
 
 
 def test_close_destroys_webview_before_waiting_for_backend():

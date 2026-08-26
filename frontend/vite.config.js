@@ -28,6 +28,12 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        mini: resolve(__dirname, "mini.html"),
+        ongoing: resolve(__dirname, "ongoing.html"),
+        cooldownTimer: resolve(__dirname, "cd-timer.html"),
+      },
       output: {
         manualChunks(id) {
           const normalized = id.replace(/\\/g, "/");

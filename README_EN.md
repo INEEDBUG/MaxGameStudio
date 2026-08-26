@@ -13,6 +13,8 @@
 <h3 align="center"><b>A local CS2 workspace for personal training and match review</b> </h3>
 <h4 align="center">Official Demo Download · Demo Analysis · Sensitivity Lab · Magnetic Input Lab</h4>
 
+> **One MaxGameStudio desktop app:** the CS2 workspace, League Lab, and VALORANT Lab share the same Tauri shell and sidebar; the two labs are not separate desktop applications.
+
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
 <p align="center">
@@ -31,6 +33,7 @@
 - **Official Demo workflow reference:** [akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager). Its PostgreSQL data layer is not used, and the full project was not merged into this repository.
 - **Steam Game Coordinator helper:** [akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0 (GPL-3.0), downloaded only after first-use consent and executed unmodified as a separate process.
 - **Share Code decoding:** a Python adaptation of [akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode) (MIT); its notice is retained at `third_party/licenses/csgo-sharecode-LICENSE.txt`.
+- **League automation reference:** [LeagueAkari](https://github.com/LeagueAkari/LeagueAkari) (MIT) informed the local LCU and game-flow integration; this project implements its React/Tauri/FastAPI surface independently, retains the MIT notice at `third_party/licenses/LeagueAkari-LICENSE.txt`, and does not bundle the upstream Electron/Vue application.
 - See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for the complete dependency and license boundaries.
 
 This repository does not display upstream donation QR codes or solicit money on behalf of upstream authors. The new orange crosshair/data-pulse emblem is an original project asset and does not use Valve's official CS2 mark.
@@ -76,6 +79,8 @@ This repository does not display upstream donation QR codes or solicit money on 
 - **Local CS2 CFG Prefill** — Read-only discovery of local Steam CS2 settings can prefill sensitivity, resolution, and aspect ratio. DPI and GPU scaling still require user confirmation.
 - **Magnetic-key Optimization** — Uses duplicate edges, hold jitter, A/D overlap, and direction-transition latency to recommend starting values for actuation, RT press, and RT release, followed by controlled `0.05–0.10 mm` retests.
 - **Official Matchmaking Input Safety** — Regular Rapid Trigger can shorten key reset, while Snap Tap, Rapid Tap, Snappy Tappy, SOCD/LKP, and similar automated counter-direction features should be disabled for CS2 official matchmaking.
+- **Valorant Lab** — A separate VALORANT workspace reads the local GPU, primary monitor, and refresh rate; after detection, it can prepare a reversible preview for the community-popular `1568×1080` preset or a custom resolution. Applying a real display mode requires the preview and explicit risk confirmation, offers keep/restore during the countdown, and never disables monitors automatically. The crosshair editor provides P/A/S profiles, live preview, strict backend encoding, import/export, and a local fallback; local fallback saves are not claimed to be native-code equivalent.
+- **League Lab** — A local LCU/SGP workspace for Riot and WeGame/Tencent clients, covering gated game-flow automation, champion/rune/spell configuration, player and match-history analysis, filters and presets, account-scoped tags, and optional Mini, ongoing-game, and cooldown windows. Account-affecting actions are visibly gated; credentials remain in memory and are not exported or uploaded. The lab adapts concepts from LeagueAkari under MIT, with the notice retained in `third_party/licenses/LeagueAkari-LICENSE.txt`.
 
 ### Auto Recording
 
@@ -95,7 +100,7 @@ This repository does not display upstream donation QR codes or solicit money on 
 ### Compilation Workbench
 
 - Successfully recorded clips are automatically stored in the library; use the Compilation Workbench to drag-and-drop reorder, add BGM/transition themes, and export MP4; filter by highlight/fail/compilation/timeline types, with intro/outro arrangement.
-- **Player Info Card** — Enable bottom-left corner watermark when exporting: briefly displays player nickname, clip type (highlight/fail/compilation), round and scenario tags (e.g., multi-kill, one-tap) at the start of each clip; upload custom avatars for each player appearing in the timeline, or display first letter of nickname if no avatar. Perfect for Bilibili-style highlight intros without manual PR editing.
+- **Player Info Card** — Enable bottom-left corner watermark when exporting: briefly displays player nickname, clip type (highlight/fail/compilation), round and scenario tags (e.g., multi-kill, one-tap) at the start of each clip; upload custom avatars for each player appearing in the timeline, or display first letter of nickname if no avatar. Perfect for polished highlight intros without manual PR editing.
 - **FFmpeg Configuration Required**: Download Windows builds from [FFmpeg Official](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), extract and set the full path to `ffmpeg.exe` in the settings page. Export prioritizes GPU hardware encoding (NVENC/QSV/AMF), falling back to software encoding if unavailable.
 
 
@@ -118,7 +123,7 @@ By default, the window `×` button asks whether to keep the app running in the W
 
 After installation, launch from desktop or start menu. **No browser or manual backend start is required.** The lightweight Tauri shell starts the bundled Python backend and renders the UI with the Windows system WebView2 runtime.
 
-The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases are downloaded, verified and installed in place before the new version is relaunched. User settings, demo data and projects remain in the separate application-data directory. Release candidates carrying `-rc.N` are GitHub prereleases only: they do not update `updater/latest.json` and are never offered to stable clients. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
+The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases are downloaded, verified and installed in place before the new version is relaunched. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
 
 > **Recommended: Installation path without Chinese characters.** e.g., `D:\MaxGameStudio\` ✅, `D:\游戏工具\MaxGameStudio\` ❌
 

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaxGameStudio · League 技能计时器</title>
+    <style>
+      html, body, #root { width: 100%; min-height: 100%; margin: 0; background: #151518; color: #e4e4e7; }
+      body { font-family: Inter, "Segoe UI", sans-serif; }
+      .aux-native-boot { box-sizing: border-box; display: grid; min-height: 100vh; place-items: center; padding: 12px; text-align: center; }
+      .aux-native-boot strong { display: block; margin-bottom: 6px; color: #d1fae5; font-size: 12px; }
+      .aux-native-boot span { color: #71717a; font-size: 10px; }
+      .aux-native-boot[data-error="true"] strong { color: #fda4af; }
+    </style>
+    <script>
+      (() => {
+        const showBootError = (reason) => {
+          const root = document.getElementById("root");
+          if (!root || root.dataset.reactMounted === "true") return;
+          const message = reason instanceof Error ? reason.message : String(reason || "未知错误");
+          root.innerHTML = `<div class="aux-native-boot" data-error="true"><div><strong>技能计时器加载失败</strong><span>${message.replace(/[&<>"']/g, (value) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[value])}</span></div></div>`;
+        };
+        window.addEventListener("error", (event) => showBootError(event.error || event.message));
+        window.addEventListener("unhandledrejection", (event) => showBootError(event.reason));
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"><div class="aux-native-boot"><div><strong>正在启动技能计时器</strong><span>正在连接本机服务…</span></div></div></div>
+    <script type="module" src="/src/cdTimer.jsx"></script>
+  </body>
+</html>

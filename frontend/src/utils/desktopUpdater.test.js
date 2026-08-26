@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const updaterMocks = vi.hoisted(() => ({
   check: vi.fn(),
   relaunch: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: updaterMocks.check }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: updaterMocks.relaunch }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: updaterMocks.invoke }));
 
 import { createDesktopUpdateCheck, normalizeUpdateMode } from "./desktopUpdater.js";
 
@@ -30,6 +32,7 @@ function makeUpdate(overrides = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   updaterMocks.relaunch.mockResolvedValue(undefined);
+  updaterMocks.invoke.mockResolvedValue(undefined);
 });
 
 describe("normalizeUpdateMode", () => {
@@ -55,6 +58,7 @@ describe("createDesktopUpdateCheck", () => {
     await createDesktopUpdateCheck((state) => states.push(state)).start();
 
     expect(update.download).toHaveBeenCalledOnce();
+    expect(updaterMocks.invoke).toHaveBeenCalledWith("persist_desktop_window_state");
     expect(update.install).toHaveBeenCalledOnce();
     expect(updaterMocks.relaunch).toHaveBeenCalledOnce();
     expect(states.map((state) => state.status)).toEqual([
@@ -116,5 +120,22 @@ describe("createDesktopUpdateCheck", () => {
 
     expect(update.download).toHaveBeenCalledOnce();
     expect(update.install).toHaveBeenCalledOnce();
+  });
+
+  it("fails open when the update endpoint does not answer in time", async () => {
+    vi.useFakeTimers();
+    updaterMocks.check.mockImplementation(() => new Promise(() => {}));
+    const states = [];
+    const controller = createDesktopUpdateCheck((state) => states.push(state), {
+      checkTimeoutMs: 1000,
+    });
+
+    const run = controller.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    await run;
+
+    expect(states.map((state) => state.status)).toEqual(["checking", "error"]);
+    expect(states.at(-1)?.error).toContain("检查更新超时");
+    vi.useRealTimers();
   });
 });

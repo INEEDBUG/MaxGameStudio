@@ -1,5 +1,6 @@
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 
 /** Tauri 桌面壳注入 IPC 对象；浏览器 / Vite dev 页面无此对象。 */
 export function isTauriDesktop() {
@@ -21,7 +22,10 @@ export function normalizeUpdateMode(value) {
  *
  * 注意：Tauri updater 无法中断已经开始的下载；Windows 会在安装器成功启动后退出当前进程。
  */
-export function createDesktopUpdateCheck(onStatus, { autoInstall = true } = {}) {
+export function createDesktopUpdateCheck(
+  onStatus,
+  { autoInstall = true, checkTimeoutMs = 8000 } = {},
+) {
   let cancelled = false;
   let updateMode = "normal";
   let confirmWait = null;
@@ -55,11 +59,28 @@ export function createDesktopUpdateCheck(onStatus, { autoInstall = true } = {}) 
     emit({ status: "checking", update_mode: "normal" });
 
     let update = null;
+    let checkTimer = null;
     try {
-      update = await check();
+      const timeoutMs = Math.max(1000, Number(checkTimeoutMs) || 8000);
+      update = await Promise.race([
+        check(),
+        new Promise((_, reject) => {
+          checkTimer = window.setTimeout(
+            () => reject(new Error(`检查更新超时（${Math.round(timeoutMs / 1000)} 秒）`)),
+            timeoutMs,
+          );
+        }),
+      ]);
     } catch (error) {
-      emit({ status: "error", error: String(error?.message || error), update_mode: "normal" });
+      emit({
+        status: "error",
+        error_stage: "check",
+        error: String(error?.message || error),
+        update_mode: "normal",
+      });
       return;
+    } finally {
+      if (checkTimer !== null) window.clearTimeout(checkTimer);
     }
     if (cancelled) {
       emit({ status: "cancelled", update_mode: "normal" });
@@ -123,6 +144,7 @@ export function createDesktopUpdateCheck(onStatus, { autoInstall = true } = {}) 
 
     emit({ status: "installing", ...base });
     try {
+      await invoke("persist_desktop_window_state");
       await update.install();
       // Windows 上 install() 成功启动 NSIS 后，Tauri updater 会直接退出当前进程。
       // 其他平台或测试环境若返回，则显式重启以载入新版本。

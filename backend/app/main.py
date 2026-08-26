@@ -91,6 +91,8 @@ from .steam_profiles import get_public_steam_avatar
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .training_api import get_training_db, router as training_router
+from .valorant_lab.api import router as valorant_lab_router
+from .league_lab import league_lab_service, router as league_lab_router
 from .demo_download_jobs import DemoDownloadJob, DemoDownloadJobManager
 from .lite_cut.db import LiteCutDB
 from .lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
@@ -333,6 +335,7 @@ async def lifespan(_: FastAPI):
     await montage_db.init_tables()
     await lite_cut_db.init_tables()
     await get_training_db().init_tables()
+    await league_lab_service.start()
     stale_lite_cut_outputs = await lite_cut_db.recover_interrupted_exports()
     if stale_lite_cut_outputs:
         from .lite_cut.export_preflight import cleanup_stale_export_artifacts
@@ -357,6 +360,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         try:
+            await league_lab_service.stop()
             from .recording.api import get_queue_abort_event
 
             abort_event = get_queue_abort_event()
@@ -378,6 +382,8 @@ app = FastAPI(title="MaxGameStudio", version=APP_VERSION, lifespan=lifespan)
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
 app.include_router(training_router)
+app.include_router(valorant_lab_router)
+app.include_router(league_lab_router)
 
 app.add_middleware(
     CORSMiddleware,

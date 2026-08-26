@@ -3,6 +3,8 @@
 ; Design goals (every path must also work fully silent, e.g. when the Tauri
 ; updater or electron-updater runs this installer with /S):
 ;   * User data under %APPDATA% is never touched by anything in this file.
+;   * The exact legacy Tauri entry "CS2 Ultimate Insight Studio" is retired
+;     only from its registered install directory; "MaxGameStudio" is ignored.
 ;   * A legacy Electron install in a DIFFERENT directory is only uninstalled
 ;     after the new files and the user-data migration are verified
 ;     (postinstall), keeping a runnable fallback until that point.
@@ -16,13 +18,22 @@
 
 ; tauri-build copies the GNU WebView2 loader beside the release executable,
 ; but tauri-bundler 2.6 does not add that sibling DLL to NSIS automatically.
+; GNU Rust builds also import libunwind.dll dynamically. The build script stages
+; the matching active-toolchain DLL beside the release executable before NSIS.
 ; Capture this directory while the hook is included so macro expansion later
 ; does not change __FILEDIR__ to the generated NSIS directory.
 !define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\..\target\release"
+!define CS2_LEGACY_TAURI_PRODUCT "CS2 Ultimate Insight Studio"
+!define CS2_LEGACY_TAURI_UNINSTALL_KEY "CS2 Ultimate Insight Studio"
+!define CS2_CURRENT_TAURI_PRODUCT "MaxGameStudio"
+!define CS2_LEGACY_TAURI_EXE "cs2-insight-agent-desktop.exe"
 
 Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
 Var CS2ElectronDir       ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
+Var CS2LegacyTauriScope  ; "samedir" (preinstall) or "differentdir" (postinstall)
+Var CS2LegacyTauriDir    ; lowercased install dir of the legacy entry, no trailing backslash
+Var CS2LegacyTauriUninsExe ; parsed legacy Tauri uninstaller executable path
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -139,6 +150,304 @@ Function CS2_RemoveBundledDemoparser
 
   Pop $1
   Pop $0
+FunctionEnd
+
+; productName changed from the stable Tauri release to MaxGameStudio. The
+; generated installer creates the new shortcuts, but an in-place update does
+; not know the historical shortcut filenames. Remove only these exact paths;
+; never recurse through the Desktop or Start Menu and never touch user data.
+Function CS2_RemoveLegacyBrandShortcuts
+  Delete "$DESKTOP\CS2 Ultimate Insight Studio.lnk"
+  Delete "$SMPROGRAMS\CS2 Ultimate Insight Studio.lnk"
+  Delete "$SMPROGRAMS\CS2 Ultimate Insight Studio\CS2 Ultimate Insight Studio.lnk"
+  RMDir "$SMPROGRAMS\CS2 Ultimate Insight Studio"
+FunctionEnd
+
+; In: $R0 = raw InstallLocation, $R8 = raw UninstallString.
+; Out: $CS2LegacyTauriDir, $CS2LegacyTauriUninsExe.
+; The old Tauri NSIS uninstaller is normally registered as a quoted path to
+; uninstall.exe. Keep the parser conservative so no registry arguments are
+; ever executed as part of the migration command.
+Function CS2_ResolveLegacyTauriDir
+  Push $0
+  Push $1
+
+  ; Parse only the executable path from the uninstall command.
+  StrCpy $0 $R8
+  StrCpy $1 $0 1
+  ${If} $1 == '"'
+    StrCpy $0 $0 "" 1
+    ${StrLoc} $1 $0 '"' ">"
+    ${If} $1 != ""
+      StrCpy $0 $0 $1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $CS2LegacyTauriUninsExe $0
+
+  ; Prefer the registered InstallLocation, else the uninstaller's directory.
+  StrCpy $1 $R0
+  StrCpy $0 $1 1
+  ${If} $0 == '"'
+    StrCpy $1 $1 "" 1
+  ${EndIf}
+  StrCpy $0 $1 1 -1
+  ${If} $0 == '"'
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${If} $1 == ""
+    ${GetParent} $CS2LegacyTauriUninsExe $1
+  ${EndIf}
+  StrCpy $0 $1 1 -1
+  ${If} $0 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${StrCase} $CS2LegacyTauriDir $1 "L"
+
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Out: $R0 = 1 when the legacy Tauri entry lives in the directory being
+; installed to. Path comparison is case-insensitive and ignores one trailing
+; separator, matching Windows registry path semantics.
+Function CS2_LegacyTauriDirMatchesInstDir
+  Push $0
+  Push $1
+  StrCpy $1 $INSTDIR
+  StrCpy $0 $1 1 -1
+  ${If} $0 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${StrCase} $1 $1 "L"
+  StrCpy $R0 0
+  ${If} $CS2LegacyTauriDir != ""
+  ${AndIf} $CS2LegacyTauriDir == $1
+    StrCpy $R0 1
+  ${EndIf}
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Function CS2_RunLegacyTauriUninstaller
+  ; Run only the parsed executable and add NSIS silent mode explicitly. Do not
+  ; pass any data-deletion switch: the old user's %APPDATA% remains intact.
+  DetailPrint "正在静默卸载旧版 Tauri 应用…"
+  ClearErrors
+  ExecWait '"$CS2LegacyTauriUninsExe" /S' $R0
+  ${If} ${Errors}
+    StrCpy $R7 "无法启动旧版 Tauri 卸载程序。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+  ${If} $R0 != 0
+    StrCpy $R7 "旧版 Tauri 卸载没有成功完成（退出码 $R0）。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+FunctionEnd
+
+; The silent NSIS uninstaller may copy itself to %TEMP% before returning. Do
+; not let same-directory installation race the old executable's removal.
+Function CS2_WaitLegacyTauriUninstallerGone
+  Push $0
+  StrCpy $0 0
+  cs2_legacy_tauri_unins_gone_loop:
+    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_unins_gone_done
+    IntOp $0 $0 + 1
+    ${If} $0 < 30
+      Sleep 500
+      Goto cs2_legacy_tauri_unins_gone_loop
+    ${EndIf}
+    StrCpy $R7 "旧版 Tauri 卸载程序仍在运行或未能移除旧安装。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  cs2_legacy_tauri_unins_gone_done:
+    Sleep 500
+  Pop $0
+FunctionEnd
+
+Function CS2_VerifyLegacyTauriRetired
+  ; Never remove an arbitrary leftover directory: only verify that the old
+  ; registered application binary is gone after its own uninstaller ran.
+  IfFileExists "$CS2LegacyTauriDir\${CS2_LEGACY_TAURI_EXE}" 0 cs2_legacy_tauri_retired
+  StrCpy $R7 "旧版 Tauri 主程序仍然存在，安装已中止以避免并排运行。旧程序和用户数据均未删除。"
+  Call CS2_AbortMigrationInstall
+  cs2_legacy_tauri_retired:
+FunctionEnd
+
+; Remove one exact old Tauri registry entry from HKCU. The DisplayName and key
+; must both be exactly the known legacy product name; in particular an entry
+; for MaxGameStudio is explicitly excluded.
+Function CS2_RemoveLegacyTauriHKCU
+  StrCpy $R4 0
+  cs2_legacy_tauri_hkcu_loop:
+    EnumRegKey $R5 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall" $R4
+    StrCmp $R5 "" cs2_legacy_tauri_hkcu_done
+    IntOp $R4 $R4 + 1
+
+    ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "DisplayName"
+    ${If} $R0 == "${CS2_CURRENT_TAURI_PRODUCT}"
+      Goto cs2_legacy_tauri_hkcu_loop
+    ${EndIf}
+    ${If} $R0 != "${CS2_LEGACY_TAURI_PRODUCT}"
+      Goto cs2_legacy_tauri_hkcu_loop
+    ${EndIf}
+    ${If} $R5 != "${CS2_LEGACY_TAURI_UNINSTALL_KEY}"
+      Goto cs2_legacy_tauri_hkcu_loop
+    ${EndIf}
+
+    ReadRegStr $R8 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "UninstallString"
+    ${If} $R8 == ""
+      StrCpy $R7 "发现旧版 Tauri 卸载项，但缺少 UninstallString。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+    ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "InstallLocation"
+    Call CS2_ResolveLegacyTauriDir
+    ${If} $CS2LegacyTauriDir == ""
+      StrCpy $R7 "无法解析旧版 Tauri 安装目录。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hkcu_missing_uninstaller
+    Goto cs2_legacy_tauri_hkcu_have_uninstaller
+    cs2_legacy_tauri_hkcu_missing_uninstaller:
+      StrCpy $R7 "旧版 Tauri 卸载程序不存在。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    cs2_legacy_tauri_hkcu_have_uninstaller:
+
+    ${If} $CS2LegacyTauriScope == "samedir"
+      Call CS2_LegacyTauriDirMatchesInstDir
+      ${If} $R0 != 1
+        Goto cs2_legacy_tauri_hkcu_loop
+      ${EndIf}
+    ${ElseIf} $CS2LegacyTauriScope == "differentdir"
+      Call CS2_LegacyTauriDirMatchesInstDir
+      ${If} $R0 == 1
+        StrCpy $R7 "旧版 Tauri 注册项仍指向当前安装目录。安装已中止，避免卸载新版本。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+    ${Else}
+      StrCpy $R7 "旧版 Tauri 迁移阶段无效。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+
+    StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    Call CS2_RunLegacyTauriUninstaller
+    StrCpy $R6 0
+    cs2_legacy_tauri_hkcu_wait_removed:
+      ReadRegStr $R3 HKCU "$R9" "DisplayName"
+      ${If} $R3 == ""
+        Goto cs2_legacy_tauri_hkcu_removed
+      ${EndIf}
+      IntOp $R6 $R6 + 1
+      ${If} $R6 < 30
+        Sleep 500
+        Goto cs2_legacy_tauri_hkcu_wait_removed
+      ${EndIf}
+      StrCpy $R7 "旧版 Tauri 卸载程序返回成功，但卸载项仍然存在。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    cs2_legacy_tauri_hkcu_removed:
+    Call CS2_WaitLegacyTauriUninstallerGone
+    Call CS2_VerifyLegacyTauriRetired
+    StrCpy $R4 0
+    Goto cs2_legacy_tauri_hkcu_loop
+  cs2_legacy_tauri_hkcu_done:
+FunctionEnd
+
+; HKLM counterpart for installations registered for all users.
+Function CS2_RemoveLegacyTauriHKLM
+  StrCpy $R4 0
+  cs2_legacy_tauri_hklm_loop:
+    EnumRegKey $R5 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall" $R4
+    StrCmp $R5 "" cs2_legacy_tauri_hklm_done
+    IntOp $R4 $R4 + 1
+
+    ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "DisplayName"
+    ${If} $R0 == "${CS2_CURRENT_TAURI_PRODUCT}"
+      Goto cs2_legacy_tauri_hklm_loop
+    ${EndIf}
+    ${If} $R0 != "${CS2_LEGACY_TAURI_PRODUCT}"
+      Goto cs2_legacy_tauri_hklm_loop
+    ${EndIf}
+    ${If} $R5 != "${CS2_LEGACY_TAURI_UNINSTALL_KEY}"
+      Goto cs2_legacy_tauri_hklm_loop
+    ${EndIf}
+
+    ReadRegStr $R8 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "UninstallString"
+    ${If} $R8 == ""
+      StrCpy $R7 "发现旧版 Tauri 卸载项，但缺少 UninstallString。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+    ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "InstallLocation"
+    Call CS2_ResolveLegacyTauriDir
+    ${If} $CS2LegacyTauriDir == ""
+      StrCpy $R7 "无法解析旧版 Tauri 安装目录。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hklm_missing_uninstaller
+    Goto cs2_legacy_tauri_hklm_have_uninstaller
+    cs2_legacy_tauri_hklm_missing_uninstaller:
+      StrCpy $R7 "旧版 Tauri 卸载程序不存在。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    cs2_legacy_tauri_hklm_have_uninstaller:
+
+    ${If} $CS2LegacyTauriScope == "samedir"
+      Call CS2_LegacyTauriDirMatchesInstDir
+      ${If} $R0 != 1
+        Goto cs2_legacy_tauri_hklm_loop
+      ${EndIf}
+    ${ElseIf} $CS2LegacyTauriScope == "differentdir"
+      Call CS2_LegacyTauriDirMatchesInstDir
+      ${If} $R0 == 1
+        StrCpy $R7 "旧版 Tauri 注册项仍指向当前安装目录。安装已中止，避免卸载新版本。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+    ${Else}
+      StrCpy $R7 "旧版 Tauri 迁移阶段无效。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+
+    StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    Call CS2_RunLegacyTauriUninstaller
+    StrCpy $R6 0
+    cs2_legacy_tauri_hklm_wait_removed:
+      ReadRegStr $R3 HKLM "$R9" "DisplayName"
+      ${If} $R3 == ""
+        Goto cs2_legacy_tauri_hklm_removed
+      ${EndIf}
+      IntOp $R6 $R6 + 1
+      ${If} $R6 < 30
+        Sleep 500
+        Goto cs2_legacy_tauri_hklm_wait_removed
+      ${EndIf}
+      StrCpy $R7 "旧版 Tauri 卸载程序返回成功，但系统级卸载项仍然存在。安装已中止，旧程序和用户数据均未删除。"
+      Call CS2_AbortMigrationInstall
+    cs2_legacy_tauri_hklm_removed:
+    Call CS2_WaitLegacyTauriUninstallerGone
+    Call CS2_VerifyLegacyTauriRetired
+    StrCpy $R4 0
+    Goto cs2_legacy_tauri_hklm_loop
+  cs2_legacy_tauri_hklm_done:
+FunctionEnd
+
+Function CS2_RemoveLegacyTauri
+  ${If} $CS2LegacyTauriScope != "samedir"
+  ${AndIf} $CS2LegacyTauriScope != "differentdir"
+    StrCpy $R7 "旧版 Tauri 迁移阶段无效。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+
+  ${If} ${RunningX64}
+    SetRegView 64
+    Call CS2_RemoveLegacyTauriHKCU
+    Call CS2_RemoveLegacyTauriHKLM
+    SetRegView 32
+    Call CS2_RemoveLegacyTauriHKCU
+    Call CS2_RemoveLegacyTauriHKLM
+  ${Else}
+    SetRegView 32
+    Call CS2_RemoveLegacyTauriHKCU
+    Call CS2_RemoveLegacyTauriHKLM
+  ${EndIf}
+
+  ; Restore the registry view selected by the generated Tauri installer.
+  !insertmacro SetContext
 FunctionEnd
 
 ; In: $R0 = raw InstallLocation, $R8 = raw UninstallString.
@@ -353,11 +662,13 @@ FunctionEnd
 !macro NSIS_HOOK_PREINSTALL
   Call CS2_PrepareRunningApps
 
-  ; Same-directory Electron installs must be retired before any file copy —
-  ; their uninstaller would delete $INSTDIR together with the new files.
+  ; Same-directory legacy installs must be retired before any file copy —
+  ; their uninstallers may delete $INSTDIR together with the new files.
   ; Different-directory installs stay untouched until NSIS_HOOK_POSTINSTALL.
   ; Do not hold $INSTDIR as the working directory while it may be deleted.
   SetOutPath $PLUGINSDIR
+  StrCpy $CS2LegacyTauriScope "samedir"
+  Call CS2_RemoveLegacyTauri
   StrCpy $CS2ElectronScope "samedir"
   Call CS2_RemoveLegacyElectron
   SetOutPath $INSTDIR
@@ -370,6 +681,10 @@ FunctionEnd
   ; executable so Windows can resolve the dependency before Rust/Tauri starts.
   !if /FileExists "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
     File /a "/oname=WebView2Loader.dll" "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
+  !endif
+  ; LLVM-MinGW (gnullvm) also imports its unwind runtime dynamically.
+  !if /FileExists "${CS2_TAURI_RELEASE_DIR}\libunwind.dll"
+    File /a "/oname=libunwind.dll" "${CS2_TAURI_RELEASE_DIR}\libunwind.dll"
   !endif
 !macroend
 
@@ -405,15 +720,22 @@ FunctionEnd
     Call CS2_AbortMigrationInstall
   ${EndIf}
 
-  ; Only retire remaining (different-directory) Electron installs after the
-  ; new installation and migration are known-good. Any earlier installer
-  ; failure therefore leaves a runnable Electron fallback in place.
+  ; Only retire different-directory legacy installs after the new runtime and
+  ; user-data migration are known-good. Any earlier failure leaves a runnable
+  ; legacy fallback in place.
   StrCpy $CS2ElectronScope "all"
   Call CS2_RemoveLegacyElectron
+  StrCpy $CS2LegacyTauriScope "differentdir"
+  Call CS2_RemoveLegacyTauri
+
+  ; The generated installer has already created/updated the MaxGameStudio
+  ; shortcut at this point. Remove only the exact old-brand shortcut paths.
+  Call CS2_RemoveLegacyBrandShortcuts
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
   Delete "$INSTDIR\WebView2Loader.dll"
+  Delete "$INSTDIR\libunwind.dll"
   ; The generated uninstaller tries to remove $INSTDIR before this custom
   ; file is deleted. Retry non-recursively once the loader is gone.
   RmDir "$INSTDIR"
