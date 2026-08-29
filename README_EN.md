@@ -10,10 +10,13 @@
   <a href="./README.md"><img src="./asset/icon-cn.svg" alt="" width="20" height="20" style="vertical-align: middle;"> 简体中文</a> | <img src="./asset/icon-en.svg" alt="" width="20" height="20" style="vertical-align: middle;"> English
 </p>
 
-<h3 align="center"><b>A local CS2 workspace for personal training and match review</b> </h3>
-<h4 align="center">Official Demo Download · Demo Analysis · Sensitivity Lab · Magnetic Input Lab</h4>
+<h3 align="center"><b>A local desktop workspace for personal training, match review, and multi-game tools</b> </h3>
+<h4 align="center">CS2 Demo Analysis & Recording · League Lab · VALORANT Lab</h4>
 
 > **One MaxGameStudio desktop app:** the CS2 workspace, League Lab, and VALORANT Lab share the same Tauri shell and sidebar; the two labs are not separate desktop applications.
+
+> [!NOTE]
+> **The current stable release is `v2.5.16`.** The CS2 workspace, League Lab, and VALORANT Lab ship in one installer and can be installed in place through the signed updater channel.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
@@ -41,6 +44,17 @@ This repository does not display upstream donation QR codes or solicit money on 
 ---
 
 ## Key Features
+
+### Screenshots
+
+These screenshots come from the current `v2.5.16` desktop build and local demo fixtures. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><b>League Lab: game-flow automation and Mini panel</b><br><a href="./docs/screenshots/league-lab.png"><img src="./docs/screenshots/league-lab.png" alt="League Lab game-flow automation and Mini panel" width="100%"></a></td>
+    <td width="50%" align="center"><b>VALORANT Lab: true-stretch guide and crosshair tools</b><br><a href="./docs/screenshots/valorant-lab.png"><img src="./docs/screenshots/valorant-lab.png" alt="VALORANT Lab true-stretch guide and crosshair tools" width="100%"></a></td>
+  </tr>
+</table>
 
 ### Demo Library Management
 
@@ -79,8 +93,19 @@ This repository does not display upstream donation QR codes or solicit money on 
 - **Local CS2 CFG Prefill** — Read-only discovery of local Steam CS2 settings can prefill sensitivity, resolution, and aspect ratio. DPI and GPU scaling still require user confirmation.
 - **Magnetic-key Optimization** — Uses duplicate edges, hold jitter, A/D overlap, and direction-transition latency to recommend starting values for actuation, RT press, and RT release, followed by controlled `0.05–0.10 mm` retests.
 - **Official Matchmaking Input Safety** — Regular Rapid Trigger can shorten key reset, while Snap Tap, Rapid Tap, Snappy Tappy, SOCD/LKP, and similar automated counter-direction features should be disabled for CS2 official matchmaking.
-- **Valorant Lab** — A separate VALORANT workspace reads the local GPU, primary monitor, and refresh rate; after detection, it can prepare a reversible preview for the community-popular `1568×1080` preset or a custom resolution. Applying a real display mode requires the preview and explicit risk confirmation, offers keep/restore during the countdown, and never disables monitors automatically. The crosshair editor provides P/A/S profiles, live preview, strict backend encoding, import/export, and a local fallback; local fallback saves are not claimed to be native-code equivalent.
-- **League Lab** — A local LCU/SGP workspace for Riot and WeGame/Tencent clients, covering gated game-flow automation, champion/rune/spell configuration, player and match-history analysis, filters and presets, account-scoped tags, and optional Mini, ongoing-game, and cooldown windows. Account-affecting actions are visibly gated; credentials remain in memory and are not exported or uploaded. The lab adapts concepts from LeagueAkari under MIT, with the notice retained in `third_party/licenses/LeagueAkari-LICENSE.txt`.
+
+### VALORANT Lab
+
+- **Safe true-stretch guide** — Reads the local GPU, primary monitor, and refresh rate, then prepares detection and preview results for the community-popular `1568×1080` preset, other presets, or a custom resolution. Applying a real display mode requires explicit confirmation and offers keep/restore during a countdown; monitor state is detected, but monitors are never disabled automatically.
+- **Crosshair editor and sharing** — Edits primary, ADS, and sniper crosshairs using VALORANT's P/A/S profile structure, with live preview, strict encode/decode, native-format code import/export, and local preset history. A backend fallback is never presented as an equivalent native share code.
+- **Visible risk boundaries** — System-level actions follow a detect → preview → confirm → apply flow. Missing hardware or display evidence leaves the page read-only instead of claiming success.
+
+### League Lab
+
+- **Automated game flow** — Uses local LCU/SGP integration for Riot and WeGame/Tencent clients to cover ready-check acceptance, matchmaking, play again, reconnect, honor, room invitation policies, and the phase-aware Mini panel.
+- **Champion select and loadouts** — Configures champion pick/ban priorities, runes, summoner spells, and builds by mode and position, while exposing bench, swap, skin, and trade state. Local profiles replace the former dependency on a separate OP.GG window.
+- **Match history and live analysis** — Provides cross-region Riot ID lookup, paginated SGP history, encounters, local labels, SQLite collection, combined filters, player center, ten-player ongoing-game analysis, premade inference, jungle-route profiles, a dedicated live window, and an optional summoner-spell timer.
+- **Account and privacy boundaries** — The account-write master switch is prominent, high-risk manual actions require confirmation, and current LCU state is checked immediately before execution. LCU, Riot Client, and SGP credentials remain in memory and are never exported or uploaded.
 
 ### Auto Recording
 
@@ -114,9 +139,6 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ## Installation
 
-> [!WARNING]
-> **`2.5.14-rc.57` is a test-only release candidate.** It is not published to the stable updater manifest, so existing stable clients will not be prompted to install it. Testers must install it manually from the [GitHub prereleases](https://github.com/INEEDBUG/MaxGameStudio/releases).
-
 Download the latest `MaxGameStudio_x.x.x_x64-setup.exe` from this repository's [Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases), run the installer and follow the prompts.
 
 By default, the window `×` button asks whether to keep the app running in the Windows system tray or exit completely, with an option to remember the choice. Parsing and downloads continue while the app is in the tray. The behavior can be changed at any time under Settings → System & Updates.
@@ -129,22 +151,20 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 
 ---
 
-## Roadmap
+## Version History and Next Steps
 
-- **V1**
-   - [X] Highlight Parsing
-   - [X] AI Commentary
-   - [X] Auto Director
-- **V2**
-   - [X] Lightweight Tauri Desktop
-   - [X] Compilation Workbench (FFmpeg Export)
-   - [X] POV HUD Experimental Feature
-   - [X] Round Timeline Browse & Queue Recording
-   - [X] Pre-recording Spectator Warm-up / Victim POV / Virtual Keyboard OBS Overlay
-- **V3**
-   - [X] Demo Analysis, History, and Player/Round Assessments
-   - [X] 2D Player Selection and Single-team Tactical View
-   - [ ] Tactical Coach (Grenade Trajectory Analysis / Route Review)
+| Stage | Delivered | Status |
+| --- | --- | --- |
+| **V1 · Parsing and direction** | Highlight parsing, AI commentary, and automatic directing | ✅ Complete |
+| **V2 · Desktop workflow** | Lightweight Tauri desktop, FFmpeg compilation workbench, experimental POV HUD, round timeline and recording queue, spectator warm-up, victim POV, and virtual-keyboard OBS overlay | ✅ Complete |
+| **V3 · Deep review** | Demo analysis and history, player/round assessments, 2D player selection, single-team tactical view, utility damage and per-round utility metrics, grenade trajectories, movement paths, and heatmap-based route review | ✅ Complete |
+| **v2.5.16 · Multi-game labs** | League Lab and VALORANT Lab merged into the stable MaxGameStudio installer with legacy in-place updater compatibility | ✅ Released |
+
+### Planned
+
+- [ ] **Advanced tactical coach** — Add route comparison, utility-quality scoring, and explainable automated tactical suggestions on top of the existing metrics, trajectories, and route review.
+- [ ] **Review presentation** — Add clearer per-match comparisons, filtering, and exportable reports for the existing tactical indicators.
+- [ ] **Release trust** — Add publicly verifiable Authenticode signing for the Windows installer. Tauri updater signatures and Windows installer trust are separate verification chains.
 
 
 ---
