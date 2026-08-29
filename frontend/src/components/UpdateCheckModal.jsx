@@ -19,7 +19,11 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
   const isAvailable = status === "available";
   const isUpdating = status === "downloading" || status === "installing";
   const isAutoInstall = info.auto_install !== false;
-  const forceLocked = isUpdating || (isForce && isAvailable) || (isAutoInstall && isAvailable);
+  const awaitingChoice = isAvailable && info.awaiting_choice === true;
+  const forceLocked =
+    isUpdating ||
+    (isForce && isAvailable) ||
+    (isAutoInstall && isAvailable && !awaitingChoice);
 
   let body = null;
   if (err || status === "error") {
@@ -44,6 +48,8 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
       <div className="space-y-2">
         {isForce ? (
           <p className="text-sm font-semibold text-cs2-orange">{t("dialog.updateForceRequired")}</p>
+        ) : awaitingChoice && isAutoInstall ? (
+          <p className="text-sm text-zinc-300">{t("dialog.updateGraceHint")}</p>
         ) : isAutoInstall ? (
           <p className="text-sm text-zinc-300">{t("dialog.updateDownloadingStart")}</p>
         ) : (
@@ -121,7 +127,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
           ) : null}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-4 py-2">
-          {isAvailable && !isAutoInstall ? (
+          {isAvailable && (awaitingChoice || !isAutoInstall) ? (
             <>
               {!isForce ? (
                 <button
@@ -129,16 +135,20 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
                   className="text-[11px] font-semibold text-zinc-500 hover:text-white"
                   onClick={() => onClose?.()}
                 >
-                  {t("dialog.updateLater")}
+                  {awaitingChoice && isAutoInstall
+                    ? t("dialog.updateSkip")
+                    : t("dialog.updateLater")}
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="rounded-md bg-cs2-orange px-3 py-1.5 text-[11px] font-semibold text-black hover:opacity-90"
-                onClick={() => onConfirm?.()}
-              >
-                {t("dialog.updateNow")}
-              </button>
+              {!isAutoInstall ? (
+                <button
+                  type="button"
+                  className="rounded-md bg-cs2-orange px-3 py-1.5 text-[11px] font-semibold text-black hover:opacity-90"
+                  onClick={() => onConfirm?.()}
+                >
+                  {t("dialog.updateNow")}
+                </button>
+              ) : null}
             </>
           ) : null}
           {!forceLocked && !isAvailable ? (

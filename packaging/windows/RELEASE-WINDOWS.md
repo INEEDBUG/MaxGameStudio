@@ -12,7 +12,7 @@ Python 后端与 demoparser2 等既有运行时依赖按锁定清单打入 resou
 
 1. 确保 `frontend/pnpm-lock.yaml` 与 `frontend/src-tauri/Cargo.lock` 已更新。
 2. 推送严格的稳定 SemVer tag：`git tag v1.2.3 && git push origin v1.2.3`（`V1.2.3` 也会触发）。带 `-rc`、`-beta` 等预发布后缀的 tag 可以用于构建验证，但不会进入正式发布通道。
-3. `Release Windows` workflow 构建并验收 Tauri NSIS 安装包；只有 `x.y.z` 稳定版本才会创建公开 GitHub Release、生成并发布 `latest.json`，以及更新 `updater` 分支。
+3. 推送明确的稳定版本 tag（例如 `v3.0.1`）后，`Release Windows` workflow 构建并验收 Tauri NSIS 安装包；只有 `x.y.z` 稳定版本 tag 才会创建公开 GitHub Release、生成并发布 `latest.json`，以及更新 `updater` 分支。
 
 ## 在线更新（Tauri updater + GitHub Releases）
 
@@ -28,10 +28,10 @@ pnpm.cmd run desktop:build:ver -- 2.4.0
 
    CI 或自定义密钥路径时改用环境变量 `TAURI_SIGNING_PRIVATE_KEY`（密钥内容或文件路径均可）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。注意 PowerShell 无法设置「空字符串」环境变量（`$env:X = ""` 等于删除），空密码密钥请交给 `desktop:build:ver` 处理或在 CI YAML 中设置。
 
-3. **发布**：推送到 `main` 后，`Release Windows` 工作流自动递增补丁版本、运行前后端与 Rust 验收、构建并创建 GitHub Release；仅严格 `x.y.z` 稳定版本会继续生成并把带 `.sig` 的 `latest.json` 写入 `updater` 分支。任何预发布版本（例如 `-rc.1`）都会跳过这三个正式发布动作；`workflow_dispatch` 只上传私有 Actions artifact，不创建公开 Release。Release 只上传普通用户需要的 Windows 安装 EXE，签名与校验文件由更新清单和工作流内部处理。
+3. **发布**：推送明确的稳定版本 tag（例如 `v3.0.1`）后，`Release Windows` 工作流运行前后端与 Rust 验收、构建并创建 GitHub Release；仅严格 `x.y.z` 稳定版本 tag 会继续生成并把带 `.sig` 的 `latest.json` 写入 `updater` 分支。任何预发布版本（例如 `-rc.1`）都会跳过这三个正式发布动作；`workflow_dispatch` 只上传私有 Actions artifact，不创建公开 Release。Release 只上传普通用户需要的 Windows 安装 EXE，签名与校验文件由更新清单和工作流内部处理。
 
 后端更新检查按安装包文件名的明确优先级选择资产：新版本使用 `MaxGameStudio_<version>_x64-setup.exe`；旧 Release 可能仍使用 GitHub 规范化后的 `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`，该精确旧名仍受支持。只有在 Release 页面没有可识别真实资产时，检查器才使用新命名的 URL 作为最后回退猜测，不会用猜测 URL 覆盖已发现的真实资产。
-客户端启动时检查更新，运行或驻留后台期间每 15 分钟继续检查。正常更新可选择「立即更新 / 稍后再说」。
+客户端启动时检查更新，运行或驻留后台期间每 15 分钟继续检查。正常更新在自动下载前提供短暂的「跳过此版本」窗口；强制更新不可跳过。
 
 Windows 端更新流程：下载校验签名 → 应用自动退出 → NSIS 以 passive 模式安装（安装 hook 会等待后端进程退出）→ 自动重启。Authenticode 证书签名（`WINDOWS_PFX_*`）与更新签名互相独立，两者都建议配置。
 

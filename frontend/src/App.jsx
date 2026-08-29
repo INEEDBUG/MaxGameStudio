@@ -84,6 +84,25 @@ const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
+const UPDATE_SKIP_STORAGE_KEY = "maxgamestudio.update.skip_version";
+
+function readSkippedUpdateVersion() {
+  try {
+    return String(window.localStorage.getItem(UPDATE_SKIP_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function rememberSkippedUpdateVersion(version) {
+  const value = String(version || "").trim();
+  if (!value) return;
+  try {
+    window.localStorage.setItem(UPDATE_SKIP_STORAGE_KEY, value);
+  } catch {
+    // localStorage may be unavailable in a restricted desktop webview.
+  }
+}
 
 function ensureDefaultCs2FullscreenArg(value) {
   const text = String(value ?? "").trim();
@@ -2900,28 +2919,39 @@ export default function App() {
     const st = String(updateInfo?.status || "");
     const isForce = String(updateInfo?.update_mode || "").toLowerCase() === "force";
     const isAutoInstall = updateInfo?.auto_install !== false;
+    const awaitingChoice = updateInfo?.awaiting_choice === true;
     // 自动安装开始后不可关闭弹窗；force 更新在确认阶段也不可跳过。
     if (
       st === "downloading" ||
       st === "installing" ||
-      ((isForce || isAutoInstall) && st === "available")
+      ((isForce || isAutoInstall) && st === "available" && !awaitingChoice)
     ) {
       return;
     }
-    updateModalDismissedRef.current = true;
     if (st === "checking" || st === "available") {
+      let accepted = true;
       if (typeof updateControllerRef.current?.defer === "function") {
-        updateControllerRef.current.defer();
+        accepted = updateControllerRef.current.defer();
       } else {
-        updateControllerRef.current?.cancel();
+        accepted = updateControllerRef.current?.cancel();
       }
+      // The grace period may have expired while React was still rendering the
+      // skip button. Keep the modal open when the controller has already
+      // crossed into download so the UI never claims a skipped installation.
+      if (accepted === false) return;
     }
+    updateModalDismissedRef.current = true;
     setUpdateModalOpen(false);
     setUpdateModalManual(false);
     const resume = startupUpdateWaitRef.current;
     startupUpdateWaitRef.current = null;
     resume?.();
-  }, [updateInfo?.status, updateInfo?.update_mode, updateInfo?.auto_install]);
+  }, [
+    updateInfo?.status,
+    updateInfo?.update_mode,
+    updateInfo?.auto_install,
+    updateInfo?.awaiting_choice,
+  ]);
 
   const handleUpdateConfirm = useCallback(() => {
     updateControllerRef.current?.confirm?.();
@@ -2958,6 +2988,8 @@ export default function App() {
       updateCheckOptsRef.current = { manual, awaitDismiss };
       updateModalDismissedRef.current = false;
 
+      const skippedVersion = manual ? "" : readSkippedUpdateVersion();
+
       let currentVersion = "";
       try {
         currentVersion = String((await getDesktopAppVersion()) || "");
@@ -2990,6 +3022,10 @@ export default function App() {
             typeof statusPayload?.auto_install === "boolean"
               ? statusPayload.auto_install
               : prev?.auto_install ?? true,
+          awaiting_choice: statusPayload?.awaiting_choice === true,
+          skipped_version: statusPayload?.skipped_version
+            ? String(statusPayload.skipped_version)
+            : prev?.skipped_version || "",
           progress: statusPayload?.progress || null,
           error_stage: statusPayload?.error_stage || "",
           error:
@@ -3001,6 +3037,10 @@ export default function App() {
         }));
 
         const isManual = Boolean(updateCheckOptsRef.current.manual);
+
+        if (statusPayload?.skipped_version) {
+          rememberSkippedUpdateVersion(statusPayload.skipped_version);
+        }
 
         if (status === "checking") {
           if (isManual) {
@@ -3037,6 +3077,16 @@ export default function App() {
           return;
         }
 
+        if (status === "skipped") {
+          void markUpdateChecked();
+          setUpdateModalOpen(false);
+          setUpdateModalManual(false);
+          const resume = startupUpdateWaitRef.current;
+          startupUpdateWaitRef.current = null;
+          resume?.();
+          return;
+        }
+
         if (status === "not-available") {
           void markUpdateChecked();
           if (isManual) {
@@ -3060,7 +3110,7 @@ export default function App() {
             resume?.();
           }
         }
-      });
+      }, { skipVersion: skippedVersion });
       updateControllerRef.current = controller;
 
       setUpdateInfo({

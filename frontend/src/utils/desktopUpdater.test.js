@@ -55,7 +55,7 @@ describe("createDesktopUpdateCheck", () => {
     updaterMocks.check.mockResolvedValue(update);
     const states = [];
 
-    await createDesktopUpdateCheck((state) => states.push(state)).start();
+    await createDesktopUpdateCheck((state) => states.push(state), { autoInstallGraceMs: 0 }).start();
 
     expect(update.download).toHaveBeenCalledOnce();
     expect(updaterMocks.invoke).toHaveBeenCalledWith("persist_desktop_window_state");
@@ -77,7 +77,7 @@ describe("createDesktopUpdateCheck", () => {
     updaterMocks.check.mockResolvedValue(update);
     const states = [];
 
-    await createDesktopUpdateCheck((state) => states.push(state)).start();
+    await createDesktopUpdateCheck((state) => states.push(state), { autoInstallGraceMs: 0 }).start();
 
     expect(update.install).not.toHaveBeenCalled();
     expect(updaterMocks.relaunch).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe("createDesktopUpdateCheck", () => {
     updaterMocks.check.mockResolvedValue(update);
     const states = [];
 
-    await createDesktopUpdateCheck((state) => states.push(state)).start();
+    await createDesktopUpdateCheck((state) => states.push(state), { autoInstallGraceMs: 0 }).start();
 
     expect(update.download).toHaveBeenCalledOnce();
     expect(update.install).toHaveBeenCalledOnce();
@@ -120,6 +120,93 @@ describe("createDesktopUpdateCheck", () => {
 
     expect(update.download).toHaveBeenCalledOnce();
     expect(update.install).toHaveBeenCalledOnce();
+  });
+
+  it("lets a normal automatic update be skipped during the grace window", async () => {
+    const update = makeUpdate();
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+    const controller = createDesktopUpdateCheck((state) => states.push(state), {
+      autoInstallGraceMs: 10_000,
+    });
+
+    const run = controller.start();
+    await vi.waitFor(() => expect(states.at(-1)?.status).toBe("available"));
+    expect(states.at(-1)).toMatchObject({ awaiting_choice: true, auto_install: true });
+
+    controller.defer();
+    await run;
+
+    expect(update.download).not.toHaveBeenCalled();
+    expect(update.install).not.toHaveBeenCalled();
+    expect(update.close).toHaveBeenCalledOnce();
+    expect(states.at(-1)).toMatchObject({ status: "cancelled", skipped_version: "2.5.13" });
+  });
+
+  it("does not download a version remembered as skipped", async () => {
+    const update = makeUpdate();
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+
+    await createDesktopUpdateCheck((state) => states.push(state), {
+      skipVersion: "2.5.13",
+      autoInstallGraceMs: 0,
+    }).start();
+
+    expect(update.close).toHaveBeenCalledOnce();
+    expect(update.download).not.toHaveBeenCalled();
+    expect(states.at(-1)).toMatchObject({ status: "skipped", skipped_version: "2.5.13" });
+  });
+
+  it("never lets a remembered skip bypass a force update", async () => {
+    const update = makeUpdate({ rawJson: { update_mode: "force" } });
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+
+    await createDesktopUpdateCheck((state) => states.push(state), {
+      skipVersion: "2.5.13",
+      autoInstallGraceMs: 10_000,
+    }).start();
+
+    expect(update.download).toHaveBeenCalledOnce();
+    expect(update.install).toHaveBeenCalledOnce();
+    expect(states.some((state) => state.status === "skipped")).toBe(false);
+    expect(states.find((state) => state.status === "available")).toMatchObject({
+      update_mode: "force",
+      awaiting_choice: false,
+    });
+  });
+
+  it("refuses a stale Skip click after the automatic grace window expires", async () => {
+    vi.useFakeTimers();
+    let finishDownload;
+    const update = makeUpdate({
+      download: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishDownload = resolve;
+          }),
+      ),
+    });
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+    const controller = createDesktopUpdateCheck((state) => states.push(state), {
+      autoInstallGraceMs: 1000,
+    });
+
+    const run = controller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toMatchObject({ status: "available", awaiting_choice: true });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(states.at(-1)).toMatchObject({ status: "available", awaiting_choice: false });
+    expect(controller.defer()).toBe(false);
+    expect(states.some((state) => state.skipped_version)).toBe(false);
+
+    finishDownload();
+    await run;
+    expect(update.install).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
   it("fails open when the update endpoint does not answer in time", async () => {

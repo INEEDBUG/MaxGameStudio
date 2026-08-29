@@ -23,6 +23,26 @@ describe("UpdateCheckModal automatic install flow", () => {
     expect(screen.queryByRole("button", { name: /稍后再说|Later/ })).toBeNull();
   });
 
+  it("offers to skip a normal automatic update during its grace window", () => {
+    const onClose = vi.fn();
+    render(
+      <UpdateCheckModal
+        open
+        info={{
+          status: "available",
+          current_version: "2.5.12",
+          latest_version: "2.5.13",
+          auto_install: true,
+          awaiting_choice: true,
+        }}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByText(/暂不升级此版本|Skip this version/)).toBeTruthy();
+    expect(screen.getByText(/几秒后自动下载|download automatically in a few seconds/)).toBeTruthy();
+  });
+
   it("makes the automatic installation handoff explicit", () => {
     render(
       <UpdateCheckModal

@@ -133,6 +133,28 @@ def test_legacy_uninstaller_is_silent_and_never_receives_data_delete_switch(hook
     assert "APPDATA" in body
 
 
+def test_missing_legacy_tauri_uninstaller_retires_only_the_exact_stale_registry_entry(hook: str):
+    for hive, function_name, marker in (
+        ("HKCU", "CS2_RemoveLegacyTauriHKCU", "cs2_legacy_tauri_hkcu_missing_uninstaller"),
+        ("HKLM", "CS2_RemoveLegacyTauriHKLM", "cs2_legacy_tauri_hklm_missing_uninstaller"),
+    ):
+        body = _function_body(hook, function_name)
+        branch = body.index(marker)
+        tail = body[branch:]
+        scope_check = body.index('${If} $CS2LegacyTauriScope == "samedir"')
+        assert 'StrCpy $R9 "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$R5"' in body
+        assert f"DeleteRegKey {hive} \"$R9\"" in tail
+        assert f'ReadRegStr $R3 {hive} "$R9" "DisplayName"' in tail
+        assert scope_check < branch
+        clear_errors = tail.index("ClearErrors")
+        delete_key = tail.index(f'DeleteRegKey {hive} "$R9"')
+        error_guard = tail.index("${If} ${Errors}")
+        assert clear_errors < delete_key < error_guard
+        # The missing-file path must not invoke the absent old uninstaller.
+        assert "Call CS2_RunLegacyTauriUninstaller" not in tail.split("Goto cs2_legacy_tauri_hk", 1)[0]
+        assert "Goto cs2_legacy_tauri_hk" in tail
+
+
 def test_tauri_identity_and_update_channel_remain_unchanged():
     config = json.loads(TAURI_CONFIG_PATH.read_text(encoding="utf-8"))
     updater = config["plugins"]["updater"]

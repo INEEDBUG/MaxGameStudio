@@ -304,13 +304,11 @@ Function CS2_RemoveLegacyTauriHKCU
       StrCpy $R7 "无法解析旧版 Tauri 安装目录。安装已中止，旧程序和用户数据均未删除。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
-    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hkcu_missing_uninstaller
-    Goto cs2_legacy_tauri_hkcu_have_uninstaller
-    cs2_legacy_tauri_hkcu_missing_uninstaller:
-      StrCpy $R7 "旧版 Tauri 卸载程序不存在。安装已中止，旧程序和用户数据均未删除。"
-      Call CS2_AbortMigrationInstall
-    cs2_legacy_tauri_hkcu_have_uninstaller:
 
+    ; Respect the two-phase migration boundary before either running the old
+    ; uninstaller or retiring a stale entry. PREINSTALL only handles the old
+    ; entry that points at $INSTDIR; POSTINSTALL handles a different directory
+    ; after the new runtime and data migration have already been verified.
     ${If} $CS2LegacyTauriScope == "samedir"
       Call CS2_LegacyTauriDirMatchesInstDir
       ${If} $R0 != 1
@@ -326,6 +324,30 @@ Function CS2_RemoveLegacyTauriHKCU
       StrCpy $R7 "旧版 Tauri 迁移阶段无效。安装已中止，旧程序和用户数据均未删除。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
+
+    StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hkcu_missing_uninstaller
+    Goto cs2_legacy_tauri_hkcu_have_uninstaller
+    cs2_legacy_tauri_hkcu_missing_uninstaller:
+      ; A previous migration can leave only a stale uninstall registry entry
+      ; (for example after the user manually removed uninstall.exe). There is
+      ; no executable left to run, so retire this exact entry and continue;
+      ; never recurse through the old directory or touch %APPDATA% data.
+      DetailPrint "旧版 Tauri 卸载程序不存在，清理失效的注册项并继续安装…"
+      ClearErrors
+      DeleteRegKey HKCU "$R9"
+      ${If} ${Errors}
+        StrCpy $R7 "旧版 Tauri 失效注册项无法清理。安装已中止，旧程序和用户数据均未删除。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+      ReadRegStr $R3 HKCU "$R9" "DisplayName"
+      ${If} $R3 != ""
+        StrCpy $R7 "旧版 Tauri 失效注册项无法清理。安装已中止，旧程序和用户数据均未删除。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+      StrCpy $R4 0
+      Goto cs2_legacy_tauri_hkcu_loop
+    cs2_legacy_tauri_hkcu_have_uninstaller:
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
     Call CS2_RunLegacyTauriUninstaller
@@ -380,13 +402,8 @@ Function CS2_RemoveLegacyTauriHKLM
       StrCpy $R7 "无法解析旧版 Tauri 安装目录。安装已中止，旧程序和用户数据均未删除。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
-    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hklm_missing_uninstaller
-    Goto cs2_legacy_tauri_hklm_have_uninstaller
-    cs2_legacy_tauri_hklm_missing_uninstaller:
-      StrCpy $R7 "旧版 Tauri 卸载程序不存在。安装已中止，旧程序和用户数据均未删除。"
-      Call CS2_AbortMigrationInstall
-    cs2_legacy_tauri_hklm_have_uninstaller:
 
+    ; Keep HKLM on the same two-phase boundary as HKCU.
     ${If} $CS2LegacyTauriScope == "samedir"
       Call CS2_LegacyTauriDirMatchesInstDir
       ${If} $R0 != 1
@@ -402,6 +419,28 @@ Function CS2_RemoveLegacyTauriHKLM
       StrCpy $R7 "旧版 Tauri 迁移阶段无效。安装已中止，旧程序和用户数据均未删除。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
+
+    StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    IfFileExists "$CS2LegacyTauriUninsExe" 0 cs2_legacy_tauri_hklm_missing_uninstaller
+    Goto cs2_legacy_tauri_hklm_have_uninstaller
+    cs2_legacy_tauri_hklm_missing_uninstaller:
+      ; See the HKCU branch above. HKLM is handled with the same exact-key
+      ; guard, while the old files remain untouched for a manual cleanup.
+      DetailPrint "旧版 Tauri 卸载程序不存在，清理失效的系统注册项并继续安装…"
+      ClearErrors
+      DeleteRegKey HKLM "$R9"
+      ${If} ${Errors}
+        StrCpy $R7 "旧版 Tauri 失效系统注册项无法清理。安装已中止，旧程序和用户数据均未删除。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+      ReadRegStr $R3 HKLM "$R9" "DisplayName"
+      ${If} $R3 != ""
+        StrCpy $R7 "旧版 Tauri 失效系统注册项无法清理。安装已中止，旧程序和用户数据均未删除。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+      StrCpy $R4 0
+      Goto cs2_legacy_tauri_hklm_loop
+    cs2_legacy_tauri_hklm_have_uninstaller:
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
     Call CS2_RunLegacyTauriUninstaller

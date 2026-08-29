@@ -14,21 +14,29 @@ export function normalizeUpdateMode(value) {
 
 /**
  * Tauri updater 检查/下载控制器。
- * 状态：checking / available / downloading / installing / not-available / error / cancelled
+ * 状态：checking / available / downloading / installing / not-available / error / cancelled / skipped
  *
- * 默认在发现更新后自动下载并安装。传入 autoInstall: false 时会停在 available，
- * 等待 confirm() 再继续；defer()/cancel() 表示稍后再说。
- * force 模式下 defer/cancel 在开始下载前会被忽略。
+ * 默认在发现更新后自动下载并安装，但普通更新会先给用户一个短暂的跳过窗口。
+ * 传入 autoInstall: false 时会停在 available，等待 confirm() 再继续；
+ * defer() 表示跳过当前版本，cancel() 只取消本次检查。
+ * force 模式下不等待跳过窗口，且 defer/cancel 在开始下载前会被忽略。
  *
  * 注意：Tauri updater 无法中断已经开始的下载；Windows 会在安装器成功启动后退出当前进程。
  */
 export function createDesktopUpdateCheck(
   onStatus,
-  { autoInstall = true, checkTimeoutMs = 8000 } = {},
+  {
+    autoInstall = true,
+    checkTimeoutMs = 8000,
+    autoInstallGraceMs = 5000,
+    skipVersion = "",
+  } = {},
 ) {
   let cancelled = false;
   let updateMode = "normal";
   let confirmWait = null;
+  let graceTimer = null;
+  let choiceWindowExpired = false;
   let startedDownload = false;
 
   const emit = (payload) => {
@@ -39,10 +47,33 @@ export function createDesktopUpdateCheck(
     }
   };
 
-  const waitForUserChoice = () =>
+  const waitForUserChoice = (timeoutMs = null) =>
     new Promise((resolve) => {
+      choiceWindowExpired = false;
       confirmWait = resolve;
+      if (timeoutMs === null) return;
+      const duration = Math.max(0, Number(timeoutMs) || 0);
+      if (duration === 0) {
+        confirmWait = null;
+        resolve("timeout");
+        return;
+      }
+      graceTimer = window.setTimeout(() => {
+        graceTimer = null;
+        if (!confirmWait) return;
+        choiceWindowExpired = true;
+        const wait = confirmWait;
+        confirmWait = null;
+        wait("timeout");
+      }, duration);
     });
+
+  const clearChoiceTimer = () => {
+    if (graceTimer !== null) {
+      window.clearTimeout(graceTimer);
+      graceTimer = null;
+    }
+  };
 
   const resolveChoice = (choice) => {
     if (!confirmWait) return false;
@@ -51,6 +82,7 @@ export function createDesktopUpdateCheck(
     }
     const wait = confirmWait;
     confirmWait = null;
+    clearChoiceTimer();
     wait(choice);
     return true;
   };
@@ -100,18 +132,41 @@ export function createDesktopUpdateCheck(
       update_mode: updateMode,
       auto_install: autoInstall,
     };
-    emit({ status: "available", ...base });
+    if (
+      updateMode !== "force" &&
+      latest &&
+      String(skipVersion || "").trim() === String(latest).trim()
+    ) {
+      try {
+        await update.close();
+      } catch {
+        // ignore
+      }
+      emit({ status: "skipped", ...base, skipped_version: latest });
+      return;
+    }
 
-    if (!autoInstall) {
-      const choice = await waitForUserChoice();
-      if (cancelled || choice !== "install") {
+    const graceMs = Math.max(0, Number(autoInstallGraceMs) || 0);
+    const awaitingChoice = updateMode !== "force" && (autoInstall === false || graceMs > 0);
+    emit({ status: "available", ...base, awaiting_choice: awaitingChoice });
+
+    if (updateMode !== "force" && (!autoInstall || graceMs > 0)) {
+      const choice = await waitForUserChoice(autoInstall ? graceMs : null);
+      if (cancelled || choice === "defer" || choice === "cancel") {
         try {
           await update.close();
         } catch {
           // ignore
         }
-        emit({ status: "cancelled", ...base });
+        emit({
+          status: "cancelled",
+          ...base,
+          ...(choice === "defer" && latest ? { skipped_version: latest } : {}),
+        });
         return;
+      }
+      if (autoInstall && choice === "timeout") {
+        emit({ status: "available", ...base, awaiting_choice: false });
       }
     }
 
@@ -167,12 +222,14 @@ export function createDesktopUpdateCheck(
     },
     /** 稍后再说（force 且尚未开始下载时无效） */
     defer: () => {
+      if (startedDownload || choiceWindowExpired || updateMode === "force") return false;
       cancelled = true;
       resolveChoice("defer");
+      return true;
     },
     cancel: () => {
       cancelled = true;
-      resolveChoice("defer");
+      return resolveChoice("cancel");
     },
   };
 }

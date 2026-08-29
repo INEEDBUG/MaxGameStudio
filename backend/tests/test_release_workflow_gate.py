@@ -15,9 +15,13 @@ def _step_block(workflow: str, step_name: str) -> str:
 
 def test_formal_release_steps_require_push_and_strict_stable_version():
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    expected_gate = "if: github.event_name == 'push' && steps.release_version.outputs.stable == 'true'"
+    expected_gate = (
+        "if: github.event_name == 'push' && github.ref_type == 'tag' "
+        "&& steps.release_version.outputs.stable == 'true'"
+    )
 
     for step_name in (
+        "Resolve GitHub Release notes",
         "Generate signed updater manifest",
         "Create GitHub Release",
         "Publish updater channel",
@@ -33,4 +37,20 @@ def test_manual_dispatch_only_uploads_private_artifact():
     private_artifact = _step_block(workflow, "Upload private release candidate")
     assert "if: github.event_name == 'workflow_dispatch'" in private_artifact
     assert "actions/upload-artifact@v4" in private_artifact
+
+
+def test_release_title_is_only_the_version_tag():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    release = _step_block(workflow, "Create GitHub Release")
+    assert "name: ${{ steps.release_version.outputs.tag }}" in release
+    assert "name: MaxGameStudio ${{ steps.release_version.outputs.tag }}" not in release
+    assert "body_path: ${{ steps.release_notes.outputs.path }}" in release
+    assert "generate_release_notes: true" not in release
+
+
+def test_stable_release_requires_a_versioned_release_notes_file():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    notes = _step_block(workflow, "Resolve GitHub Release notes")
+    assert 'docs/releases/v$env:BUILD_VERSION.zh-CN.md' in notes
+    assert "Stable Release notes are required" in notes
 
