@@ -1,12 +1,12 @@
 {
-  "version": "2.5.17",
+  "version": "3.0.1",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-08-29T03:21:16.722Z",
+  "pub_date": "2026-08-29T23:39:44.861Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2tYckhmSzc2R2dVbzRrcXNlbFFhOUFaQjJiMDdaalcwS2pKUEQ3L1B5UWhjenB0dE44a3hWMWFqbXZGSFovM1RVUTNBTTRPSnpHbFA5WWthaTNqU1E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3OTczNjcyCWZpbGU6TWF4R2FtZVN0dWRpb18yLjUuMTdfeDY0LXNldHVwLmV4ZQo1NzMvMUQ2cXpzb2N0NmFla0tKZytLOUJlTTZYaHJEUEFkeWN6UUdkcHNrT3R1TzRockFUczRvK3VwNTVRM1ZCN0RuN1Fjbm1QMXZOK0lFY1Vxb0tBUT09Cg==",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v2.5.17/MaxGameStudio_2.5.17_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3BYTThLZWppcnlLTjVkTFR4RGk0dXZuNDFsbktsb3J6aDljUVhBZnY0MFlsR05pVWg0aTd6N2dJdnp1N1pZOGdVQWU2RHlaaE12R1lISnFXQ2xTelFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDQ2Nzc5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuMV94NjQtc2V0dXAuZXhlCjFUcUppTDBOYXZIZVMweStPWndTblhKQm9FalZTbW5VcGJFblRPeUtRTEVjMC9oM1RYRkpIVk1VU2ZIVjNOSkx0RDh2RVU1QmJrUVVwMkYrMFFneEFBPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.1/MaxGameStudio_3.0.1_x64-setup.exe"
     }
   }
 }
