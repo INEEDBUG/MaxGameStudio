@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Crosshair, MousePointer2, Play, RotateCcw } from "lucide-react";
 import {
   clamp,
+  classifyFlickClick,
   cs2CursorGain,
   makeFlickTrialResult,
   makeTrackingTrialResult,
@@ -13,12 +14,18 @@ import { useT } from "../../i18n/useT.js";
 const COUNTDOWN_MS = 3_000;
 const TARGET_RADIUS = 27;
 
-function randomTarget(width, height) {
+function randomTarget(width, height, avoid = null) {
   const margin = TARGET_RADIUS + 18;
-  return {
-    x: margin + Math.random() * Math.max(1, width - margin * 2),
-    y: margin + Math.random() * Math.max(1, height - margin * 2),
-  };
+  const minimumTravel = Math.min(width, height) * 0.22;
+  let candidate = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    candidate = {
+      x: margin + Math.random() * Math.max(1, width - margin * 2),
+      y: margin + Math.random() * Math.max(1, height - margin * 2),
+    };
+    if (!avoid || pointDistance(candidate, avoid) >= minimumTravel) return candidate;
+  }
+  return candidate;
 }
 
 export default function SensitivityAimArena({ trial, setup, index, total, durationMs = 15_000, onComplete, onCancel }) {
@@ -77,6 +84,12 @@ export default function SensitivityAimArena({ trial, setup, index, total, durati
           reactions: state.reactions,
           efficiencies: state.efficiencies,
           overshoots: state.overshoots,
+          clicks: state.clicks,
+          misses: state.misses,
+          underflicks: state.underflicks,
+          overflicks: state.overflicks,
+          offAxisMisses: state.offAxisMisses,
+          clickErrors: state.clickErrors,
         })
       : makeTrackingTrialResult({
           multiplier: trial.multiplier,
@@ -118,7 +131,8 @@ export default function SensitivityAimArena({ trial, setup, index, total, durati
         setPhase("running");
         state.lastFrameAt = now;
         state.targetSpawnAt = now;
-        state.target = randomTarget(width, height);
+        state.target = randomTarget(width, height, state.cursor);
+        state.targetStartCursor = { ...state.cursor };
         state.directDistance = pointDistance(state.cursor, state.target);
       }
       const dt = Math.min(50, now - state.lastFrameAt);
@@ -191,6 +205,7 @@ export default function SensitivityAimArena({ trial, setup, index, total, durati
     stateRef.current = {
       cursor: { x: surface.width / 2, y: surface.height / 2 },
       target: { x: surface.width / 2, y: surface.height / 2 },
+      targetStartCursor: { x: surface.width / 2, y: surface.height / 2 },
       startAt: 0,
       endAt: 0,
       lastFrameAt: 0,
@@ -203,6 +218,12 @@ export default function SensitivityAimArena({ trial, setup, index, total, durati
       reactions: [],
       efficiencies: [],
       overshoots: 0,
+      clicks: 0,
+      misses: 0,
+      underflicks: 0,
+      overflicks: 0,
+      offAxisMisses: 0,
+      clickErrors: [],
       onTargetMs: 0,
       distanceSamples: [],
       wasOnTarget: false,
@@ -258,27 +279,65 @@ export default function SensitivityAimArena({ trial, setup, index, total, durati
         state.pathDistance += moved;
         const distance = pointDistance(state.cursor, state.target);
         if (distance < state.minDistance) state.minDistance = distance;
-        else if (!state.overshootForTarget && distance > state.minDistance + TARGET_RADIUS * 0.55) {
+        else if (
+          !state.overshootForTarget &&
+          state.minDistance <= TARGET_RADIUS &&
+          distance > state.minDistance + TARGET_RADIUS * 0.55
+        ) {
           state.overshoots += 1;
           state.overshootForTarget = true;
         }
-        if (distance <= TARGET_RADIUS) {
-          state.reactions.push(performance.now() - state.targetSpawnAt);
-          state.efficiencies.push(clamp(state.directDistance / Math.max(state.directDistance, state.pathDistance), 0, 1));
-          state.target = randomTarget(surface.width, surface.height);
-          state.targetSpawnAt = performance.now();
-          state.directDistance = pointDistance(state.cursor, state.target);
-          state.pathDistance = 0;
-          state.minDistance = state.directDistance;
-          state.overshootForTarget = false;
-        }
       }
+    }
+    function onMouseDown(event) {
+      const state = stateRef.current;
+      const surface = resizeCanvas();
+      if (
+        event.button !== 0 ||
+        trial.kind !== "flick" ||
+        document.pointerLockElement !== canvasRef.current ||
+        !state ||
+        !surface ||
+        state.finished ||
+        !state.running
+      ) return;
+      event.preventDefault();
+      const outcome = classifyFlickClick({
+        start: state.targetStartCursor,
+        target: state.target,
+        cursor: state.cursor,
+        targetRadius: TARGET_RADIUS,
+        overshot: state.overshootForTarget,
+      });
+      state.clicks += 1;
+      state.clickErrors.push(outcome.errorRatio);
+      state.efficiencies.push(
+        clamp(state.directDistance / Math.max(state.directDistance, state.pathDistance), 0, 1),
+      );
+      if (outcome.hit) {
+        state.reactions.push(performance.now() - state.targetSpawnAt);
+      } else {
+        state.misses += 1;
+      }
+      if (outcome.direction === "underflick") state.underflicks += 1;
+      else if (outcome.direction === "overflick") state.overflicks += 1;
+      else if (outcome.direction === "off_axis") state.offAxisMisses += 1;
+
+      state.target = randomTarget(surface.width, surface.height, state.cursor);
+      state.targetSpawnAt = performance.now();
+      state.targetStartCursor = { ...state.cursor };
+      state.directDistance = pointDistance(state.cursor, state.target);
+      state.pathDistance = 0;
+      state.minDistance = state.directDistance;
+      state.overshootForTarget = false;
     }
     document.addEventListener("pointerlockchange", onPointerLockChange);
     document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mousedown", onMouseDown);
     return () => {
       document.removeEventListener("pointerlockchange", onPointerLockChange);
       document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mousedown", onMouseDown);
       cancelAnimationFrame(frameRef.current);
       if (document.pointerLockElement === canvasRef.current) document.exitPointerLock();
     };

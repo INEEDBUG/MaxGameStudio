@@ -359,12 +359,26 @@ export default function SensitivityLabPage() {
                   <AlertTriangle className="h-4 w-4" />{t("training.measuredDiagnosis")}
                 </div>
                 <div className="mt-2 text-base font-bold text-cs2-text-primary">{result.diagnosis_label || t("training.personalizedReady")}</div>
+                {result.click_tendency_label && (
+                  <div className="mt-2 rounded-lg border border-white/10 bg-black/15 px-3 py-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{t("training.clickTendency")}</div>
+                    <div className="mt-1 text-sm font-semibold text-cs2-text-primary">{result.click_tendency_label}</div>
+                  </div>
+                )}
                 <div className="mt-2 font-mono text-xs text-cs2-text-secondary">
                   {t("training.adjustment")} {Number(result.adjustment_percent || 0) >= 0 ? "+" : ""}{result.adjustment_percent || 0}% · {t("training.retestRange")} {result.suggested_min ?? result.recommended_sensitivity}–{result.suggested_max ?? result.recommended_sensitivity}
                 </div>
                 <div className="mt-3 space-y-2">
                   {(result.insights || []).map((item) => <p key={item} className="text-xs leading-5 text-cs2-text-secondary">• {item}</p>)}
                 </div>
+                {(result.click_evidence || []).length > 0 && (
+                  <details className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2">
+                    <summary className="cursor-pointer text-[11px] font-semibold text-cs2-text-muted">{t("training.clickEvidence")}</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {result.click_evidence.map((item) => <p key={item} className="text-[11px] leading-5 text-cs2-text-secondary">• {item}</p>)}
+                    </div>
+                  </details>
+                )}
               </div>
               <div className="rounded-xl border border-emerald-300/20 bg-black/15 p-4">
                 <div className="flex items-center gap-2 text-xs font-bold text-emerald-200"><ListChecks className="h-4 w-4" />{t("training.howToAdjust")}</div>

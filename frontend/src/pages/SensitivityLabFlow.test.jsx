@@ -66,6 +66,9 @@ describe("SensitivityLabPage full flow", () => {
       confidence: 0.78,
       console_command: 'sensitivity "0.32"',
       diagnosis_label: "当前灵敏度偏快",
+      click_tendency: "late",
+      click_tendency_label: "点晚（过甩偏多）",
+      click_evidence: ["点晚 8 次"],
       adjustment_percent: -8.6,
       suggested_min: 0.3072,
       suggested_max: 0.3328,
@@ -93,6 +96,8 @@ describe("SensitivityLabPage full flow", () => {
       dpi: 800,
     });
     expect(await screen.findByText("当前灵敏度偏快")).toBeTruthy();
+    expect(screen.getByText("点晚（过甩偏多）")).toBeTruthy();
+    expect(screen.getByText("点击证据")).toBeTruthy();
     expect(screen.getByText("降低灵敏度后复测")).toBeTruthy();
     expect(screen.getByRole("button", { name: "调整参数后复测" })).toBeTruthy();
   });

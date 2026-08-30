@@ -79,6 +79,99 @@ def test_recommendation_follows_strongest_measured_multiplier():
     assert result.suggested_min < result.recommended_sensitivity < result.suggested_max
     assert result.insights
     assert len(result.action_plan) >= 3
+    assert result.click_tendency == "insufficient"
+    assert result.click_tendency_label == "点击样本不足"
+    assert result.click_evidence
+
+
+def _with_click_metrics(*, underflicks: int, overflicks: int, off_axis_misses: int = 0):
+    payload = _request().model_dump()
+    for trial in payload["trials"]:
+        if trial["kind"] != "flick":
+            continue
+        trial.update({
+            "clicks": trial["hits"] + 10,
+            "misses": 10,
+            "underflicks": underflicks,
+            "overflicks": overflicks,
+            "off_axis_misses": off_axis_misses,
+            "average_click_error_ratio": 0.18,
+        })
+    return SensitivityRecommendationRequest.model_validate(payload)
+
+
+def test_click_tendency_requires_eight_valid_clicks_and_ignores_off_axis_for_direction():
+    insufficient_payload = _request().model_dump()
+    for trial in insufficient_payload["trials"]:
+        if trial["kind"] == "flick":
+            trial.update({
+                "hits": 0,
+                "clicks": 3,
+                "misses": 3,
+                "underflicks": 2,
+                "overflicks": 0,
+                "off_axis_misses": 1,
+            })
+    insufficient = SensitivityRecommendationRequest.model_validate(insufficient_payload)
+    insufficient_result = recommend_sensitivity(insufficient)
+    assert insufficient_result.click_tendency == "insufficient"
+
+    balanced = _with_click_metrics(underflicks=1, overflicks=0, off_axis_misses=9)
+    balanced_result = recommend_sensitivity(balanced)
+    assert balanced_result.click_tendency == "balanced"
+
+
+def test_click_tendency_is_evidence_and_conflicting_late_clicks_lower_confidence():
+    baseline = recommend_sensitivity(_request())
+    early_result = recommend_sensitivity(_with_click_metrics(underflicks=8, overflicks=0))
+    assert early_result.click_tendency == "early"
+    assert early_result.diagnosis == "too_slow"
+    assert early_result.recommended_sensitivity == baseline.recommended_sensitivity
+
+    late_result = recommend_sensitivity(_with_click_metrics(underflicks=0, overflicks=8))
+    assert late_result.click_tendency == "late"
+    assert late_result.diagnosis == "mixed"
+    assert late_result.recommended_sensitivity == baseline.recommended_sensitivity
+    assert late_result.confidence == pytest.approx(round(baseline.confidence * 0.75, 3))
+
+
+def test_late_clicks_reinforce_a_lower_sensitivity_recommendation():
+    request = SensitivityRecommendationRequest(
+        dpi=800,
+        current_sensitivity=1.0,
+        game_width=1920,
+        game_height=1080,
+        trials=[
+            _trial("flick", 0.8, 0.96),
+            _trial("tracking", 0.8, 0.95),
+            _trial("flick", 1.0, 0.55),
+            _trial("tracking", 1.0, 0.56),
+            _trial("flick", 1.2, 0.35),
+            _trial("tracking", 1.2, 0.36),
+        ],
+    )
+    payload = request.model_dump()
+    for trial in payload["trials"]:
+        if trial["kind"] == "flick":
+            trial.update({
+                "clicks": trial["hits"] + 10,
+                "misses": 10,
+                "underflicks": 0,
+                "overflicks": 8,
+            })
+    result = recommend_sensitivity(SensitivityRecommendationRequest.model_validate(payload))
+
+    assert result.click_tendency == "late"
+    assert result.diagnosis == "too_fast"
+    assert result.adjustment_percent < 0
+    assert any("降低游戏内灵敏度" in step for step in result.action_plan)
+
+
+def test_click_metric_counts_must_be_internally_consistent():
+    payload = _request().model_dump()
+    payload["trials"][0].update({"clicks": 5, "hits": 3, "misses": 1})
+    with pytest.raises(ValidationError, match=r"clicks 必须等于 hits \+ misses"):
+        SensitivityRecommendationRequest.model_validate(payload)
 
 
 def test_recommendation_requires_flick_and_tracking_trials():
