@@ -610,6 +610,7 @@ export default function Demo2DReplayPreview({
     initialRound || rounds[0]?.round_number || 1,
   );
   const [frames, setFrames] = useState([]);
+  const [replayRoundEvents, setReplayRoundEvents] = useState([]);
   const [effectTracks, setEffectTracks] = useState([]);
   const [effectCapabilities, setEffectCapabilities] = useState(null);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -701,6 +702,7 @@ export default function Demo2DReplayPreview({
     const saved = pendingResumeRef.current;
     if (Number(saved?.roundNumber) !== validRound) pendingResumeRef.current = null;
     setFrames([]);
+    setReplayRoundEvents([]);
     setEffectTracks([]);
     setEffectCapabilities(null);
     resetPlayheadToStart([]);
@@ -711,7 +713,15 @@ export default function Demo2DReplayPreview({
 
   const selectedRound = rounds.find((round) => Number(round.round_number) === Number(roundNumber)) || rounds[0];
   const tickRate = Number(workspace?.tick_rate || 64);
-  const roundEvents = useMemo(() => replayEventsForRound(selectedRound, tickRate), [selectedRound, tickRate]);
+  const replaySelectedRound = useMemo(() => (
+    replayRoundEvents.length
+      ? { ...selectedRound, events: replayRoundEvents }
+      : selectedRound
+  ), [replayRoundEvents, selectedRound]);
+  const roundEvents = useMemo(
+    () => replayEventsForRound(replaySelectedRound, tickRate),
+    [replaySelectedRound, tickRate],
+  );
   const roundIndex = Math.max(0, rounds.findIndex((round) => round === selectedRound));
   const mapName = mapKey(workspace?.map_name);
   // Prefer live /api/demo/replay map_transform over stale workspace metadata.
@@ -768,11 +778,13 @@ export default function Demo2DReplayPreview({
         : null;
       const nextFps = Math.max(1, Number(data?.fps) || SAMPLE_HZ);
       const nextEffectTracks = Array.isArray(data?.effect_tracks) ? data.effect_tracks : [];
+      const nextEvents = Array.isArray(data?.events) ? data.events : [];
       const nextCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
         ? data.effect_capabilities
         : null;
       setFrames(nextFrames);
       setEffectTracks(nextEffectTracks);
+      setReplayRoundEvents(nextEvents);
       setEffectCapabilities(nextCapabilities);
       setResponseTransform(nextTransform);
       setReplayFps(nextFps);

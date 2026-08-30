@@ -571,6 +571,7 @@ def _enrich_grenade_events(
     windows: list[dict[str, Any]],
     tick_rate: float,
     fire_df: Optional[pd.DataFrame] = None,
+    releases_by_round_kind: Optional[dict[tuple[int, str], list[dict[str, Any]]]] = None,
 ) -> None:
     if not trajectories:
         return
@@ -581,7 +582,11 @@ def _enrich_grenade_events(
         if window is not None:
             by_round_kind[(_int(window.get("round_number")), _clean_name(trajectory.get("kind")))].append(trajectory)
 
-    releases_by_round_kind = _grenade_throws_by_round(fire_df, windows)
+    releases_by_round_kind = (
+        releases_by_round_kind
+        if releases_by_round_kind is not None
+        else _grenade_throws_by_round(fire_df, windows)
+    )
     used: set[int] = set()
     used_releases: set[int] = set()
     tolerance = max(32, int(round(float(tick_rate) * 2.0)))
@@ -982,6 +987,7 @@ def build_match_workspace(
     shared_facts: Any,
     player_results: dict[str, Any],
     parser: Any = None,
+    include_grenade_trajectories: bool = True,
 ) -> dict[str, Any]:
     """Build the six analysis views from the analyzer's existing shared scan.
 
@@ -1062,13 +1068,18 @@ def build_match_workspace(
         shared_events.get("nade_batch"),
     )
     shots_by_round = _shots_by_round(shared_events.get("fire_df"), windows)
-    _enrich_grenade_events(
-        raw_events_by_round,
-        _extract_grenade_trajectories(parser, tick_rate),
-        windows,
-        tick_rate,
+    grenade_releases_by_round_kind = _grenade_throws_by_round(
         shared_events.get("fire_df"),
+        windows,
     )
+    if include_grenade_trajectories:
+        _enrich_grenade_events(
+            raw_events_by_round,
+            _extract_grenade_trajectories(parser, tick_rate),
+            windows,
+            tick_rate,
+            releases_by_round_kind=grenade_releases_by_round_kind,
+        )
 
     round_winner_team: dict[int, Optional[str]] = {}
     for window in windows:
@@ -1181,6 +1192,15 @@ def build_match_workspace(
             "events": events,
             "special_events": special_events_by_round.get(round_number, []),
             "shots": [dict(shot) for shot in shots_by_round.get(round_number, [])],
+            # Projectile trajectories are an optional replay payload. Persist
+            # only the tiny weapon-fire release rows here so the lazy replay
+            # materializer can reconstruct the exact same first flight point.
+            "grenade_releases": [
+                {**dict(release), "kind": kind}
+                for (release_round, kind), releases in grenade_releases_by_round_kind.items()
+                if int(release_round) == round_number
+                for release in releases
+            ],
             "bomb_initial_carrier": _initial_bomb_carrier(events),
         })
 

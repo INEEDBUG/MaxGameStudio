@@ -16,7 +16,7 @@ class IsolatedParseError(RuntimeError):
 
 
 def _timeout_seconds(action: str) -> float:
-    if action in {"players", "summary", "inspect"}:
+    if action in {"players", "summary", "inspect", "inspect_fast"}:
         env_name = "CS2_INSIGHT_DEMO_INSPECT_TIMEOUT_SEC"
         default = "30"
     else:
@@ -140,6 +140,17 @@ def inspect_demo_isolated(dem_path: str) -> dict:
     match_meta = result.get("match_meta")
     if not isinstance(players, list) or not isinstance(match_meta, dict):
         raise IsolatedParseError("Demo 检查 worker 缺少玩家名单或比赛摘要")
+    return result
+
+
+def inspect_demo_fast_isolated(dem_path: str) -> dict:
+    result = run_parse_worker("inspect_fast", dem_path=dem_path)
+    if not isinstance(result, dict):
+        raise IsolatedParseError("Demo 快速检查 worker 返回了无效结果")
+    players = result.get("players")
+    match_meta = result.get("match_meta")
+    if not isinstance(players, list) or not isinstance(match_meta, dict):
+        raise IsolatedParseError("Demo 快速检查 worker 缺少玩家名单或比赛摘要")
     return result
 
 

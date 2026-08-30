@@ -615,13 +615,19 @@ def _demo_inspect_concurrency() -> int:
 
 
 async def _inspect_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
-    from .demo_parse_isolation import inspect_demo_isolated
+    from .demo_parse_isolation import inspect_demo_fast_isolated, inspect_demo_isolated
 
-    inspection = await asyncio.to_thread(inspect_demo_isolated, str(dem_path))
+    inspection = await asyncio.to_thread(inspect_demo_fast_isolated, str(dem_path))
     players = inspection.get("players")
     match_meta = inspection.get("match_meta")
     if not isinstance(players, list) or not isinstance(match_meta, dict):
         raise ValueError("Demo inspection returned invalid metadata")
+    if not players:
+        inspection = await asyncio.to_thread(inspect_demo_isolated, str(dem_path))
+        players = inspection.get("players")
+        match_meta = inspection.get("match_meta")
+        if not isinstance(players, list) or not isinstance(match_meta, dict):
+            raise ValueError("Demo fallback inspection returned invalid metadata")
     return players, match_meta
 
 
@@ -916,6 +922,23 @@ async def _run_library_demo_analyze(
             composite,
             timeline_results=players_out,
         )
+        if isinstance(analysis_workspace, dict):
+            final_roster = _merge_workspace_roster_stats(
+                analysis_workspace.get("players"),
+                idx.get("players") or [],
+            )
+            if final_roster:
+                refreshed = await index_demo_player_stats(
+                    demo_id,
+                    dem_path,
+                    precomputed_players=final_roster,
+                )
+                if refreshed.get("error"):
+                    logger.warning(
+                        "Failed to refresh final roster stats demo_id=%s: %s",
+                        demo_id,
+                        refreshed.get("error"),
+                    )
         await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
     except Exception as e:
         code = _demo_failure_code(e, "save")
@@ -2047,6 +2070,20 @@ class BatchParseRequest(BaseModel):
     locale: str = "zh"
 
 
+def _demo_parse_batch_concurrency(paths: list[Path]) -> int:
+    """Bound aggregate parser RSS, especially for several large demos."""
+
+    try:
+        configured = int(os.environ.get("CS2_INSIGHT_DEMO_PARSE_CONCURRENCY", "2"))
+    except ValueError:
+        configured = 2
+    configured = max(1, min(4, configured))
+    large_demo_bytes = 256 * 1024 * 1024
+    if any(path.stat().st_size >= large_demo_bytes for path in paths):
+        configured = 1
+    return min(configured, max(1, len(paths)))
+
+
 @app.post("/api/demo/parse-batch")
 async def parse_demo_batch(req: BatchParseRequest):
     """
@@ -2063,7 +2100,7 @@ async def parse_demo_batch(req: BatchParseRequest):
     if not target:
         raise HTTPException(400, "target_player 不能为空")
 
-    workers = min(8, max(1, len(resolved)))
+    workers = _demo_parse_batch_concurrency(resolved)
     loop = asyncio.get_running_loop()
 
     def run_one(path_str: str) -> dict:
@@ -2310,6 +2347,52 @@ def _roster_rows_for_api(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _merge_workspace_roster_stats(
+    workspace_players: Any,
+    roster_players: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine final workspace K/D/A with fast signon roster identity."""
+
+    if not isinstance(workspace_players, list):
+        return []
+    by_steam: dict[str, dict[str, Any]] = {}
+    by_name: dict[str, dict[str, Any]] = {}
+    for raw in roster_players:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        steam = str(row.get("steam_id64") or row.get("steam_id") or "").strip()
+        name = str(row.get("name") or row.get("player_name") or "").strip()
+        if steam:
+            by_steam[steam] = row
+        if name:
+            by_name[name.casefold()] = row
+
+    merged: list[dict[str, Any]] = []
+    for raw in workspace_players:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        steam = str(raw.get("steam_id64") or raw.get("steam_id") or "").strip()
+        base = dict(by_steam.get(steam) or by_name.get(name.casefold()) or {})
+        if not name:
+            name = str(base.get("name") or base.get("player_name") or "").strip()
+        if not name:
+            continue
+        base.update(
+            {
+                "name": name,
+                "steam_id": steam or base.get("steam_id") or base.get("steam_id64"),
+                "steam_id64": steam or base.get("steam_id64") or base.get("steam_id"),
+                "kills": raw.get("kills"),
+                "deaths": raw.get("deaths"),
+                "assists": raw.get("assists"),
+            }
+        )
+        merged.append(base)
+    return merged
 
 
 async def _read_valid_demo_roster_cache(

@@ -31,7 +31,7 @@ from .parse_utils import (
     _DEMOPARSER_RE_RAISE, _bool, _int, _max_demo_tick,
     _duration_mins_from_tick_span, _get_match_start_tick,
     _count_team_wins_from_round_end_df, _infer_total_rounds_from_round_end,
-    _pick_assister_column,
+    _pick_assister_column, _cell_str, _cell_team,
 )
 from .round_economy import (
     build_round_economy, build_round_economy_shared, extract_player_team_maps,
@@ -44,7 +44,7 @@ from .player_roster import (
     build_player_name_to_user_id, build_player_name_to_steam_id,
     build_player_name_to_spec_player_slot_dict,
     _build_all_players_roster, _spec_player_slot_from_event_user_id,
-    _lookup_user_id_for_name, _lookup_steam_id_for_name,
+    _lookup_user_id_for_name, _lookup_steam_id_for_name, _steam_id_cell,
     lookup_spec_player_slot_for_name,
     build_steam_to_team_from_player_info, build_name_to_team_from_player_info,
     get_player_list,
@@ -1303,6 +1303,7 @@ class DemoAnalyzer:
                 shared_facts=shared_facts,
                 player_results=results,
                 parser=self.parser,
+                include_grenade_trajectories=False,
             )
         except BaseException as exc:
             if isinstance(exc, _DEMOPARSER_RE_RAISE):
@@ -2243,4 +2244,82 @@ def inspect_demo(dem_path: str | Path) -> dict[str, object]:
         round_end_df=round_ends,
         header=header,
     )
+    return {"players": players, "match_meta": match_meta}
+
+
+def inspect_demo_fast(dem_path: str | Path) -> dict[str, object]:
+    """Return the first useful library metadata without scanning match events.
+
+    ``parse_header`` and ``parse_player_info`` are backed by the demo header and
+    signon data.  On large demos they complete before the full event scan, while
+    still providing the map, server, player names, Steam IDs and team numbers
+    needed by the picker.  Score/KDA fields intentionally remain unknown until
+    the normal full analysis replaces the lightweight snapshot.
+    """
+
+    path = Path(dem_path)
+    parser = DemoParser(str(path))
+    try:
+        parsed_header = parser.parse_header()
+        header = parsed_header if isinstance(parsed_header, dict) else {}
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise
+        header = {}
+
+    try:
+        player_info = _to_pandas_df(parser.parse_player_info())
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise
+        player_info = pd.DataFrame()
+
+    players: list[dict[str, object]] = []
+    if not player_info.empty and "name" in player_info.columns:
+        team_column = next(
+            (column for column in ("team_number", "team_num", "team") if column in player_info.columns),
+            None,
+        )
+        seen: set[tuple[str, str]] = set()
+        for _, row in player_info.iterrows():
+            name = _cell_str(row.get("name"))
+            steam_id = _steam_id_cell(row.get("steamid")) if "steamid" in player_info.columns else None
+            if not name:
+                continue
+            identity = (name.casefold(), str(steam_id or ""))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            team = _cell_team(row.get(team_column)) if team_column else None
+            players.append(
+                {
+                    "name": name,
+                    "team": team if team in (2, 3) else 0,
+                    "kills": 0,
+                    "deaths": 0,
+                    "assists": 0,
+                    "user_id": None,
+                    "steam_id": str(steam_id) if steam_id is not None else None,
+                }
+            )
+    players.sort(key=lambda row: (int(row.get("team") or 0), str(row.get("name") or "").casefold()))
+
+    match_meta = {
+        "map_name": str(header.get("map_name") or "unknown"),
+        "server_name": str(header.get("server_name") or ""),
+        "target_player": "",
+        "target_player_user_id": None,
+        "target_steam_id": None,
+        "total_rounds": None,
+        "target_kills": None,
+        "target_deaths": None,
+        "team_a_score": None,
+        "team_b_score": None,
+        "team_a_name": None,
+        "team_b_name": None,
+        "match_date": "",
+        "duration_mins": None,
+        "demo_end_tick": None,
+        "inspection_level": "header_signon",
+    }
     return {"players": players, "match_meta": match_meta}

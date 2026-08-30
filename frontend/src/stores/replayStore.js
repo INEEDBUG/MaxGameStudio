@@ -140,6 +140,7 @@ export const useReplayStore = create((set, get) => ({
         fps: existing.fps,
         effect_tracks: existing.effectTracks,
         effect_capabilities: existing.effectCapabilities,
+        events: existing.events,
         cache: existing.cache,
         demo_fingerprint: existing.demoFingerprint,
       };
@@ -180,6 +181,7 @@ export const useReplayStore = create((set, get) => ({
         const effectCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
           ? data.effect_capabilities
           : null;
+        const events = Array.isArray(data?.events) ? data.events : [];
         const sizeBytes = estimateSizeBytes({ frames, effectTracks, mapTransform });
         const source = ["disk_hit", "parquet_hit", "memory_hit"].includes(data?.cache?.frames)
           ? (data.cache.frames === "memory_hit" ? "memory" : "disk")
@@ -195,6 +197,7 @@ export const useReplayStore = create((set, get) => ({
               frames,
               effectTracks,
               effectCapabilities,
+              events,
               mapTransform,
               fps,
               error: null,
@@ -222,6 +225,7 @@ export const useReplayStore = create((set, get) => ({
               frames: null,
               effectTracks: null,
               effectCapabilities: null,
+              events: null,
               mapTransform: null,
               fps: null,
               error: error?.response?.data?.detail || error?.message || "2D 回放加载失败",

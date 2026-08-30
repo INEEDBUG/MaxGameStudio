@@ -152,6 +152,11 @@ def _clean_rounds(workspace: dict[str, Any]) -> list[dict[str, Any]]:
                 "team_b_side": str(raw.get("team_b_side") or "").upper(),
                 "shots": [dict(item) for item in raw.get("shots") or [] if isinstance(item, dict)],
                 "events": [dict(item) for item in raw.get("events") or [] if isinstance(item, dict)],
+                "grenade_releases": [
+                    dict(item)
+                    for item in raw.get("grenade_releases") or []
+                    if isinstance(item, dict)
+                ],
             }
         )
     rounds.sort(key=lambda item: (item["round_number"], item["start_tick"]))
@@ -521,6 +526,7 @@ def materialize_match_replay_parquet_impl(
     """Parse all replay ticks once and atomically write Rust-native Parquet."""
     from demoparser2 import DemoParser
 
+    from app.parser.match_workspace import _enrich_grenade_events, _extract_grenade_trajectories
     from app.parser.replay_effects import extract_dynamic_effect_tracks
     from app.radar.radar_map_assets import lookup_map_data
 
@@ -626,6 +632,21 @@ def materialize_match_replay_parquet_impl(
             workspace,
             tick_rate=tick_rate,
         )
+        releases_by_round_kind: dict[tuple[int, str], list[dict[str, Any]]] = {}
+        events_by_round: dict[int, list[dict[str, Any]]] = {}
+        for spec in round_specs:
+            round_number = _int(spec.get("round_number"))
+            events_by_round[round_number] = spec.get("events") or []
+            for release in spec.get("grenade_releases") or []:
+                kind = str(release.get("kind") or "")
+                releases_by_round_kind.setdefault((round_number, kind), []).append(release)
+        _enrich_grenade_events(
+            events_by_round,
+            _extract_grenade_trajectories(parser, tick_rate),
+            round_specs,
+            tick_rate,
+            releases_by_round_kind=releases_by_round_kind,
+        )
         try:
             map_transform = lookup_map_data(map_name)
         except (KeyError, OSError):
@@ -652,6 +673,7 @@ def materialize_match_replay_parquet_impl(
                     "player_rows": spec["player_rows"],
                     "sample_ticks": spec["sample_ticks"],
                     "shots": spec.get("shots") or [],
+                    "events": spec.get("events") or [],
                 }
                 for spec in round_specs
             ],
@@ -921,6 +943,7 @@ def load_match_replay_round_binary(
         "pov_player_name": meta.get("pov_player_name"),
         "pov_steamid64": meta.get("pov_steamid64"),
         "shots": [dict(item) for item in spec.get("shots") or [] if isinstance(item, dict)],
+        "events": [dict(item) for item in spec.get("events") or [] if isinstance(item, dict)],
         "effect_tracks_version": int(meta.get("effect_tracks_version") or 1),
         "effect_capabilities": meta.get("effect_capabilities") or {},
         "effect_warnings": list(meta.get("effect_warnings") or []),

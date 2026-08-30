@@ -25,6 +25,7 @@ function packetFixture() {
     row_count: 4,
     shots: [{ tick: 108, actor: "Alpha", weapon: "ak47" }],
     effect_tracks: [{ id: "smoke:1", type: "smoke", start_tick: 100, end_tick: 140, samples: [] }],
+    events: [{ type: "grenade", tick: 108, trajectory: [{ tick: 100, x: 1, y: 2 }] }],
     cache: { frames: "parquet_binary_hit", parsed: false },
     effects_pending: false,
   };
@@ -102,6 +103,9 @@ describe("decodeReplayBinary", () => {
     ]);
     expect(decoded.effect_tracks).toEqual([
       expect.objectContaining({ id: "smoke:1", type: "smoke" }),
+    ]);
+    expect(decoded.events).toEqual([
+      expect.objectContaining({ type: "grenade", tick: 108 }),
     ]);
     expect(decoded.effects_pending).toBe(false);
   });

@@ -502,7 +502,7 @@ def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
         calls.append(dem_path)
         return expected
 
-    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
+    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_fast_isolated", fake_inspect)
 
     players, match_meta, error_code = asyncio.run(
         main._safe_upload_demo_meta(Path("match.dem"))
@@ -518,7 +518,7 @@ def test_upload_metadata_returns_safe_timeout_code(monkeypatch):
     def fake_inspect(_dem_path):
         raise RuntimeError("worker timed out with internal details")
 
-    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
+    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_fast_isolated", fake_inspect)
 
     players, match_meta, error_code = asyncio.run(
         main._safe_upload_demo_meta(Path("broken.dem"))
@@ -544,6 +544,55 @@ def test_parse_worker_dispatches_combined_inspection(monkeypatch):
 
     assert parse_worker._run({"action": "inspect", "dem_path": "match.dem"}) == expected
     assert calls == ["match.dem"]
+
+
+def test_parse_worker_dispatches_fast_inspection(monkeypatch):
+    expected = {
+        "players": [{"name": "alpha", "steam_id": "76561198000000001"}],
+        "match_meta": {"map_name": "de_nuke", "inspection_level": "header_signon"},
+    }
+    calls = []
+
+    def fake_inspect(dem_path):
+        calls.append(dem_path)
+        return expected
+
+    monkeypatch.setattr(parse_worker, "inspect_demo_fast", fake_inspect)
+
+    assert parse_worker._run({"action": "inspect_fast", "dem_path": "match.dem"}) == expected
+    assert calls == ["match.dem"]
+
+
+def test_parse_worker_defers_replay_materialization(monkeypatch):
+    class FakeResult:
+        def to_dict(self):
+            return {"clips": [], "match_meta": {"map_name": "de_nuke"}}
+
+    class FakeAnalyzer:
+        def __init__(self, dem_path):
+            assert dem_path == "match.dem"
+            self.analysis_workspace = {
+                "rounds": [{"round_number": 1, "start_tick": 100, "end_tick": 200}],
+            }
+
+        def analyze_multi_players(self, players, *, freeze_to_death_rounds):
+            assert players == ["alpha"]
+            assert freeze_to_death_rounds is None
+            return {"alpha": FakeResult()}
+
+    monkeypatch.setattr(parse_worker, "DemoAnalyzer", FakeAnalyzer)
+
+    result = parse_worker._run({
+        "action": "analyze_batch",
+        "dem_path": "match.dem",
+        "target_players": ["alpha"],
+    })
+
+    assert result["alpha"]["match_meta"]["map_name"] == "de_nuke"
+    assert result["__analysis_workspace__"] == {
+        "rounds": [{"round_number": 1, "start_tick": 100, "end_tick": 200}],
+    }
+    assert "replay_cache" not in result["__analysis_workspace__"]
 
 
 def test_index_demo_player_stats_reuses_precomputed_roster(monkeypatch):
@@ -576,6 +625,49 @@ def test_index_demo_player_stats_reuses_precomputed_roster(monkeypatch):
     assert result["players"] == players
     replace_stats.assert_awaited_once_with(7, "match.dem", players)
     assert save_cache.await_args.kwargs["row_count"] == 1
+
+
+def test_workspace_stats_replace_fast_roster_placeholders():
+    fast = [{
+        "name": "Alpha",
+        "team": 2,
+        "steam_id": "76561198000000001",
+        "kills": 0,
+        "deaths": 0,
+        "assists": 0,
+    }]
+    workspace = [{
+        "name": "alpha renamed",
+        "steam_id64": "76561198000000001",
+        "kills": 24,
+        "deaths": 12,
+        "assists": 7,
+    }]
+
+    merged = main._merge_workspace_roster_stats(workspace, fast)
+
+    assert merged == [{
+        "name": "alpha renamed",
+        "team": 2,
+        "steam_id": "76561198000000001",
+        "steam_id64": "76561198000000001",
+        "kills": 24,
+        "deaths": 12,
+        "assists": 7,
+    }]
+
+
+def test_batch_parse_concurrency_is_memory_bounded(monkeypatch, tmp_path):
+    small = tmp_path / "small.dem"
+    small.write_bytes(b"demo")
+    large = tmp_path / "large.dem"
+    with large.open("wb") as stream:
+        stream.truncate(256 * 1024 * 1024)
+
+    monkeypatch.setenv("CS2_INSIGHT_DEMO_PARSE_CONCURRENCY", "4")
+
+    assert main._demo_parse_batch_concurrency([small, small, small]) == 3
+    assert main._demo_parse_batch_concurrency([small, large, small]) == 1
 
 
 def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(

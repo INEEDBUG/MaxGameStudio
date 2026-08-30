@@ -300,6 +300,7 @@ export function decodeReplayBinary(input) {
     effect_tracks: Array.isArray(metadata.effect_tracks) ? metadata.effect_tracks : [],
     effect_capabilities: metadata.effect_capabilities || null,
     effect_warnings: metadata.effect_warnings || [],
+    events: Array.isArray(metadata.events) ? metadata.events : [],
     effects_pending: metadata.effects_pending === true,
     demo_fingerprint: metadata.demo_fingerprint || null,
     cache: metadata.cache || { frames: "parquet_binary_hit", effects: "pending", parsed: false },

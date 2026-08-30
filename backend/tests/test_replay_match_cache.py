@@ -26,6 +26,9 @@ def _workspace() -> dict:
                 "events": [
                     {"type": "grenade", "kind": "烟雾弹", "tick": 110, "actor": "Alpha", "x": 10, "y": 20}
                 ],
+                "grenade_releases": [
+                    {"kind": "烟雾弹", "tick": 100, "actor": "Alpha", "steamid64": "1", "x": 1, "y": 2, "z": 3}
+                ],
             },
             {
                 "round_number": 2,
@@ -67,7 +70,7 @@ def test_cache_key_changes_with_parser_runtime(monkeypatch, tmp_path):
 
 def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_path):
     import demoparser2
-    from app.parser import replay_effects
+    from app.parser import match_workspace, replay_effects
 
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
@@ -216,6 +219,23 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
             "parse_ms": 1.25,
         },
     )
+    monkeypatch.setattr(
+        match_workspace,
+        "_extract_grenade_trajectories",
+        lambda *_args, **_kwargs: [
+            {
+                "kind": "烟雾弹",
+                "actor": "Alpha",
+                "steamid64": "1",
+                "throw_tick": 106,
+                "end_tick": 110,
+                "points": [
+                    {"tick": 106, "x": 4, "y": 5, "z": 6},
+                    {"tick": 110, "x": 10, "y": 20, "z": 6},
+                ],
+            }
+        ],
+    )
 
     result = replay_match_cache.materialize_match_replay_parquet_impl(
         demo_path=str(demo_path),
@@ -271,6 +291,13 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
     assert binary_calls[0]["metadata"]["shots"] == [
         {"tick": 132, "actor": "Alpha", "weapon": "ak47"}
     ]
+    assert binary_calls[0]["metadata"]["events"][0]["throw_tick"] == 100
+    assert binary_calls[0]["metadata"]["events"][0]["trajectory"][0] == {
+        "tick": 100,
+        "x": 1.0,
+        "y": 2.0,
+        "z": 6.0,
+    }
     assert binary_calls[0]["metadata"]["cache"]["frames"] == "parquet_binary_hit"
     assert binary_calls[0]["metadata"]["effects_pending"] is False
     assert binary_calls[0]["metadata"]["cache"]["effects"] == "parquet_hit"

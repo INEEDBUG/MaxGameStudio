@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 if __package__:
-    from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
+    from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo, inspect_demo_fast
     from .radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
-    from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
+    from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo, inspect_demo_fast
     from app.radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 
 
@@ -76,20 +76,10 @@ def _run(payload: dict) -> object:
             target_players, freeze_to_death_rounds=ftd_list
         )
         analysis_workspace = analyzer.analysis_workspace
-        if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
-            analysis_workspace = dict(analysis_workspace)
-            try:
-                from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
-
-                analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
-                    demo_path=dem_path,
-                    workspace=analysis_workspace,
-                )
-            except Exception as exc:  # noqa: BLE001 - analysis result remains usable
-                analysis_workspace["replay_cache"] = {
-                    "status": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
+        # Whole-match replay Parquet is intentionally not generated on the
+        # analysis critical path.  The replay endpoint materializes it on the
+        # first actual replay request from this persisted workspace, with
+        # single-flight protection for concurrent cold misses.
         return {
             "__analysis_workspace__": analysis_workspace,
             **{player: result.to_dict() for player, result in results.items()},
@@ -100,6 +90,8 @@ def _run(payload: dict) -> object:
         return get_demo_match_summary(dem_path)
     if action == "inspect":
         return inspect_demo(dem_path)
+    if action == "inspect_fast":
+        return inspect_demo_fast(dem_path)
     raise ValueError(f"unknown parse worker action: {action!r}")
 
 
