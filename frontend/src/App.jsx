@@ -3010,6 +3010,7 @@ export default function App() {
             : typeof statusPayload?.info?.releaseNotes === "string"
               ? statusPayload.info.releaseNotes
               : "";
+        const incomingUserNotes = statusPayload?.user_release_notes || null;
         const incomingMode =
           statusPayload?.update_mode || statusPayload?.info?.update_mode || null;
         setUpdateInfo((prev) => ({
@@ -3017,6 +3018,7 @@ export default function App() {
           current_version: currentVersion || prev?.current_version || "",
           latest_version: incomingLatest || prev?.latest_version || null,
           release_notes: incomingNotes || prev?.release_notes || "",
+          user_release_notes: incomingUserNotes || prev?.user_release_notes || null,
           update_mode: incomingMode || prev?.update_mode || "normal",
           auto_install:
             typeof statusPayload?.auto_install === "boolean"
@@ -3118,6 +3120,7 @@ export default function App() {
         current_version: currentVersion,
         latest_version: null,
         release_notes: "",
+        user_release_notes: null,
         update_mode: "normal",
         error: "",
       });

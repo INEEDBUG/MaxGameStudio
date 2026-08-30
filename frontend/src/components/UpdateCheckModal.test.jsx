@@ -3,6 +3,47 @@ import { describe, expect, it, vi } from "vitest";
 import UpdateCheckModal from "./UpdateCheckModal";
 
 describe("UpdateCheckModal automatic install flow", () => {
+  it("shows plain-language categories instead of technical release notes", () => {
+    render(
+      <UpdateCheckModal
+        open
+        info={{
+          status: "available",
+          latest_version: "3.0.1",
+          auto_install: false,
+          release_notes: "refactor(parser): replace eager payload allocation",
+          user_release_notes: {
+            fixed: ["修复大型 Demo 解析时容易卡顿的问题。"],
+            added: ["新增 Demo 快速预览。"],
+            optimized: ["降低大型 Demo 的内存占用。"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/修复问题|Bug fixes/)).toBeTruthy();
+    expect(screen.getByText("修复大型 Demo 解析时容易卡顿的问题。")).toBeTruthy();
+    expect(screen.getByText(/新增功能|New features/)).toBeTruthy();
+    expect(screen.getByText(/性能与体验优化|Performance and experience/)).toBeTruthy();
+    expect(screen.queryByText(/replace eager payload allocation/)).toBeNull();
+  });
+
+  it("falls back to legacy release notes when categorized notes are absent", () => {
+    render(
+      <UpdateCheckModal
+        open
+        info={{
+          status: "available",
+          latest_version: "3.0.0",
+          auto_install: false,
+          release_notes: "兼容旧版更新说明",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("兼容旧版更新说明")).toBeTruthy();
+  });
+
   it("shows automatic download without asking for a second confirmation", () => {
     render(
       <UpdateCheckModal

@@ -11,6 +11,13 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
   const latest = info.latest_version ? String(info.latest_version) : "";
   const current = info.current_version ? String(info.current_version) : "";
   const notes = String(info.release_notes || "").trim();
+  const userNotes = info.user_release_notes;
+  const noteSections = [
+    ["fixed", t("dialog.updateFixed")],
+    ["added", t("dialog.updateAdded")],
+    ["optimized", t("dialog.updateOptimized")],
+  ].filter(([key]) => Array.isArray(userNotes?.[key]) && userNotes[key].length > 0);
+  const hasUserNotes = noteSections.length > 0;
   const updateMode = normalizeUpdateMode(info.update_mode);
   const isForce = updateMode === "force";
   const percent = Number(info.progress?.percent);
@@ -84,7 +91,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
     status !== "cancelled" &&
     status !== "checking" &&
     status !== "not-available" &&
-    notes;
+    (hasUserNotes || notes);
 
   return (
     <div
@@ -117,12 +124,28 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
         </div>
         <div className="max-h-[45vh] overflow-y-auto px-4 py-3">
           {body}
-          {showNotes ? (
+          {showNotes && hasUserNotes ? (
+            <div className="mt-3 space-y-2" aria-label={t("dialog.updateSummary")}>
+              {noteSections.map(([key, label]) => (
+                <section key={key} className="rounded-md border border-white/5 bg-black/20 p-3">
+                  <h3 className="text-[12px] font-semibold text-white">{label}</h3>
+                  <ul className="mt-1.5 space-y-1 text-[12px] leading-relaxed text-zinc-300">
+                    {userNotes[key].map((item, index) => (
+                      <li key={`${key}-${index}`} className="flex gap-2">
+                        <span className="text-cs2-orange" aria-hidden="true">•</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : showNotes ? (
             <pre className="mt-3 whitespace-pre-wrap break-words rounded-md border border-white/5 bg-black/20 p-3 font-sans text-[12px] leading-relaxed text-zinc-300">
               {notes}
             </pre>
           ) : null}
-          {isAvailable && !notes ? (
+          {isAvailable && !hasUserNotes && !notes ? (
             <p className="mt-2 text-[12px] text-zinc-500">{t("dialog.updateNoNotes")}</p>
           ) : null}
         </div>

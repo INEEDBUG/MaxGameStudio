@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,6 +10,7 @@ const version = String(process.env.BUILD_VERSION || "").replace(/^[vV]/, "");
 const repository = String(process.env.GITHUB_REPOSITORY || "");
 const releaseNotes = String(process.env.RELEASE_NOTES || "");
 const updateMode = String(process.env.UPDATE_MODE || "normal").toLowerCase();
+const userReleaseNotesPath = String(process.env.USER_RELEASE_NOTES_PATH || "");
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const nsisDir = join(scriptsDir, "../src-tauri/target/release/bundle/nsis");
 
@@ -28,6 +29,10 @@ const signaturePath = join(nsisDir, `${installerName}.sig`);
 if (!existsSync(signaturePath)) {
   throw new Error(`Updater signature not found: ${signaturePath}`);
 }
+if (!userReleaseNotesPath || !existsSync(userReleaseNotesPath)) {
+  throw new Error(`User release notes not found: ${userReleaseNotesPath || "<empty>"}`);
+}
+const userReleaseNotes = JSON.parse(readFileSync(userReleaseNotesPath, "utf8"));
 
 const manifest = createGithubUpdaterManifest({
   version,
@@ -36,6 +41,7 @@ const manifest = createGithubUpdaterManifest({
   signature: readUpdaterSignature(signaturePath),
   notes: releaseNotes,
   updateMode,
+  userReleaseNotes,
 });
 const outputPath = join(nsisDir, "latest.json");
 writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

@@ -12,6 +12,18 @@ export function normalizeUpdateMode(value) {
   return String(value || "").trim().toLowerCase() === "force" ? "force" : "normal";
 }
 
+/** 将更新清单中的普通用户说明收敛为稳定的三分类结构。 */
+export function normalizeUserReleaseNotes(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const normalized = {};
+  for (const category of ["fixed", "added", "optimized"]) {
+    normalized[category] = Array.isArray(value[category])
+      ? value[category].map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+  }
+  return Object.values(normalized).some((items) => items.length) ? normalized : null;
+}
+
 /**
  * Tauri updater 检查/下载控制器。
  * 状态：checking / available / downloading / installing / not-available / error / cancelled / skipped
@@ -126,9 +138,11 @@ export function createDesktopUpdateCheck(
     updateMode = normalizeUpdateMode(update.rawJson?.update_mode);
     const latest = update.version || null;
     const notes = typeof update.body === "string" ? update.body : "";
+    const userNotes = normalizeUserReleaseNotes(update.rawJson?.user_release_notes);
     const base = {
       latest_version: latest,
       release_notes: notes,
+      user_release_notes: userNotes,
       update_mode: updateMode,
       auto_install: autoInstall,
     };

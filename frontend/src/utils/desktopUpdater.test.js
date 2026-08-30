@@ -10,7 +10,11 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check: updaterMocks.check }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: updaterMocks.relaunch }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: updaterMocks.invoke }));
 
-import { createDesktopUpdateCheck, normalizeUpdateMode } from "./desktopUpdater.js";
+import {
+  createDesktopUpdateCheck,
+  normalizeUpdateMode,
+  normalizeUserReleaseNotes,
+} from "./desktopUpdater.js";
 
 function makeUpdate(overrides = {}) {
   return {
@@ -49,7 +53,41 @@ describe("normalizeUpdateMode", () => {
   });
 });
 
+describe("normalizeUserReleaseNotes", () => {
+  it("keeps only non-empty plain-language entries", () => {
+    expect(normalizeUserReleaseNotes({ fixed: [" 修复崩溃 ", ""], added: null })).toEqual({
+      fixed: ["修复崩溃"],
+      added: [],
+      optimized: [],
+    });
+    expect(normalizeUserReleaseNotes({ fixed: [], added: [], optimized: [] })).toBeNull();
+  });
+});
+
 describe("createDesktopUpdateCheck", () => {
+  it("forwards categorized user release notes from the updater manifest", async () => {
+    const update = makeUpdate({
+      rawJson: {
+        update_mode: "normal",
+        user_release_notes: {
+          fixed: ["修复启动崩溃"],
+          added: ["新增快速预览"],
+          optimized: ["降低内存占用"],
+        },
+      },
+    });
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+
+    await createDesktopUpdateCheck((state) => states.push(state), { autoInstallGraceMs: 0 }).start();
+
+    expect(states.find((state) => state.status === "available")?.user_release_notes).toEqual({
+      fixed: ["修复启动崩溃"],
+      added: ["新增快速预览"],
+      optimized: ["降低内存占用"],
+    });
+  });
+
   it("automatically downloads, installs, and relaunches an available update", async () => {
     const update = makeUpdate();
     updaterMocks.check.mockResolvedValue(update);

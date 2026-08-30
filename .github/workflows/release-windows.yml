@@ -227,16 +227,22 @@ jobs:
         shell: pwsh
         run: |
           $notesPath = "docs/releases/v$env:BUILD_VERSION.zh-CN.md"
+          $userNotesPath = "docs/update-notes/v$env:BUILD_VERSION.json"
           if (-not (Test-Path -LiteralPath $notesPath)) {
             throw "Stable Release notes are required: $notesPath"
           }
+          if (-not (Test-Path -LiteralPath $userNotesPath)) {
+            throw "Plain-language update notes are required: $userNotesPath"
+          }
           "path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "user_path=$userNotesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Generate signed updater manifest
         if: github.event_name == 'push' && github.ref_type == 'tag' && steps.release_version.outputs.stable == 'true'
         working-directory: frontend
         env:
           RELEASE_NOTES: "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。"
+          USER_RELEASE_NOTES_PATH: ${{ github.workspace }}/${{ steps.release_notes.outputs.user_path }}
           UPDATE_MODE: normal
         run: node scripts/generate-github-updater-manifest.mjs
 

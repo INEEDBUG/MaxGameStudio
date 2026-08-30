@@ -18,6 +18,12 @@ describe("GitHub updater manifest", () => {
       signature: "signed-payload",
       notes: "更新说明",
       pubDate: "2026-08-13T00:00:00.000Z",
+      userReleaseNotes: {
+        version: "2.5.9",
+        fixed: ["修复更新失败"],
+        added: ["新增更新说明"],
+        optimized: [],
+      },
     });
 
     expect(manifest.version).toBe("2.5.9");
@@ -25,6 +31,12 @@ describe("GitHub updater manifest", () => {
     expect(manifest.platforms["windows-x86_64"]).toEqual({
       signature: "signed-payload",
       url: "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v2.5.9/MaxGameStudio_2.5.9_x64-setup.exe",
+    });
+    expect(manifest.user_release_notes).toEqual({
+      version: "2.5.9",
+      fixed: ["修复更新失败"],
+      added: ["新增更新说明"],
+      optimized: [],
     });
   });
 
@@ -37,5 +49,17 @@ describe("GitHub updater manifest", () => {
         signature: "signed-payload",
       }),
     ).toThrow(/stable semantic version/);
+  });
+
+  test("rejects user notes for a different release", () => {
+    expect(() =>
+      createGithubUpdaterManifest({
+        version: "3.0.1",
+        repository: "INEEDBUG/MaxGameStudio",
+        installerName: "MaxGameStudio_3.0.1_x64-setup.exe",
+        signature: "signed-payload",
+        userReleaseNotes: { version: "3.0.0", fixed: [], added: [], optimized: ["更快"] },
+      }),
+    ).toThrow(/version mismatch/);
   });
 });

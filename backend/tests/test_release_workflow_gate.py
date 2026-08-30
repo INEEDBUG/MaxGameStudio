@@ -53,4 +53,8 @@ def test_stable_release_requires_a_versioned_release_notes_file():
     notes = _step_block(workflow, "Resolve GitHub Release notes")
     assert 'docs/releases/v$env:BUILD_VERSION.zh-CN.md' in notes
     assert "Stable Release notes are required" in notes
+    assert 'docs/update-notes/v$env:BUILD_VERSION.json' in notes
+    assert "Plain-language update notes are required" in notes
+    manifest = _step_block(workflow, "Generate signed updater manifest")
+    assert "USER_RELEASE_NOTES_PATH:" in manifest
 
