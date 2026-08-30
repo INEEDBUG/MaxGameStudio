@@ -1,12 +1,29 @@
 {
-  "version": "3.0.1",
+  "version": "3.0.2",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-08-29T23:39:44.861Z",
+  "pub_date": "2026-08-30T14:02:55.603Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3BYTThLZWppcnlLTjVkTFR4RGk0dXZuNDFsbktsb3J6aDljUVhBZnY0MFlsR05pVWg0aTd6N2dJdnp1N1pZOGdVQWU2RHlaaE12R1lISnFXQ2xTelFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDQ2Nzc5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuMV94NjQtc2V0dXAuZXhlCjFUcUppTDBOYXZIZVMweStPWndTblhKQm9FalZTbW5VcGJFblRPeUtRTEVjMC9oM1RYRkpIVk1VU2ZIVjNOSkx0RDh2RVU1QmJrUVVwMkYrMFFneEFBPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.1/MaxGameStudio_3.0.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2pHMGU2N1lDWEVhdWd5V1VNRy9TNklPSXF6RXJCMFJKV0R2TDJDazhOVTA5M2JrbU4wQ2ZNY0JYV2dnQjZVYjE4bk80cWd1WTYydno5dmN2TjBsTmdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDk4NTY5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuMl94NjQtc2V0dXAuZXhlCkt4bElkSFBHWEh4R25uOTFTWnRXT1lZeHlVYXYwSVpVdnJIWmR1QXNKKy9VWjZjLzlPY052VXVqdklyL21KZUh1QWRvK3RHOE5LYTQvVHc4ZjkwSUFnPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.2/MaxGameStudio_3.0.2_x64-setup.exe"
     }
+  },
+  "user_release_notes": {
+    "version": "3.0.2",
+    "fixed": [
+      "修复大型 Demo 解析时内存占用过高、可能卡顿的问题。",
+      "修复首次打开 2D 回放时部分投掷物轨迹信息可能缺失的问题。"
+    ],
+    "added": [
+      "灵敏度实验室现在通过真实点击判断欠甩、过甩和偏轴误差，并告诉你应该提高还是降低游戏内灵敏度。",
+      "新增 Demo 快速预览，选择文件后可以更快看到地图、服务器和玩家名单。",
+      "更新弹窗现在会直接说明修复了什么、增加了什么、优化了什么。"
+    ],
+    "optimized": [
+      "大幅缩短大型 Demo 的完整解析时间。",
+      "优化批量解析调度，降低同时处理多个大文件时的内存压力。",
+      "灵敏度建议增加样本门槛和冲突保护，避免因单次误点给出武断结论。"
+    ]
   }
 }
