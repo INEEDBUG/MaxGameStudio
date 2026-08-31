@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import { cancelLeagueInGameSend, fetchLeagueLabStatus } from "../api/leagueLabApi";
-
-const POLL_INTERVAL_MS = 2500;
+import { cancelLeagueInGameSend } from "../api/leagueLabApi";
+import { subscribeLeagueLabStatus } from "../utils/leagueLabStatusSubscription";
 
 export default function LeagueAuxShortcutManager() {
   const registered = useRef(new Map());
@@ -13,12 +12,11 @@ export default function LeagueAuxShortcutManager() {
     if (!window.__TAURI_INTERNALS__) return undefined;
     let disposed = false;
 
-    const sync = async () => {
+    const sync = async (status) => {
       if (disposed || syncing.current) return;
       syncing.current = true;
       try {
-        const status = await fetchLeagueLabStatus();
-        if (disposed) return;
+        if (disposed || !status) return;
         const settings = status?.settings || {};
         const candidates = [
           [settings.in_game_send_enabled ? settings.in_game_cancel_shortcut : null, "cancel"],
@@ -60,11 +58,10 @@ export default function LeagueAuxShortcutManager() {
       }
     };
 
-    void sync();
-    const timer = window.setInterval(() => void sync(), POLL_INTERVAL_MS);
+    const unsubscribe = subscribeLeagueLabStatus((status) => { void sync(status); });
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      unsubscribe();
       for (const shortcut of registered.current.keys()) void unregister(shortcut).catch(() => {});
       registered.current.clear();
     };

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import LeagueAutomationLabPage from "./LeagueAutomationLabPage";
-import { fetchLeagueClientInstallations, fetchLeagueClients, fetchLeagueLabStatus, fetchLeagueMatches, fetchLeagueOngoingGame, fetchLeagueReplay, saveLeagueLabSettings } from "../api/leagueLabApi";
+import { fetchLeagueClientInstallations, fetchLeagueClients, fetchLeagueLabStatus, fetchLeagueMatches, fetchLeagueOngoingGame, fetchLeagueReplay, runLeagueLabAction, saveLeagueLabSettings } from "../api/leagueLabApi";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(null) }));
 
@@ -51,6 +51,15 @@ describe("LeagueAutomationLabPage", () => {
     fetchLeagueOngoingGame.mockResolvedValue({ available: false, players: [] });
     fetchLeagueReplay.mockResolvedValue({ enabled: false });
     saveLeagueLabSettings.mockResolvedValue({ ...status, settings: { ...status.settings, automation_enabled: true } });
+  });
+
+  it("keeps canonical League routes synchronized with the page tabs", async () => {
+    const onNavigateTab = vi.fn();
+    render(<LeagueAutomationLabPage routeTab="history" onNavigateTab={onNavigateTab} />);
+
+    expect(await screen.findByText("已连接：Tester")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "自动化" }));
+    expect(onNavigateTab).toHaveBeenCalledWith("automation", {});
   });
 
   it("shows the detected League client and persists the master switch", async () => {
@@ -152,5 +161,74 @@ describe("LeagueAutomationLabPage", () => {
     expect(screen.getAllByText("亮出禁用").length).toBeGreaterThan(0);
     expect(screen.getByText("禁用计划")).toBeTruthy();
     expect(screen.getByText("1.3 秒")).toBeTruthy();
+  });
+
+  it("serializes rapid settings writes and merges each update from the latest settings", async () => {
+    const writes = [];
+    const resolvers = [];
+    saveLeagueLabSettings.mockImplementation((next) => {
+      writes.push(next);
+      return new Promise((resolve) => resolvers.push(resolve));
+    });
+
+    render(<LeagueAutomationLabPage />);
+    await screen.findByText("已连接：Tester");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("switch", { name: "启用英雄联盟自动化" }));
+      fireEvent.click(screen.getByRole("switch", { name: "自动接受对局" }));
+    });
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({ automation_enabled: true, auto_accept_enabled: false });
+    resolvers[0]({ ...status, settings: { ...status.settings, ...writes[0] } });
+
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1]).toMatchObject({ automation_enabled: true, auto_accept_enabled: true });
+    resolvers[1]({ ...status, settings: { ...status.settings, ...writes[1] } });
+    await waitFor(() => expect(saveLeagueLabSettings).toHaveBeenCalledTimes(2));
+  });
+
+  it("handles manual accept, play-again and reconnect through one refreshable action path", async () => {
+    runLeagueLabAction.mockResolvedValue({ ...status, last_action: "ok" });
+    render(<LeagueAutomationLabPage />);
+    await screen.findByText("已连接：Tester");
+
+    for (const [label, action] of [["立即接受", "accept"], ["返回房间", "play-again"], ["立即重连", "reconnect"]]) {
+      const beforeRefreshes = fetchLeagueLabStatus.mock.calls.length;
+      const button = screen.getByRole("button", { name: label });
+      fireEvent.click(button);
+      await waitFor(() => expect(runLeagueLabAction).toHaveBeenCalledWith(action));
+      await waitFor(() => expect(fetchLeagueLabStatus.mock.calls.length).toBeGreaterThan(beforeRefreshes));
+      await waitFor(() => expect(button.disabled).toBe(false));
+    }
+
+    runLeagueLabAction.mockRejectedValueOnce(new Error("模拟操作失败"));
+    fireEvent.click(screen.getByRole("button", { name: "立即接受" }));
+    expect(await screen.findByText("模拟操作失败")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "立即接受" }).disabled).toBe(false));
+  });
+
+  it("prevents an older match-history response from replacing a newer page", async () => {
+    const requests = [];
+    fetchLeagueMatches.mockImplementation((limit, offset) => new Promise((resolve, reject) => requests.push({ limit, offset, resolve, reject })));
+
+    render(<LeagueAutomationLabPage routeTab="history" />);
+    await screen.findByText("已连接：Tester");
+    await waitFor(() => expect(requests).toHaveLength(1));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "战绩每页数量" }), { target: { value: "10" } });
+    await waitFor(() => expect(requests).toHaveLength(2));
+
+    await act(async () => {
+      requests[1].resolve({ matches: [{ game_id: 2002, champion_id: 1, champion_name: "安妮", participant_puuid: "self", team_id: 100, win: true, participants: [] }] });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("对局 ID 2002")).toBeTruthy();
+    await act(async () => {
+      requests[0].resolve({ matches: [{ game_id: 1001, champion_id: 1, champion_name: "安妮", participant_puuid: "self", team_id: 100, win: true, participants: [] }] });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("对局 ID 1001")).toBeNull();
   });
 });

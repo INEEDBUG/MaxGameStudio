@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import { fetchLeagueLabStatus, terminateLeagueGameClient } from "../api/leagueLabApi";
+import { terminateLeagueGameClient } from "../api/leagueLabApi";
+import { subscribeLeagueLabStatus } from "../utils/leagueLabStatusSubscription";
 
-const POLL_INTERVAL_MS = 2500;
 const TRIGGER_DEBOUNCE_MS = 1500;
 
 export default function LeagueGlobalShortcutManager() {
@@ -20,12 +20,11 @@ export default function LeagueGlobalShortcutManager() {
       if (current) await unregister(current).catch(() => {});
     };
 
-    const sync = async () => {
+    const sync = async (status) => {
       if (disposed || syncing.current) return;
       syncing.current = true;
       try {
-        const status = await fetchLeagueLabStatus();
-        if (disposed) return;
+        if (disposed || !status) return;
         const settings = status?.settings || {};
         const desired = settings.terminate_game_shortcut_enabled
           ? String(settings.terminate_game_shortcut || "").trim()
@@ -54,11 +53,10 @@ export default function LeagueGlobalShortcutManager() {
       }
     };
 
-    void sync();
-    const timer = window.setInterval(() => void sync(), POLL_INTERVAL_MS);
+    const unsubscribe = subscribeLeagueLabStatus((status) => { void sync(status); });
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      unsubscribe();
       void clearRegisteredShortcut();
     };
   }, []);

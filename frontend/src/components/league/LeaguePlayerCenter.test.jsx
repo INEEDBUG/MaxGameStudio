@@ -83,6 +83,12 @@ const makeBundle = (overrides = {}) => ({
   ...overrides,
 });
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
 describe("LeaguePlayerCenter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -116,6 +122,55 @@ describe("LeaguePlayerCenter", () => {
     expect(screen.getByText("最近对手")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Ally/ }));
     await waitFor(() => expect(fetchLeaguePlayer).toHaveBeenCalledWith("ally", 20, 0, ""));
+  });
+
+  it("loads search history exactly once when the current player is initialized", async () => {
+    render(<LeaguePlayerCenter currentPuuid="self" onError={vi.fn()} />);
+
+    await screen.findByTestId("player-profile-header");
+    await waitFor(() => expect(fetchLeaguePlayerSearchHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the newest player and auxiliary recent list when older responses resolve late", async () => {
+    const firstPlayer = deferred();
+    const secondPlayer = deferred();
+    const firstRecent = deferred();
+    const secondRecent = deferred();
+    fetchLeaguePlayer
+      .mockImplementationOnce(() => firstPlayer.promise)
+      .mockImplementationOnce(() => secondPlayer.promise);
+    fetchRecentLeaguePlayers
+      .mockImplementationOnce(() => firstRecent.promise)
+      .mockImplementationOnce(() => secondRecent.promise);
+
+    const { rerender } = render(<LeaguePlayerCenter currentPuuid="first" onError={vi.fn()} />);
+    rerender(<LeaguePlayerCenter currentPuuid="second" onError={vi.fn()} />);
+
+    secondPlayer.resolve(makeBundle({ summoner: { puuid: "second", game_name: "Second", tag_line: "CN1", summoner_level: 30 } }));
+    secondRecent.resolve({ players: [{ puuid: "second-recent", game_name: "Second recent" }] });
+    await screen.findByText("Second");
+    await waitFor(() => expect(screen.getByText("Second recent")).toBeTruthy());
+
+    firstPlayer.resolve(makeBundle({ summoner: { puuid: "first", game_name: "First", tag_line: "CN1", summoner_level: 30 } }));
+    firstRecent.resolve({ players: [{ puuid: "first-recent", game_name: "First recent" }] });
+
+    await waitFor(() => {
+      expect(screen.getByText("Second")).toBeTruthy();
+      expect(screen.getByText("Second recent")).toBeTruthy();
+      expect(screen.queryByText("First recent")).toBeNull();
+    });
+  });
+
+  it("reloads jungle analysis when the selected server changes", async () => {
+    fetchLeaguePlayerSearchServers.mockResolvedValue({ servers: [{ id: "na1", label: "NA1" }], current: "" });
+    render(<LeaguePlayerCenter currentPuuid="self" onError={vi.fn()} />);
+
+    await screen.findByTestId("player-profile-header");
+    await waitFor(() => expect(fetchLeaguePlayerJungleAnalysis).toHaveBeenCalledWith("self", 6, ""));
+    fetchLeaguePlayerJungleAnalysis.mockClear();
+
+    fireEvent.change(screen.getByLabelText("搜索区服"), { target: { value: "na1" } });
+    await waitFor(() => expect(fetchLeaguePlayerJungleAnalysis).toHaveBeenCalledWith("self", 6, "na1"));
   });
 
   it("renders the profile icon from the player payload", async () => {

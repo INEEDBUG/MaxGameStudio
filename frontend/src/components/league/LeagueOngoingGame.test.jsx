@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchLeagueLabStatus, fetchLeagueMatchDetails, fetchLeagueOngoingGame } from "../../api/leagueLabApi";
 import LeagueOngoingGame from "./LeagueOngoingGame";
@@ -45,6 +45,14 @@ describe("LeagueOngoingGame", () => {
     await waitFor(() => expect(fetchLeagueOngoingGame).toHaveBeenCalled());
   });
 
+  it("does not refetch global status when privacy settings are already provided", async () => {
+    render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
+
+    await screen.findByText("当前房间");
+    expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
+    expect(fetchLeagueLabStatus).not.toHaveBeenCalled();
+  });
+
   it("expands and collapses one player card without changing the player navigation", async () => {
     render(<LeagueOngoingGame />);
 
@@ -52,6 +60,7 @@ describe("LeagueOngoingGame", () => {
     expect(screen.queryByTestId("player-details")).toBeNull();
     fireEvent.click(expand);
     expect(await screen.findByTestId("player-details")).toBeTruthy();
+    expect(screen.getByTestId("ongoing-player-card-player-1").className.split(/\s+/)).not.toContain("h-[375px]");
     expect(screen.getByText("当前英雄使用")).toBeTruthy();
     expect(screen.getByText("近期对局")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "收起 Tester 详情" }));
@@ -109,6 +118,69 @@ describe("LeagueOngoingGame", () => {
     await waitFor(() => expect(fetchLeagueMatchDetails).toHaveBeenCalledWith(9001, "auto"));
   });
 
+  it("falls back to a populated games list when recent_matches is empty", async () => {
+    fetchLeagueOngoingGame.mockResolvedValueOnce({
+      available: true,
+      query_stage: "lobby",
+      players: [{
+        puuid: "player-1",
+        team: "LOBBY",
+        summoner: { gameName: "Tester" },
+        recent: { matches: 1, wins: 1, average_kda: 3, akari_score: 6 },
+        recent_matches: [],
+        games: { games: [{
+          gameId: 9003,
+          gameCreation: 1786600000000,
+          gameMode: "CLASSIC",
+          queueId: 420,
+          participantIdentities: [{ participantId: 1, player: { puuid: "player-1", gameName: "Tester" } }],
+          participants: [{ participantId: 1, teamId: 100, championId: 1, championName: "安妮", stats: { kills: 8, deaths: 2, assists: 4, win: true } }],
+        }] },
+        champion_usage: { mode: "none" },
+        performance_tags: [],
+      }],
+    });
+
+    render(<LeagueOngoingGame />);
+
+    const history = await screen.findByTestId("ongoing-mini-history");
+    expect(history.textContent).toContain("单双排位");
+    expect(history.textContent).toContain("8 / 2 / 4");
+  });
+
+  it("keeps the loading state visible until the initial live request resolves", async () => {
+    let resolveGame;
+    fetchLeagueOngoingGame.mockReturnValueOnce(new Promise((resolve) => { resolveGame = resolve; }));
+    render(<LeagueOngoingGame />);
+
+    expect(screen.getByTestId("ongoing-loading-state")).toBeTruthy();
+    expect(screen.queryByTestId("ongoing-idle-state")).toBeNull();
+
+    await act(async () => {
+      resolveGame({ available: true, query_stage: "lobby", players: [] });
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId("ongoing-loading-state")).toBeNull();
+    expect(screen.queryByTestId("ongoing-idle-state")).toBeNull();
+  });
+
+  it("does not let a live response overwrite a newly opened historical preview", async () => {
+    let resolveGame;
+    fetchLeagueOngoingGame.mockReturnValueOnce(new Promise((resolve) => { resolveGame = resolve; }));
+    const { rerender } = render(<LeagueOngoingGame />);
+    const preview = { historical_preview: true, available: true, game_id: 7001, players: [] };
+
+    rerender(<LeagueOngoingGame previewData={preview} />);
+    expect(await screen.findByText("历史对局模拟 · Game 7001")).toBeTruthy();
+
+    await act(async () => {
+      resolveGame({ available: true, query_stage: "lobby", players: [{ puuid: "live", team: "LOBBY", summoner: { gameName: "Live" } }] });
+      await Promise.resolve();
+    });
+    expect(screen.getByText("历史对局模拟 · Game 7001")).toBeTruthy();
+    expect(screen.queryByText("Live")).toBeNull();
+  });
+
   it("renders LeagueAkari-style recent result rows directly in each player card", async () => {
     fetchLeagueOngoingGame.mockResolvedValueOnce({
       available: true,
@@ -138,6 +210,27 @@ describe("LeagueOngoingGame", () => {
     expect(history.textContent).toContain("8 / 2 / 4");
     expect(history.textContent).toContain("2 / 7 / 3");
     expect(history.querySelectorAll("img")).toHaveLength(2);
+  });
+
+  it("accepts camelCase gameId summaries without dropping them", async () => {
+    fetchLeagueOngoingGame.mockResolvedValueOnce({
+      available: true,
+      query_stage: "lobby",
+      players: [{
+        puuid: "player-1",
+        team: "LOBBY",
+        summoner: { gameName: "Tester" },
+        recent: { matches: 1, wins: 1, average_kda: 3, akari_score: 6 },
+        recent_matches: [{ gameId: 9004, queueId: 420, gameMode: "CLASSIC", championId: 1, championName: "安妮", kills: 1, deaths: 0, assists: 2, win: true }],
+        champion_usage: { mode: "none" },
+        performance_tags: [],
+      }],
+    });
+
+    render(<LeagueOngoingGame />);
+
+    expect(await screen.findByTestId("ongoing-mini-history")).toBeTruthy();
+    expect(screen.getByText("单双排位")).toBeTruthy();
   });
 
   it("keeps the expanded card useful when the payload has no recent matches", async () => {

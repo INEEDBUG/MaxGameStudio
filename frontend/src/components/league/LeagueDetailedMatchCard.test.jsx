@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LeagueDetailedMatchCard from "./LeagueDetailedMatchCard";
 import { fetchLeagueLoadoutCatalog, fetchLeagueMatchDetails } from "../../api/leagueLabApi";
@@ -94,8 +94,8 @@ describe("LeagueDetailedMatchCard", () => {
     expect(screen.getAllByTitle("装备 1002").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "展开战绩详情" }));
     const teamTable = screen.getAllByTestId("league-team-table")[0];
-    expect(teamTable.firstElementChild.className).toContain("min-w-[920px]");
-    expect(teamTable.children[1].className).toContain("min-w-[920px]");
+    expect(teamTable.firstElementChild.className).toContain("min-w-[1000px]");
+    expect(teamTable.children[1].className).toContain("min-w-[1000px]");
   });
 
   it("renders LeagueAkari-style spells arrays and the local LCU asset URL", () => {
@@ -111,6 +111,21 @@ describe("LeagueDetailedMatchCard", () => {
 
     expect(screen.getByTitle("召唤师技能 4").getAttribute("src")).toBe("/api/league-lab/assets/summoner-spells/4.png");
     expect(screen.getByTitle("召唤师技能 14").getAttribute("src")).toBe("/api/league-lab/assets/summoner-spells/14.png");
+  });
+
+  it("renders both summoner spells in the expanded team table", () => {
+    const withParticipantSpells = {
+      ...match,
+      participants: match.participants.map((player, index) => index === 0
+        ? { ...player, spell1_id: 4, spell2_id: 14 }
+        : player),
+    };
+    render(<LeagueDetailedMatchCard match={withParticipantSpells} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开战绩详情" }));
+    const teamTable = screen.getAllByTestId("league-team-table")[0];
+    expect(within(teamTable).getByTitle("召唤师技能 4").getAttribute("src")).toBe("/api/league-lab/assets/summoner-spells/4.png");
+    expect(within(teamTable).getByTitle("召唤师技能 14").getAttribute("src")).toBe("/api/league-lab/assets/summoner-spells/14.png");
   });
 
   it("loads timeline details only when that tab is opened", async () => {

@@ -1,14 +1,13 @@
 import { useEffect, useRef } from "react";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { fetchLeagueLabStatus, fetchLeagueOngoingGame, sendLeagueInGameLines, sendLeagueInGamePreset } from "../api/leagueLabApi";
+import { subscribeLeagueLabStatus } from "../utils/leagueLabStatusSubscription";
 import {
   buildLeaguePresetLines,
   getLeaguePresetOptions,
   selectLeaguePresetPlayers,
   shortcutSettingsKey,
 } from "../utils/leagueChatPresets";
-
-const POLL_INTERVAL_MS = 2500;
 
 export default function LeaguePresetShortcutManager() {
   const registered = useRef(new Map());
@@ -19,12 +18,11 @@ export default function LeaguePresetShortcutManager() {
     if (!window.__TAURI_INTERNALS__) return undefined;
     let disposed = false;
 
-    const sync = async () => {
+    const sync = async (status) => {
       if (disposed || syncing.current) return;
       syncing.current = true;
       try {
-        const status = await fetchLeagueLabStatus();
-        if (disposed) return;
+        if (disposed || !status) return;
         const settings = status?.settings || {};
         const desired = new Map();
         if (settings.toolkit_account_actions_enabled && settings.in_game_send_enabled) {
@@ -56,6 +54,9 @@ export default function LeaguePresetShortcutManager() {
               }
               const [, kind, target] = action.split(":");
               try {
+                // A shortcut is an explicit user action, so refresh the
+                // snapshot once for the current summoner/options. This is
+                // separate from the shared 1.5 s background status poll.
                 const [game, liveStatus] = await Promise.all([fetchLeagueOngoingGame(), fetchLeagueLabStatus()]);
                 const players = game?.players || [];
                 const options = getLeaguePresetOptions(liveStatus?.settings, kind);
@@ -82,11 +83,10 @@ export default function LeaguePresetShortcutManager() {
       }
     };
 
-    void sync();
-    const timer = window.setInterval(() => void sync(), POLL_INTERVAL_MS);
+    const unsubscribe = subscribeLeagueLabStatus((status) => { void sync(status); });
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      unsubscribe();
       for (const shortcut of registered.current.keys()) void unregister(shortcut).catch(() => {});
       registered.current.clear();
     };

@@ -62,7 +62,8 @@ function historyRows(player) {
     player?.games?.games,
     player?.games,
   ];
-  return candidates.find((value) => Array.isArray(value)) || [];
+  const arrays = candidates.filter((value) => Array.isArray(value));
+  return arrays.find((value) => value.length > 0) || arrays[0] || [];
 }
 
 function unwrapHistoryGame(value) {
@@ -81,9 +82,10 @@ function normalizeHistoryMatches(player) {
   const puuid = String(player?.puuid || "");
   return historyRows(player).map((entry, index) => {
     const game = unwrapHistoryGame(entry);
-    if (game.game_id != null || game.gameId == null && !Array.isArray(game.participants)) {
-      if (game.game_id == null) return null;
-      return { ...game, participant_puuid: game.participant_puuid || puuid, _history_index: index };
+    if (game.game_id != null || (game.gameId != null && !Array.isArray(game.participants))) {
+      const gameId = game.game_id ?? game.gameId;
+      if (gameId == null) return null;
+      return { ...game, game_id: gameId, participant_puuid: game.participant_puuid || puuid, _history_index: index };
     }
     const rows = Array.isArray(game.participants) ? game.participants : [];
     if (!rows.length) return null;
@@ -391,7 +393,7 @@ function PlayerCard({ player, index, data, privacy, onOpenPlayer, onError, onPre
   const championUsage = Array.isArray(analysis?.champions) ? analysis.champions : Object.values(analysis?.champions || {});
   const championUsageRows = championUsage.length ? championUsage : (player.rating_summary?.main_champions || []);
   const outlier = data?.analysis?.players?.[player.puuid]?.kda_outlier || player?.analysis?.kda_outlier;
-  return <article data-testid={`ongoing-player-card-${player.puuid || index}`} className={`relative flex h-[375px] min-h-[375px] min-w-0 flex-col overflow-hidden rounded-lg border bg-[#17181c]/95 ${cardBorder}`}>
+  return <article data-testid={`ongoing-player-card-${player.puuid || index}`} className={`relative flex ${expanded ? "min-h-[375px]" : "h-[375px] min-h-[375px]"} min-w-0 flex-col overflow-hidden rounded-lg border bg-[#17181c]/95 ${cardBorder}`}>
     {player.premade_group ? <span aria-label={`组排 ${player.premade_group}`} className="absolute right-0 top-0 h-4 w-4 translate-x-1/2 -translate-y-1/2 rotate-45 bg-violet-400/80"/> : null}
     <div className="flex items-start gap-2 border-b border-white/10 p-2">
       <button type="button" disabled={!player.puuid} aria-label={`${playerName} 头像`} title="打开玩家中心" onClick={() => player.puuid && onOpenPlayer(player.puuid)} className="relative h-10 w-10 shrink-0 rounded-full bg-white/[.05] disabled:cursor-default">
@@ -451,22 +453,37 @@ export default function LeagueOngoingGame({ streamerMode, useAliases, previewDat
     const sequence = ++requestSequence.current;
     setBusy(true);
     try {
-      const [game, status] = await Promise.all([fetchLeagueOngoingGame(), fetchLeagueLabStatus()]);
+      const privacyProvided = streamerMode != null && useAliases != null;
+      const [game, status] = privacyProvided
+        ? [await fetchLeagueOngoingGame(), null]
+        : await Promise.all([fetchLeagueOngoingGame(), fetchLeagueLabStatus()]);
       if (sequence !== requestSequence.current) return;
       setData(game);
       setPrivacy({ enabled: streamerMode ?? Boolean(status?.settings?.streamer_mode_enabled), aliases: useAliases ?? Boolean(status?.settings?.streamer_mode_use_aliases) });
     } catch (error) {
-      onError(error?.response?.data?.detail || "实时对局读取失败");
+      if (sequence === requestSequence.current) onError(error?.response?.data?.detail || "实时对局读取失败");
     } finally {
-      requestInFlight.current = false;
-      setBusy(false);
+      if (sequence === requestSequence.current) {
+        requestInFlight.current = false;
+        setBusy(false);
+      }
     }
   };
   useEffect(() => {
-    if (previewData) { setData(previewData); return undefined; }
+    if (previewData) {
+      requestSequence.current += 1;
+      requestInFlight.current = false;
+      setBusy(false);
+      setData(previewData);
+      return undefined;
+    }
     load();
     const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      requestSequence.current += 1;
+      requestInFlight.current = false;
+    };
   }, [streamerMode, useAliases, previewData]);
   const grouped = (data?.players || []).reduce((out, row) => {
     const key = String(row.team || "未知队伍");
@@ -479,7 +496,8 @@ export default function LeagueOngoingGame({ streamerMode, useAliases, previewDat
   });
   return <div data-testid="ongoing-game-root" className="mx-auto w-full max-w-[1500px] space-y-4 pb-6">
     <div className="flex items-center justify-between border-b border-white/10 pb-2"><div className="min-w-0"><h2 className="truncate font-bold"><Users className="mr-2 inline h-4 w-4"/>{data?.historical_preview ? `历史对局模拟 · Game ${data.game_id}` : queueMeta(data).title}</h2><p className="mt-1 truncate text-xs text-cs2-text-muted">{data?.historical_preview ? "只读重放历史阵容与结算数据，不会向客户端写入任何状态。" : data?.query_stage === "lobby" ? "房间阶段已开始分析当前队伍；进入英雄选择后会自动补全对手、英雄与分路。" : "读取当前 Gameflow 队伍，分析近期表现、当前英雄、组排关系和双方打野路线倾向。"}</p></div>{data?.historical_preview ? <button onClick={onExitPreview} className="rounded-xl border border-cs2-border px-3 py-2 text-xs">退出模拟</button> : <button onClick={load} className="rounded-xl border border-cs2-border px-3 py-2 text-xs"><RefreshCw className={`mr-1 inline h-4 w-4 ${busy ? "animate-spin" : ""}`}/>刷新</button>}</div>
-    {!data?.available ? <div data-testid="ongoing-idle-state" className="flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cs2-border bg-white/[.015] p-12 text-center text-sm text-cs2-text-muted"><span className="grid h-12 w-12 place-items-center rounded-full bg-white/[.04] text-xl">{data?.is_connected === false ? "↯" : data?.is_spectating ? "◌" : "⌁"}</span><span>{idleCopy(data)}</span><span className="text-[11px]">进入房间、英雄选择或游戏阶段后自动显示玩家</span></div> : null}
+    {busy && !data && !previewData ? <div data-testid="ongoing-loading-state" className="flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-2xl border border-cs2-border-subtle bg-white/[.015] p-12 text-center text-sm text-cs2-text-muted"><RefreshCw className="h-6 w-6 animate-spin text-cyan-300"/><span>正在读取实时对局…</span></div> : null}
+    {!busy && !previewData && !data?.available ? <div data-testid="ongoing-idle-state" className="flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cs2-border bg-white/[.015] p-12 text-center text-sm text-cs2-text-muted"><span className="grid h-12 w-12 place-items-center rounded-full bg-white/[.04] text-xl">{data?.is_connected === false ? "↯" : data?.is_spectating ? "◌" : "⌁"}</span><span>{idleCopy(data)}</span><span className="text-[11px]">进入房间、英雄选择或游戏阶段后自动显示玩家</span></div> : null}
     {orderedGroups.map(([team, players]) => <TeamSection key={team} team={team} players={players} data={data} privacy={privacy} onOpenPlayer={onOpenPlayer} onError={onError} onPreviewGame={onPreviewGame}/>) }
   </div>;
 }

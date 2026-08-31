@@ -16,7 +16,7 @@
 > **One MaxGameStudio desktop app:** the CS2 workspace, League Lab, and VALORANT Lab share the same Tauri shell and sidebar; the two labs are not separate desktop applications.
 
 > [!NOTE]
-> **The current stable release is `v3.0.2`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.2`. The CS2 workspace, League Lab, and VALORANT Lab ship in one installer.
+> **The current stable release is `v3.0.3`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.3`. The CS2 workspace, League features, and VALORANT features ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
@@ -47,7 +47,7 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ### Screenshots
 
-These screenshots come from the `v2.5.16` desktop UI baseline and local demo fixtures; they are not presented as `v3.0.2`-specific screenshots. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
+These screenshots come from the `v2.5.16` desktop UI baseline and local demo fixtures; they are not presented as `v3.0.3`-specific screenshots. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
 
 <table>
   <tr>
@@ -161,7 +161,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v2.5.16 · Multi-game labs** | League Lab and VALORANT Lab merged into the stable MaxGameStudio installer with legacy in-place updater compatibility | ✅ Released |
 | **v2.5.17 · Withdrawn** | Critical upgrade-installation and automatic-update boundary defects | ⛔ Withdrawn |
 | **v3.0.1 · Upgrade fixes** | Fixes safe cleanup, version skipping/forced updates, and Release title version parsing | ✅ Released |
-| **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Current stable |
+| **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
+| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game, makes League features easier to find, merges duplicate status requests, and fixes Mini/page races | ✅ Current stable |
 
 ### Planned
 

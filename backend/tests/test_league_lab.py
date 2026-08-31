@@ -797,6 +797,148 @@ def test_ready_check_gameflow_event_accepts_immediately(monkeypatch):
     assert service._accept_due_at == float("inf")
 
 
+def test_ready_check_event_invalidates_status_snapshot_without_changing_acceptance(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    service._snapshot_cache_at = time.monotonic()
+    calls = []
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(service, "_record_action", record)
+    asyncio.run(service._handle_lcu_event({
+        "uri": "/lol-gameflow/v1/gameflow-phase",
+        "data": "ReadyCheck",
+    }))
+
+    assert service._snapshot_cache_at == 0.0
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
+def test_snapshot_single_flight_coalesces_concurrent_refreshes(monkeypatch):
+    service = LeagueLabService()
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    calls = []
+
+    async def refresh_connection(*, force=False):
+        calls.append(("connection", force))
+        refresh_started.set()
+        return True
+
+    async def refresh_state():
+        calls.append(("state",))
+        await release_refresh.wait()
+
+    monkeypatch.setattr(service, "refresh_connection", refresh_connection)
+    monkeypatch.setattr(service, "_refresh_state", refresh_state)
+
+    async def exercise():
+        first = asyncio.create_task(service.snapshot())
+        await refresh_started.wait()
+        second = asyncio.create_task(service.snapshot())
+        await asyncio.sleep(0)
+        release_refresh.set()
+        return await asyncio.gather(first, second)
+
+    results = asyncio.run(exercise())
+    diagnostics = results[-1]["diagnostics"]
+
+    assert len(results) == 2
+    assert calls == [("connection", True), ("state",)]
+    assert diagnostics["refresh_count"] == 1
+    assert diagnostics["coalesced_count"] == 1
+    assert diagnostics["last_duration_ms"] is not None
+    assert diagnostics["age_ms"] >= 0
+
+
+def test_snapshot_ttl_skips_refresh_then_expires(monkeypatch):
+    service = LeagueLabService()
+    refresh_count = 0
+
+    async def refresh_connection(*, force=False):
+        nonlocal refresh_count
+        refresh_count += 1
+        return False
+
+    monkeypatch.setattr(service, "refresh_connection", refresh_connection)
+
+    async def exercise():
+        first = await service.snapshot()
+        second = await service.snapshot()
+        service._snapshot_cache_at -= service._SNAPSHOT_CACHE_TTL_SECONDS + 0.001
+        third = await service.snapshot()
+        return first, second, third
+
+    results = asyncio.run(exercise())
+
+    assert all(isinstance(result, dict) for result in results)
+    assert refresh_count == 2
+    assert results[-1]["diagnostics"]["refresh_count"] == 2
+    assert results[-1]["diagnostics"]["coalesced_count"] == 0
+
+
+def test_snapshot_cache_invalidates_on_connection_replacement_and_settings(monkeypatch):
+    service = LeagueLabService()
+    service._snapshot_cache_at = time.monotonic()
+    service.credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+
+    service._replace_credentials(None)
+    assert service._snapshot_cache_at == 0.0
+
+    service._snapshot_cache_at = time.monotonic()
+    monkeypatch.setattr(service, "_write_settings", lambda _settings: None)
+    service.update_settings(service.settings.model_copy(update={"mini_enabled": not service.settings.mini_enabled}))
+
+    assert service._snapshot_cache_at == 0.0
+
+
+def test_successful_non_get_request_invalidates_snapshot_cache(monkeypatch):
+    service = LeagueLabService()
+    service.credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service._last_discovery_at = time.monotonic()
+    service._snapshot_cache_at = time.monotonic()
+
+    class FakeResponse:
+        status_code = 204
+        content = b""
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def request(self, method, url, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+
+    async def exercise():
+        await service.request("GET", "/read-only")
+        read_cache_at = service._snapshot_cache_at
+        await service.request("POST", "/write")
+        return read_cache_at
+
+    read_cache_at = asyncio.run(exercise())
+
+    assert read_cache_at > 0
+    assert service._snapshot_cache_at == 0.0
+    assert service.status()["diagnostics"]["age_ms"] is None
+
+
 def test_ready_check_event_starts_real_timer_from_event(monkeypatch):
     service = LeagueLabService()
     service.settings = LeagueLabSettings(
@@ -4058,7 +4200,8 @@ def test_ongoing_game_reads_lobby_filters_current_queue_and_sorts(monkeypatch):
     monkeypatch.setattr(league_lab.league_lab_service, "phase", "Lobby")
     monkeypatch.setattr(league_lab.league_lab_service, "request", request)
     monkeypatch.setattr(league_lab, "_champion_names", champion_names)
-    monkeypatch.setattr(league_lab, "_read_player_tags", lambda: {})
+    player_tag_reads = []
+    monkeypatch.setattr(league_lab, "_read_player_tags", lambda: player_tag_reads.append(True) or {})
     remembered = []
     monkeypatch.setattr(league_lab, "_remember_recent_players", lambda *args: remembered.append(args))
     monkeypatch.setattr(league_lab, "_ongoing_cache", {"key": "", "expires_at": 0.0, "payload": None})
@@ -4084,6 +4227,7 @@ def test_ongoing_game_reads_lobby_filters_current_queue_and_sorts(monkeypatch):
     assert result["analysis"]["players"]["high"]["winLoss"]["all"]["winRate"] == 1.0
     assert result["analysis"]["teams"]["LOBBY"]["games"] == 2
     assert remembered == []
+    assert len(player_tag_reads) == 1
     assert any(path == "/lol-lobby/v2/lobby" for _, path, _ in calls)
 
 

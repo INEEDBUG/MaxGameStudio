@@ -93,18 +93,32 @@ describe("LeagueMiniAutoManager", () => {
     view.unmount();
   });
 
-  it("does not overlap polls while a slow status request is in flight", async () => {
-    let resolveStatus;
-    fetchLeagueLabStatus.mockImplementation(() => new Promise((resolve) => {
-      resolveStatus = resolve;
-    }));
+  it("applies the newest phase after a slow native window sync", async () => {
+    let resolveNativeSync;
+    fetchLeagueLabStatus
+      .mockResolvedValueOnce({
+        connected: true,
+        phase: "Lobby",
+        mini_should_show: true,
+        cooldown_timer_should_show: false,
+        settings: { mini_enabled: true, mini_auto_show: true },
+      })
+      .mockResolvedValue({
+        connected: true,
+        phase: "InProgress",
+        mini_should_show: false,
+        cooldown_timer_should_show: false,
+        settings: { mini_enabled: true, mini_auto_show: true },
+      });
+    invoke.mockImplementationOnce(() => new Promise((resolve) => { resolveNativeSync = resolve; }));
     const view = render(<LeagueMiniAutoManager />);
 
     await waitFor(() => expect(fetchLeagueLabStatus).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_league_content_protection", { enabled: false }));
     await new Promise((resolve) => setTimeout(resolve, 1600));
-    expect(fetchLeagueLabStatus).toHaveBeenCalledTimes(1);
+    expect(fetchLeagueLabStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
 
-    resolveStatus({ connected: true, phase: "InProgress", mini_should_show: true, settings: { mini_enabled: true, mini_auto_show: true } });
+    resolveNativeSync();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("sync_league_mini", {
       shouldShow: false,
       context: "connected:InProgress:playing",

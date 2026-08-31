@@ -85,6 +85,48 @@ const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage")
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 const UPDATE_SKIP_STORAGE_KEY = "maxgamestudio.update.skip_version";
+const LEAGUE_ROUTE_TABS = new Set(["automation", "history", "players", "ongoing", "toolkit"]);
+
+function PreserveSearchRedirect({ to }) {
+  const location = useLocation();
+  return <Navigate to={{ pathname: to, search: location.search, hash: location.hash }} replace />;
+}
+
+function LegacyLeagueRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const requested = params.get("league_tab");
+  const tab = LEAGUE_ROUTE_TABS.has(requested) ? requested : "automation";
+  params.delete("league_tab");
+  const search = params.toString();
+  return <Navigate to={{ pathname: `/league/${tab}`, search: search ? `?${search}` : "", hash: location.hash }} replace />;
+}
+
+function LegacyValorantRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const requested = String(params.get("section") || params.get("tab") || "").toLowerCase();
+  params.delete("section");
+  params.delete("tab");
+  const search = params.toString();
+  return <Navigate to={{ pathname: requested === "crosshair" ? "/valorant/crosshair" : "/valorant/stretch", search: search ? `?${search}` : "", hash: location.hash }} replace />;
+}
+
+function LeagueRoutePage({ routeTab }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = new URLSearchParams(location.search);
+  const navigateTab = useCallback((nextTab, extra = {}) => {
+    const nextParams = new URLSearchParams(location.search);
+    nextParams.delete("league_tab");
+    if (nextTab !== "players") nextParams.delete("player");
+    if (nextTab !== "toolkit") nextParams.delete("toolkit");
+    if (nextTab === "players" && extra.player) nextParams.set("player", extra.player);
+    const search = nextParams.toString();
+    navigate({ pathname: `/league/${nextTab}`, search: search ? `?${search}` : "" });
+  }, [location.search, navigate]);
+  return <LeagueAutomationLabPage routeTab={routeTab} routeToolkit={routeTab === "toolkit" ? params.get("toolkit") || "" : ""} onNavigateTab={navigateTab} />;
+}
 
 function readSkippedUpdateVersion() {
   try {
@@ -3360,7 +3402,7 @@ export default function App() {
   };
 
   const parsingShownInline =
-    location.pathname === "/analysis" &&
+    ["/analysis", "/cs2/analysis"].includes(location.pathname) &&
     (parsing || anyDemoParsing || analysisInlineProgress?.active === true);
 
   const showGlobalNotice =
@@ -3463,25 +3505,53 @@ export default function App() {
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
-                <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<DemoAnalysisPreviewPage />} />
-                <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
-                <Route path="/queue" element={<RecordingQueuePage />} />
-                <Route path="/recorded-videos" element={<RecordedVideosPage />} />
-                <Route path="/montage" element={<MontageWorkbenchPage />} />
-                <Route path="/lite-cut" element={<LiteCutEditorPage />} />
-                <Route path="/lite-cut/editor" element={<Navigate to="/lite-cut" replace />} />
-                <Route path="/lite-cut/text" element={<Navigate to="/lite-cut" replace />} />
-                <Route path="/lite-cut/color" element={<Navigate to="/lite-cut" replace />} />
-                <Route path="/lite-cut/export" element={<LiteCutExportPage />} />
-                <Route path="/params" element={<RecordingParamsPage />} />
+                <Route path="/cs2" element={<Navigate to="/cs2/guide" replace />} />
+                <Route path="/cs2/guide" element={<GuidePage />} />
+                <Route path="/cs2/library" element={<DemoLibraryPage />} />
+                <Route path="/cs2/analysis" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/cs2/queue" element={<RecordingQueuePage />} />
+                <Route path="/cs2/recorded-videos" element={<RecordedVideosPage />} />
+                <Route path="/cs2/montage" element={<MontageWorkbenchPage />} />
+                <Route path="/cs2/lite-cut" element={<LiteCutEditorPage />} />
+                <Route path="/cs2/lite-cut/editor" element={<Navigate to="/cs2/lite-cut" replace />} />
+                <Route path="/cs2/lite-cut/text" element={<Navigate to="/cs2/lite-cut" replace />} />
+                <Route path="/cs2/lite-cut/color" element={<Navigate to="/cs2/lite-cut" replace />} />
+                <Route path="/cs2/lite-cut/export" element={<LiteCutExportPage />} />
+                <Route path="/cs2/params" element={<RecordingParamsPage />} />
+                <Route path="/cs2/player-game-config" element={<PlayerGameConfigPage />} />
+                <Route path="/cs2/match-history" element={<MatchHistoryPage />} />
+                <Route path="/valorant" element={<Navigate to="/valorant/stretch" replace />} />
+                <Route path="/valorant/stretch" element={<ValorantLabPage section="stretch" />} />
+                <Route path="/valorant/crosshair" element={<ValorantLabPage section="crosshair" />} />
+                <Route path="/league" element={<Navigate to="/league/automation" replace />} />
+                <Route path="/league/automation" element={<LeagueRoutePage routeTab="automation" />} />
+                <Route path="/league/history" element={<LeagueRoutePage routeTab="history" />} />
+                <Route path="/league/players" element={<LeagueRoutePage routeTab="players" />} />
+                <Route path="/league/ongoing" element={<LeagueRoutePage routeTab="ongoing" />} />
+                <Route path="/league/toolkit" element={<LeagueRoutePage routeTab="toolkit" />} />
+                <Route path="/peripherals" element={<Navigate to="/peripherals/sensitivity" replace />} />
+                <Route path="/peripherals/sensitivity" element={<SensitivityLabPage />} />
+                <Route path="/peripherals/input" element={<MagneticInputLabPage />} />
+
+                <Route path="/library" element={<PreserveSearchRedirect to="/cs2/library" />} />
+                <Route path="/analysis" element={<PreserveSearchRedirect to="/cs2/analysis" />} />
+                <Route path="/demo-analysis-preview" element={<PreserveSearchRedirect to="/cs2/analysis" />} />
+                <Route path="/queue" element={<PreserveSearchRedirect to="/cs2/queue" />} />
+                <Route path="/recorded-videos" element={<PreserveSearchRedirect to="/cs2/recorded-videos" />} />
+                <Route path="/montage" element={<PreserveSearchRedirect to="/cs2/montage" />} />
+                <Route path="/lite-cut" element={<PreserveSearchRedirect to="/cs2/lite-cut" />} />
+                <Route path="/lite-cut/editor" element={<PreserveSearchRedirect to="/cs2/lite-cut" />} />
+                <Route path="/lite-cut/text" element={<PreserveSearchRedirect to="/cs2/lite-cut" />} />
+                <Route path="/lite-cut/color" element={<PreserveSearchRedirect to="/cs2/lite-cut" />} />
+                <Route path="/lite-cut/export" element={<PreserveSearchRedirect to="/cs2/lite-cut/export" />} />
+                <Route path="/params" element={<PreserveSearchRedirect to="/cs2/params" />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
-                <Route path="/match-history" element={<MatchHistoryPage />} />
-                <Route path="/sensitivity-lab" element={<SensitivityLabPage />} />
-                <Route path="/input-lab" element={<MagneticInputLabPage />} />
-                <Route path="/valorant-lab" element={<ValorantLabPage />} />
-                <Route path="/league-lab" element={<LeagueAutomationLabPage />} />
+                <Route path="/player-game-config" element={<PreserveSearchRedirect to="/cs2/player-game-config" />} />
+                <Route path="/match-history" element={<PreserveSearchRedirect to="/cs2/match-history" />} />
+                <Route path="/sensitivity-lab" element={<PreserveSearchRedirect to="/peripherals/sensitivity" />} />
+                <Route path="/input-lab" element={<PreserveSearchRedirect to="/peripherals/input" />} />
+                <Route path="/valorant-lab" element={<LegacyValorantRedirect />} />
+                <Route path="/league-lab" element={<LegacyLeagueRedirect />} />
                 <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
                 <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

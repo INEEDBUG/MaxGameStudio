@@ -23,7 +23,7 @@ const TABS = [
 // Keep every summary row on one shared column track.  The explicit minimum
 // width lets narrow windows scroll instead of allowing KP/damage/CS to drift
 // when a player name or item build is longer than its neighbour's.
-const TEAM_TABLE_GRID = "grid min-w-[920px] grid-cols-[minmax(220px,1fr)_112px_82px_100px_106px_218px] gap-2";
+const TEAM_TABLE_GRID = "grid min-w-[1000px] grid-cols-[minmax(220px,1fr)_72px_112px_82px_100px_106px_218px] gap-2";
 const MATCH_METRIC_GRID = "grid min-w-0 flex-1 grid-cols-[minmax(104px,1fr)_minmax(104px,1fr)_minmax(104px,1fr)] gap-2";
 
 function formatNumber(value) {
@@ -278,7 +278,7 @@ function TeamTable({ players, targetPuuid, streamerMode, useAliases, onOpenPlaye
   const teamDamage = players.reduce((sum, player) => sum + Number(player.damage || player.totalDamageDealtToChampions || 0), 0);
   return <div data-testid="league-team-table" className="overflow-x-auto rounded-xl border border-cs2-border-subtle">
     <div className={`${TEAM_TABLE_GRID} border-b border-cs2-border-subtle bg-white/[.035] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-cs2-text-muted`}>
-      <span>玩家</span><span className="text-center">K / D / A</span><span className="text-right">参团</span><span className="text-right">伤害</span><span className="text-right">补刀 / 金币</span><span>装备</span>
+      <span>玩家</span><span>召唤师技能</span><span className="text-center">K / D / A</span><span className="text-right">参团</span><span className="text-right">伤害</span><span className="text-right">补刀 / 金币</span><span>装备</span>
     </div>
     {players.map((player, index) => {
       const highlighted = player.puuid && player.puuid === targetPuuid;
@@ -289,6 +289,7 @@ function TeamTable({ players, targetPuuid, streamerMode, useAliases, onOpenPlaye
           <Icon src={getLeagueChampionIconUrl(player.champion_id)} title={player.champion_name} className="h-8 w-8" />
           <span className="min-w-0"><b className="block truncate">{playerName(player, index, streamerMode, useAliases)}</b><span className="text-[10px] text-cs2-text-muted">{player.position || player.role || player.champion_name}</span></span>
         </button>
+        <SpellIcons player={player} compact />
         <span className="text-center font-mono font-bold"><span>{player.kills ?? "—"}</span><span className="text-cs2-text-muted"> / </span><span className="text-rose-300">{player.deaths ?? "—"}</span><span className="text-cs2-text-muted"> / </span><span>{player.assists ?? "—"}</span></span>
         <span className="text-right font-mono">{kp == null ? "—" : `${kp}%`}</span>
         <span className="text-right"><b>{formatNumber(player.damage ?? player.totalDamageDealtToChampions)}</b><small className="block text-[9px] text-cs2-text-muted">{damageShare == null ? "—" : `${damageShare}%`}</small></span>

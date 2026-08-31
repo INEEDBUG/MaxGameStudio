@@ -105,6 +105,15 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
   const jungleInFlight = useRef(null);
   const disposed = useRef(false);
   const lastRefreshSignal = useRef(refreshSignal);
+  const auxiliaryRequest = useRef({ recent: 0, searchHistory: 0, friends: 0, servers: 0 });
+  const isCurrentLoad = (request) => !disposed.current && request === loadRequest.current;
+  const beginAuxiliaryRequest = (kind, ownerRequest = loadRequest.current) => ({
+    ownerRequest,
+    sequence: ++auxiliaryRequest.current[kind],
+  });
+  const isCurrentAuxiliary = (kind, request) => (
+    isCurrentLoad(request.ownerRequest) && request.sequence === auxiliaryRequest.current[kind]
+  );
 
   const load = async (target = currentPuuid, nextPage = 0, collect = false, serverOverride) => {
     const trimmed = String(target || "").trim();
@@ -122,7 +131,7 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
           body = await searchLeaguePlayer(trimmed.slice(0, splitAt), trimmed.slice(splitAt + 1), routeServer);
         } else if (trimmed) body = await fetchLeaguePlayer(trimmed, collect ? 100 : 20, collect ? 0 : nextPage * 20, routeServer);
         else body = await fetchCurrentLeaguePlayer();
-        if (disposed.current || request !== loadRequest.current) return;
+        if (!isCurrentLoad(request)) return;
         const nextPuuid = String(body?.summoner?.puuid || "");
         if (nextPuuid && nextPuuid !== String(data?.summoner?.puuid || "")) setActiveTab("overview");
         setData(body && typeof body === "object" ? body : null);
@@ -130,14 +139,11 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
         setPage(nextPage);
         setTag({ label: "", note: "", color: "emerald", ...(body?.tag || {}) });
         if (body?.server_id) setSelectedServer(body.server_id);
-        try {
-          const history = await fetchLeaguePlayerSearchHistory();
-          if (!disposed.current && request === loadRequest.current) setSearchHistory(Array.isArray(history?.players) ? history.players : []);
-        } catch { /* keep the current local list */ }
+        await refreshSearchHistory(request);
       } catch (error) {
-        if (!disposed.current && request === loadRequest.current) onError?.(error?.response?.data?.detail || "玩家资料读取失败");
+        if (isCurrentLoad(request)) onError?.(error?.response?.data?.detail || "玩家资料读取失败");
       } finally {
-        if (!disposed.current && request === loadRequest.current) {
+        if (isCurrentLoad(request)) {
           setBusy(false);
           onLoadingChange?.(false);
         }
@@ -146,10 +152,44 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
     loadInFlight.current = { key, promise };
     try { return await promise; } finally { if (loadInFlight.current?.key === key) loadInFlight.current = null; }
   };
-  const refreshRecent = async () => { try { setRecent((await fetchRecentLeaguePlayers()).players || []); } catch { setRecent([]); } };
-  const refreshSearchHistory = async () => { try { setSearchHistory((await fetchLeaguePlayerSearchHistory()).players || []); } catch { setSearchHistory([]); } };
-  const refreshFriends = async () => { try { setFriends((await fetchLeaguePlayerFriends()).friends || []); } catch { setFriends([]); } };
-  const refreshServers = async () => { try { const body = await fetchLeaguePlayerSearchServers(); setServers(body.servers || []); setSelectedServer((value) => value || body.current || ""); } catch { setServers([]); } };
+  const refreshRecent = async (ownerRequest = loadRequest.current) => {
+    const request = beginAuxiliaryRequest("recent", ownerRequest);
+    try {
+      const body = await fetchRecentLeaguePlayers();
+      if (isCurrentAuxiliary("recent", request)) setRecent(Array.isArray(body?.players) ? body.players : []);
+    } catch {
+      if (isCurrentAuxiliary("recent", request)) setRecent([]);
+    }
+  };
+  const refreshSearchHistory = async (ownerRequest = loadRequest.current) => {
+    const request = beginAuxiliaryRequest("searchHistory", ownerRequest);
+    try {
+      const body = await fetchLeaguePlayerSearchHistory();
+      if (isCurrentAuxiliary("searchHistory", request)) setSearchHistory(Array.isArray(body?.players) ? body.players : []);
+    } catch {
+      if (isCurrentAuxiliary("searchHistory", request)) setSearchHistory([]);
+    }
+  };
+  const refreshFriends = async (ownerRequest = loadRequest.current) => {
+    const request = beginAuxiliaryRequest("friends", ownerRequest);
+    try {
+      const body = await fetchLeaguePlayerFriends();
+      if (isCurrentAuxiliary("friends", request)) setFriends(Array.isArray(body?.friends) ? body.friends : []);
+    } catch {
+      if (isCurrentAuxiliary("friends", request)) setFriends([]);
+    }
+  };
+  const refreshServers = async (ownerRequest = loadRequest.current) => {
+    const request = beginAuxiliaryRequest("servers", ownerRequest);
+    try {
+      const body = await fetchLeaguePlayerSearchServers();
+      if (!isCurrentAuxiliary("servers", request)) return;
+      setServers(Array.isArray(body?.servers) ? body.servers : []);
+      setSelectedServer((value) => value || body?.current || "");
+    } catch {
+      if (isCurrentAuxiliary("servers", request)) setServers([]);
+    }
+  };
   const loadJungle = async (puuid, serverId = "") => {
     if (!puuid) return;
     const key = `${puuid}|${serverId || ""}`;
@@ -179,7 +219,13 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
       if (disposed.current || request !== loadRequest.current) return;
       const matches = Array.isArray(body?.matches) ? body.matches : [];
       const count = Number(body?.count);
-      setData({ ...data, matches, match_source: "sqlite", collection_count: Number.isFinite(count) ? count : matches.length, page: { beg_index: 0, end_index: Math.max(0, matches.length - 1), has_more: false } });
+      setData((current) => current ? {
+        ...current,
+        matches,
+        match_source: "sqlite",
+        collection_count: Number.isFinite(count) ? count : matches.length,
+        page: { beg_index: 0, end_index: Math.max(0, matches.length - 1), has_more: false },
+      } : current);
       setPage(0);
       setActiveTab("history");
     } catch (error) {
@@ -192,13 +238,30 @@ export default function LeaguePlayerCenter({ accountPuuid = "", currentPuuid = "
     disposed.current = false;
     return () => { disposed.current = true; loadRequest.current += 1; jungleRequest.current += 1; };
   }, []);
-  useEffect(() => { void load(currentPuuid); void refreshRecent(); void refreshSearchHistory(); void refreshFriends(); void refreshServers(); }, [currentPuuid]);
+  useEffect(() => {
+    jungleRequest.current += 1;
+    setJungle(null);
+    void load(currentPuuid);
+    const ownerRequest = loadRequest.current;
+    void refreshRecent(ownerRequest);
+    void refreshFriends(ownerRequest);
+    void refreshServers(ownerRequest);
+  }, [currentPuuid]);
   useEffect(() => {
     if (refreshSignal === lastRefreshSignal.current) return;
     lastRefreshSignal.current = refreshSignal;
     if (currentPuuid) void load(currentPuuid, 0);
   }, [refreshSignal, currentPuuid]);
-  useEffect(() => { const puuid = data?.summoner?.puuid; if (puuid) void loadJungle(puuid, data?.server_id || selectedServer); else { jungleRequest.current += 1; setJungle(null); } }, [data?.summoner?.puuid, data?.server_id]);
+  useEffect(() => {
+    const puuid = data?.summoner?.puuid;
+    if (puuid) {
+      setJungle(null);
+      void loadJungle(puuid, selectedServer || data?.server_id || "");
+    } else {
+      jungleRequest.current += 1;
+      setJungle(null);
+    }
+  }, [data?.summoner?.puuid, data?.server_id, selectedServer]);
 
   const rankedRows = useMemo(() => queueRows(data?.ranked), [data]);
   const masteryRows = useMemo(() => Array.isArray(data?.mastery) ? data.mastery : (data?.mastery?.championMasteries || []), [data]);

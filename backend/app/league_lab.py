@@ -1098,6 +1098,8 @@ def _send_text_to_foreground_league_game(text: str) -> int:
 
 
 class LeagueLabService:
+    _SNAPSHOT_CACHE_TTL_SECONDS = 0.35
+
     def __init__(self) -> None:
         self.settings = self._load_settings()
         self.credentials: LcuCredentials | None = None
@@ -1128,6 +1130,18 @@ class LeagueLabService:
         }
         self._event_wakeup = asyncio.Event()
         self._event_connected = False
+        # ``snapshot`` is called by several status consumers (including the
+        # Mini lifecycle).  Keep only a short-lived refresh marker here: the
+        # public status is still rebuilt on every call so countdowns remain
+        # monotonic and phase-sensitive data is not served from a stale JSON
+        # payload.  The lock collapses concurrent callers into one LCU read
+        # cycle without changing any automation/write semantics.
+        self._snapshot_refresh_lock = asyncio.Lock()
+        self._snapshot_cache_at = 0.0
+        self._snapshot_generation = 0
+        self._snapshot_refresh_count = 0
+        self._snapshot_coalesced_count = 0
+        self._snapshot_last_duration_ms: float | None = None
         self._accept_due_at: float | None = None
         # LeagueAkari starts a real timeout task as soon as the LCU enters
         # ReadyCheck.  Keep the polling loop as a recovery path, but do not
@@ -1254,6 +1268,7 @@ class LeagueLabService:
     def update_settings(self, settings: LeagueLabSettings) -> LeagueLabSettings:
         self._write_settings(settings)
         self.settings = settings
+        self._invalidate_snapshot_cache()
         if not settings.automation_enabled or not settings.auto_accept_enabled:
             self._cancel_auto_accept_waiter()
             self._accept_due_at = None
@@ -1296,6 +1311,17 @@ class LeagueLabService:
         self._auto_accept_waiter = None
         if waiter is not None and not waiter.done():
             waiter.cancel()
+
+    def _invalidate_snapshot_cache(self) -> None:
+        """Invalidate the read-only status refresh marker.
+
+        The generation protects an in-flight refresh from publishing a cache
+        timestamp after an LCU event/write changed the underlying state.
+        This stores no response body, token, player data, or other sensitive
+        material.
+        """
+        self._snapshot_cache_at = 0.0
+        self._snapshot_generation += 1
 
     def _start_auto_accept_waiter(self, delay: float) -> None:
         """Start a ReadyCheck timer immediately after the LCU event arrives.
@@ -1381,6 +1407,7 @@ class LeagueLabService:
 
     def _replace_credentials(self, credentials: LcuCredentials | None) -> None:
         if credentials != self.credentials:
+            self._invalidate_snapshot_cache()
             self._terminate_dodge_loop("client-disconnected")
             if self._event_task:
                 self._event_task.cancel()
@@ -1616,6 +1643,7 @@ class LeagueLabService:
             self._event_connected = False
 
     async def _handle_lcu_event(self, event: dict) -> None:
+        self._invalidate_snapshot_cache()
         uri = str(event.get("uri") or "")
         data = event.get("data") or {}
         if uri == "/lol-gameflow/v1/gameflow-phase":
@@ -1768,6 +1796,10 @@ class LeagueLabService:
                     params=params,
                 )
             response.raise_for_status()
+            if str(method).upper() != "GET":
+                # A successful account/state write can invalidate the status
+                # marker even when the endpoint returns an empty 204 body.
+                self._invalidate_snapshot_cache()
             if response.status_code == 204 or not response.content:
                 return None
             return response.json()
@@ -1826,15 +1858,50 @@ class LeagueLabService:
             raise RuntimeError(f"Riot Client 请求失败: {type(exc).__name__}") from exc
 
     async def snapshot(self) -> dict:
-        connected = await self.refresh_connection(force=True)
-        if connected:
-            await self._refresh_state()
+        now = time.monotonic()
+        if self._snapshot_cache_at > 0 and now - self._snapshot_cache_at < self._SNAPSHOT_CACHE_TTL_SECONDS:
+            return self.status()
+
+        if self._snapshot_refresh_lock.locked():
+            self._snapshot_coalesced_count += 1
+        async with self._snapshot_refresh_lock:
+            # Another caller may have completed the refresh while we waited
+            # for the single-flight lock.
+            now = time.monotonic()
+            if self._snapshot_cache_at <= 0 or now - self._snapshot_cache_at >= self._SNAPSHOT_CACHE_TTL_SECONDS:
+                started = time.perf_counter()
+                self._snapshot_refresh_count += 1
+                completed = False
+                generation = self._snapshot_generation
+                try:
+                    connected = await self.refresh_connection(force=True)
+                    # Client discovery can itself replace credentials.  That
+                    # reset is part of this refresh, so use the post-discovery
+                    # generation as the consistency point for the LCU reads.
+                    generation = self._snapshot_generation
+                    if connected:
+                        await self._refresh_state()
+                    completed = True
+                finally:
+                    self._snapshot_last_duration_ms = round(
+                        max(0.0, (time.perf_counter() - started) * 1000.0),
+                        2,
+                    )
+                    if completed and generation == self._snapshot_generation:
+                        self._snapshot_cache_at = time.monotonic()
+                    else:
+                        self._snapshot_cache_at = 0.0
         return self.status()
 
     def status(self) -> dict:
         credentials = self.credentials
         client_window_detected = _league_client_window_is_present()
         now_mono = time.monotonic()
+        snapshot_age_ms = (
+            round(max(0.0, now_mono - self._snapshot_cache_at) * 1000.0, 2)
+            if self._snapshot_cache_at > 0
+            else None
+        )
 
         def public_due(kind: str, label: str, due_at: float | None, *, action_id: str | None = None) -> dict | None:
             """Expose a monotonic scheduler deadline without leaking its clock."""
@@ -2142,6 +2209,14 @@ class LeagueLabService:
             "auto_select_temporarily_disabled": self.auto_select_temporarily_disabled,
             "event_stream_connected": self._event_connected,
             "last_event_at": self._last_event_at or None,
+            # Local, aggregate-only diagnostics.  Deliberately exclude LCU
+            # paths, credentials, response bodies, and player identifiers.
+            "diagnostics": {
+                "refresh_count": self._snapshot_refresh_count,
+                "coalesced_count": self._snapshot_coalesced_count,
+                "last_duration_ms": self._snapshot_last_duration_ms,
+                "age_ms": snapshot_age_ms,
+            },
             "matchmaking_status": self._matchmaking_status,
             "matchmaking_status_reason": self._matchmaking_status_reason,
             "matchmaking_due_at": (time.time() + max(0.0, self._matchmaking_due_at - time.monotonic())) if self._matchmaking_due_at else None,
@@ -7355,6 +7430,10 @@ async def league_ongoing_game():
         return _ongoing_cache["payload"]
     query_semaphore = asyncio.Semaphore(settings.ongoing_query_concurrency)
     sgp_server_id = _sgp_server_id(league_lab_service.credentials)
+    # Player tags are stored in one local JSON document. Snapshot it once for
+    # the whole 10-player analysis instead of reopening and parsing the same
+    # file independently in every enrichment coroutine.
+    player_tags = _read_player_tags() if settings.ongoing_show_local_tag else {}
 
     async def enrich(row):
         if not isinstance(row, dict):
@@ -7428,7 +7507,7 @@ async def league_ongoing_game():
             / max(1.0, float(match.get("deaths") or 0))
             for match in matches
         ) / max(1, len(matches)), 2)
-        local_tag = _find_player_tag(_read_player_tags(), puuid) if settings.ongoing_show_local_tag else {}
+        local_tag = _find_player_tag(player_tags, puuid) if settings.ongoing_show_local_tag else {}
         card_tags = _ongoing_performance_tags(
             detail_matches,
             show_streaks=settings.ongoing_show_streak_tags,

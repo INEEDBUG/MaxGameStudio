@@ -691,13 +691,18 @@ function CrosshairEditor({ t }) {
   );
 }
 
-export default function ValorantLabPage() {
+export default function ValorantLabPage({ section = null } = {}) {
   const t = useT();
+  const showStretch = !section || section === "stretch";
+  const showCrosshair = !section || section === "crosshair";
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
       <div className="mx-auto flex max-w-[1500px] flex-col gap-5">
         <header className="flex flex-wrap items-end justify-between gap-4"><div><div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cs2-accent/25 bg-cs2-accent-soft px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-cs2-accent"><Gamepad2 className="h-3.5 w-3.5" />{t("valorant.badge")}</div><h1 className="text-2xl font-bold tracking-tight text-cs2-text-primary">{t("valorant.pageTitle")}</h1><p className="mt-1 max-w-3xl text-sm leading-6 text-cs2-text-secondary">{t("valorant.pageSubtitle")}</p></div><div className="rounded-xl border border-cs2-border-subtle bg-cs2-bg-card px-3.5 py-2.5 text-right"><div className="text-[9px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{t("valorant.protocol")}</div><div className="mt-1 font-mono text-xs font-bold text-cs2-text-primary">{t("valorant.protocolValue")}</div></div></header>
-        <div className="grid items-start gap-5 2xl:grid-cols-[1.05fr_0.95fr]"><StretchWizard t={t} /><CrosshairEditor t={t} /></div>
+        <div className={showStretch && showCrosshair ? "grid items-start gap-5 2xl:grid-cols-[1.05fr_0.95fr]" : "max-w-4xl"}>
+          {showStretch && <div data-testid="valorant-stretch-section"><StretchWizard t={t} /></div>}
+          {showCrosshair && <div data-testid="valorant-crosshair-section"><CrosshairEditor t={t} /></div>}
+        </div>
       </div>
     </div>
   );
