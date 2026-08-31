@@ -11,9 +11,9 @@
 </p>
 
 <h3 align="center"><b>A local desktop workspace for personal training, match review, and multi-game tools</b> </h3>
-<h4 align="center">CS2 Demo Analysis & Recording · League Lab · VALORANT Lab</h4>
+<h4 align="center">CS2 · League of Legends · VALORANT · Peripheral Tuning</h4>
 
-> **One MaxGameStudio desktop app:** the CS2 workspace, League Lab, and VALORANT Lab share the same Tauri shell and sidebar; the two labs are not separate desktop applications.
+> **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
 > **The current stable release is `v3.0.3`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.3`. The CS2 workspace, League features, and VALORANT features ship in one installer.
@@ -40,6 +40,30 @@
 - See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for the complete dependency and license boundaries.
 
 This repository does not display upstream donation QR codes or solicit money on behalf of upstream authors. The new orange crosshair/data-pulse emblem is an original project asset and does not use Valve's official CS2 mark.
+
+---
+
+## What's new in v3.0.3
+
+> [!TIP]
+> League of Legends is the primary focus of this release. See the [v3.0.3 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.3) for the complete technical notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
+
+| Section | Directly accessible features |
+| --- | --- |
+| **CS2** | Demo library, official-match downloads, analysis, recording queue, video library, montage workbench, and LiteCut |
+| **League of Legends** | Automation, Mini panel, match history, player center, ongoing-game analysis, and client toolkit |
+| **VALORANT** | Safe true-stretch guide and crosshair/share-code tools |
+| **Peripheral Tuning** | Sensitivity and magnetic-key input labs, no longer grouped under CS2 |
+
+League improvements include:
+
+- **Shallower navigation** — Stable match-history, player-center, and ongoing-game features are now first-class entries. Legacy URLs still redirect with their query parameters intact.
+- **Safer page state** — Stale responses can no longer overwrite a newer page state after navigation or unmount; loading, empty, and error states are explicit.
+- **More reliable Mini lifecycle** — Native-window synchronization retains the newest pending state so a rapid transition into the game cannot lose the hide event.
+- **Fewer duplicate reads** — Four resident managers share one 1.5-second status source. In the fixed one-minute model, requests fall from 60 to 40, while the embedded ongoing-game view's extra status reads fall from 12 per minute to zero.
+- **Less repeated I/O** — A ten-player analysis reads the local tag file once instead of up to ten times, and concurrent status reads inside a 350ms window share one actual refresh.
+
+These figures come from deterministic code paths and automated-test models; they are not promises of absolute latency or memory use on every PC. Release validation did not execute League account actions or fabricate a complete Lobby → ReadyCheck → ChampSelect → InProgress live-client chain.
 
 ---
 
@@ -94,13 +118,13 @@ These screenshots come from the `v2.5.16` desktop UI baseline and local demo fix
 - **Magnetic-key Optimization** — Uses duplicate edges, hold jitter, A/D overlap, and direction-transition latency to recommend starting values for actuation, RT press, and RT release, followed by controlled `0.05–0.10 mm` retests.
 - **Official Matchmaking Input Safety** — Regular Rapid Trigger can shorten key reset, while Snap Tap, Rapid Tap, Snappy Tappy, SOCD/LKP, and similar automated counter-direction features should be disabled for CS2 official matchmaking.
 
-### VALORANT Lab
+### VALORANT
 
 - **Safe true-stretch guide** — Reads the local GPU, primary monitor, and refresh rate, then prepares detection and preview results for the community-popular `1568×1080` preset, other presets, or a custom resolution. Applying a real display mode requires explicit confirmation and offers keep/restore during a countdown; monitor state is detected, but monitors are never disabled automatically.
 - **Crosshair editor and sharing** — Edits primary, ADS, and sniper crosshairs using VALORANT's P/A/S profile structure, with live preview, strict encode/decode, native-format code import/export, and local preset history. A backend fallback is never presented as an equivalent native share code.
 - **Visible risk boundaries** — System-level actions follow a detect → preview → confirm → apply flow. Missing hardware or display evidence leaves the page read-only instead of claiming success.
 
-### League Lab
+### League of Legends
 
 - **Automated game flow** — Uses local LCU/SGP integration for Riot and WeGame/Tencent clients to cover ready-check acceptance, matchmaking, play again, reconnect, honor, room invitation policies, and the phase-aware Mini panel.
 - **Champion select and loadouts** — Configures champion pick/ban priorities, runes, summoner spells, and builds by mode and position, while exposing bench, swap, skin, and trade state. Local profiles replace the former dependency on a separate OP.GG window.
@@ -145,7 +169,7 @@ By default, the window `×` button asks whether to keep the app running in the W
 
 After installation, launch from desktop or start menu. **No browser or manual backend start is required.** The lightweight Tauri shell starts the bundled Python backend and renders the UI with the Windows system WebView2 runtime.
 
-The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases are downloaded, verified and installed in place before the new version is relaunched. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
+The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases show a plain-language Fixes / New Features / Optimizations summary before they are downloaded, verified, installed in place, and relaunched. A normal update can be skipped for the current version; a manual update check can show it again. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
 
 > **Recommended: Installation path without Chinese characters.** e.g., `D:\MaxGameStudio\` ✅, `D:\游戏工具\MaxGameStudio\` ❌
 
@@ -162,7 +186,7 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v2.5.17 · Withdrawn** | Critical upgrade-installation and automatic-update boundary defects | ⛔ Withdrawn |
 | **v3.0.1 · Upgrade fixes** | Fixes safe cleanup, version skipping/forced updates, and Release title version parsing | ✅ Released |
 | **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
-| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game, makes League features easier to find, merges duplicate status requests, and fixes Mini/page races | ✅ Current stable |
+| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Current stable |
 
 ### Planned
 
