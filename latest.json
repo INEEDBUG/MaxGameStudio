@@ -1,29 +1,30 @@
 {
-  "version": "3.0.2",
+  "version": "3.0.3",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-08-30T14:02:55.603Z",
+  "pub_date": "2026-08-31T09:17:42.639Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2pHMGU2N1lDWEVhdWd5V1VNRy9TNklPSXF6RXJCMFJKV0R2TDJDazhOVTA5M2JrbU4wQ2ZNY0JYV2dnQjZVYjE4bk80cWd1WTYydno5dmN2TjBsTmdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDk4NTY5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuMl94NjQtc2V0dXAuZXhlCkt4bElkSFBHWEh4R25uOTFTWnRXT1lZeHlVYXYwSVpVdnJIWmR1QXNKKy9VWjZjLzlPY052VXVqdklyL21KZUh1QWRvK3RHOE5LYTQvVHc4ZjkwSUFnPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.2/MaxGameStudio_3.0.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3BValMrbElPa2hUVHAzc0FLa2Fob1ZLbW5VVjkzZ0R1eUoweURmVk04dXRjTzRpanczNjFSS2ZQQlpuYTA3bTJHcDlmOXN0cXZSemhMcEwrWmxCTFFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTY3ODU2CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuM194NjQtc2V0dXAuZXhlCkdZZDJXT2d5ZWRVRms5QVFxSGl6VDI5eTBoUkpJT3hlUGRqN3d4cFVPMmp4ZVozT2g5S2E5QWQxVmJ4QzhsMzJrYWdMcVBiRmVaTXF2NWlCb3AvZkNBPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.3/MaxGameStudio_3.0.3_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.0.2",
+    "version": "3.0.3",
     "fixed": [
-      "修复大型 Demo 解析时内存占用过高、可能卡顿的问题。",
-      "修复首次打开 2D 回放时部分投掷物轨迹信息可能缺失的问题。"
+      "修复英雄联盟 Mini 面板在快速阶段切换时可能错误显示或隐藏不及时的问题。",
+      "修复英雄联盟页面的旧请求可能覆盖新状态、页面切换后仍继续更新的问题。",
+      "修复实时对局与战绩详情中的空数据、加载失败和快速切换显示异常。"
     ],
     "added": [
-      "灵敏度实验室现在通过真实点击判断欠甩、过甩和偏轴误差，并告诉你应该提高还是降低游戏内灵敏度。",
-      "新增 Demo 快速预览，选择文件后可以更快看到地图、服务器和玩家名单。",
-      "更新弹窗现在会直接说明修复了什么、增加了什么、优化了什么。"
+      "新增按游戏整理的导航：CS2、英雄联盟和无畏契约功能集中在各自分区。",
+      "灵敏度实验室与磁轴输入实验室移动到独立的“外设调优”分区。",
+      "英雄联盟的自动化、战绩、玩家中心、实时对局和工具箱现在都有直接入口。"
     ],
     "optimized": [
-      "大幅缩短大型 Demo 的完整解析时间。",
-      "优化批量解析调度，降低同时处理多个大文件时的内存压力。",
-      "灵敏度建议增加样本门槛和冲突保护，避免因单次误点给出武断结论。"
+      "多个英雄联盟后台组件现在共享同一份状态，减少重复读取客户端状态。",
+      "实时对局只读取一次本地玩家标签，减少十名玩家分析时的重复文件访问。",
+      "优化英雄联盟大列表和详情页的渲染、展开与请求生命周期。"
     ]
   }
 }
