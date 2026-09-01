@@ -131,10 +131,9 @@ fn build_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
     .min_inner_size(980.0, 640.0)
     .resizable(true)
     .decorations(true)
-    // Keep the native surface transparent until the first React frame is
-    // acknowledged. This prevents WebView2's unpainted white surface from
-    // flashing when the game transitions into Loading/InProgress.
-    .transparent(true)
+    // Keep an opaque native dark surface behind WebView2 while the hidden
+    // window boots. Transparent decorated windows can render as a persistent
+    // white surface on Windows/WebView2, even after the React frame commits.
     .background_color(Color(17, 18, 20, 255))
     .visible(false)
     .focused(false)
@@ -1391,7 +1390,8 @@ mod tests {
             "fn prime_league_ongoing_window",
         );
         assert!(ongoing_builder.contains(".visible(false)"));
-        assert!(ongoing_builder.contains(".transparent(true)"));
+        assert!(ongoing_builder.contains(".background_color(Color(17, 18, 20, 255))"));
+        assert!(!ongoing_builder.contains(".transparent(true)"));
         assert!(ongoing_builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
 
         let cd_timer = section("async fn show_league_cd_timer", "#[tauri::command]");
@@ -1476,7 +1476,8 @@ mod tests {
         let builder = &builder[..builder_end];
         assert!(builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
         assert!(builder.contains(".visible(false)"));
-        assert!(builder.contains(".transparent(true)"));
+        assert!(builder.contains(".background_color(Color(17, 18, 20, 255))"));
+        assert!(!builder.contains(".transparent(true)"));
     }
 
     #[test]
