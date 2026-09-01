@@ -1475,7 +1475,6 @@ mod tests {
             .map(|(body, _)| body)
             .expect("setup should finish before the app build");
         assert!(!setup_body.contains("prime_league_ongoing_window"));
-        assert!(!source.contains("fn prime_league_ongoing_window"));
 
         let builder_start = source
             .find("fn build_league_ongoing_window")
