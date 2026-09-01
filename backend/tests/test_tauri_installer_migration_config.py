@@ -54,6 +54,11 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert "demoparser2-0.41.4+cs2insight1.dist-info" not in hook
     # The installed parser contract is checked before the app can be launched.
     assert 'backend\\app\\demoparser_runtime.py' in hook
+    assert hook.count("Call CS2_ValidateBundledRuntime") == 2
+    final_validation = hook.rindex("Call CS2_ValidateBundledRuntime")
+    assert final_validation > hook.index("Call CS2_RemoveLegacyElectron", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
+    assert final_validation > hook.index("Call CS2_RemoveLegacyTauri", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
+    assert final_validation > hook.index("Call CS2_RemoveLegacyBrandShortcuts", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
     assert "pyarrow-25.0.0.dist-info" in hook
     assert '!define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\\..\\target\\release"' in hook
     assert 'File /a "/oname=WebView2Loader.dll"' in hook

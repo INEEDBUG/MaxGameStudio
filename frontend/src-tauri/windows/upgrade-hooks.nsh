@@ -152,6 +152,24 @@ Function CS2_RemoveBundledDemoparser
   Pop $0
 FunctionEnd
 
+; Validate the runtime that is physically present in $INSTDIR.  This is kept
+; as a function because the post-install migration still performs destructive
+; legacy cleanup after the first validation.  A second call at the very end
+; prevents the installer from reporting success if that cleanup removed or
+; damaged files from the freshly installed runtime.
+Function CS2_ValidateBundledRuntime
+  ClearErrors
+  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
+  ${If} ${Errors}
+    StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+  ${If} $R0 != 0
+    StrCpy $R7 "内置 Rust Demo 解析器版本校验失败（退出码 $R0）。安装已停止，请重新下载完整安装包。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+FunctionEnd
+
 ; productName changed from the stable Tauri release to MaxGameStudio. The
 ; generated installer creates the new shortcuts, but an in-place update does
 ; not know the historical shortcut filenames. Remove only these exact paths;
@@ -735,16 +753,7 @@ FunctionEnd
   ; Validate the exact installed runtime before the finish page can launch
   ; Tauri. This catches stale metadata, a missing extension, or an incomplete
   ; file copy at install time instead of surfacing as a backend startup dialog.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
-  ${If} ${Errors}
-    StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
-    Call CS2_AbortMigrationInstall
-  ${EndIf}
-  ${If} $R0 != 0
-    StrCpy $R7 "内置 Rust Demo 解析器版本校验失败（退出码 $R0）。安装已停止，请重新下载完整安装包。"
-    Call CS2_AbortMigrationInstall
-  ${EndIf}
+  Call CS2_ValidateBundledRuntime
 
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.
@@ -770,6 +779,11 @@ FunctionEnd
   ; The generated installer has already created/updated the MaxGameStudio
   ; shortcut at this point. Remove only the exact old-brand shortcut paths.
   Call CS2_RemoveLegacyBrandShortcuts
+
+  ; Legacy uninstallers run after the first validation and can remove files
+  ; asynchronously on some upgrade paths.  Never show the success page until
+  ; the final on-disk runtime has passed the same import/version contract.
+  Call CS2_ValidateBundledRuntime
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
