@@ -80,6 +80,7 @@ const SensitivityLabPage = lazy(() => import("./pages/SensitivityLabPage"));
 const MagneticInputLabPage = lazy(() => import("./pages/MagneticInputLabPage"));
 const ValorantLabPage = lazy(() => import("./pages/ValorantLabPage"));
 const LeagueAutomationLabPage = lazy(() => import("./pages/LeagueAutomationLabPage"));
+const LeagueOngoingPage = lazy(() => import("./pages/LeagueOngoingPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
@@ -3527,7 +3528,7 @@ export default function App() {
                 <Route path="/league/automation" element={<LeagueRoutePage routeTab="automation" />} />
                 <Route path="/league/history" element={<LeagueRoutePage routeTab="history" />} />
                 <Route path="/league/players" element={<LeagueRoutePage routeTab="players" />} />
-                <Route path="/league/ongoing" element={<LeagueRoutePage routeTab="ongoing" />} />
+                <Route path="/league/ongoing" element={<LeagueOngoingPage />} />
                 <Route path="/league/toolkit" element={<LeagueRoutePage routeTab="toolkit" />} />
                 <Route path="/peripherals" element={<Navigate to="/peripherals/sensitivity" replace />} />
                 <Route path="/peripherals/sensitivity" element={<SensitivityLabPage />} />

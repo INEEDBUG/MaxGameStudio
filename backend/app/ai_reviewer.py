@@ -69,15 +69,24 @@ Return JSON with:
 - "comment": one or two plain English sentences, no more than 200 characters, no line breaks.
 Output exactly one line of valid JSON with only these two keys. No markdown, no extra text."""
 
+_OUTPUT_LANGUAGE_SUFFIX = {
+    "ms-MY": "\nWrite the comment in Bahasa Melayu (Malay), not English.",
+    "ru-RU": "\nWrite the comment in Russian, not English.",
+}
+
 
 def select_reviewer_prompt(locale: str) -> str:
     """Return the appropriate reviewer system prompt for the given locale."""
-    return REVIEWER_SYSTEM_PROMPT_EN if locale == "en" else REVIEWER_SYSTEM_PROMPT
+    if locale in ("zh", "zh-HK", "zh-TW"):
+        return REVIEWER_SYSTEM_PROMPT
+    return REVIEWER_SYSTEM_PROMPT_EN + _OUTPUT_LANGUAGE_SUFFIX.get(locale, "")
 
 
 def select_meme_montage_prompt(locale: str) -> str:
     """Return the appropriate meme montage system prompt for the given locale."""
-    return MEME_MONTAGE_SYSTEM_PROMPT_EN if locale == "en" else MEME_MONTAGE_SYSTEM_PROMPT
+    if locale in ("zh", "zh-HK", "zh-TW"):
+        return MEME_MONTAGE_SYSTEM_PROMPT
+    return MEME_MONTAGE_SYSTEM_PROMPT_EN + _OUTPUT_LANGUAGE_SUFFIX.get(locale, "")
 
 
 def _clip_payload_for_prompt(clip: Clip) -> str:

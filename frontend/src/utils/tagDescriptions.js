@@ -1,3 +1,5 @@
+import { baseLocale } from "../i18n/localeUtils.js";
+
 // 所有 tag → 中文/英文说明。命中优先级：精确匹配 → 前缀匹配。
 // 保持文本尽量短，hover tooltip 用。
 // IMPORTANT: tag keys (Chinese strings) are used as IDs by the backend/DB — do NOT change them.
@@ -637,7 +639,7 @@ const DYNAMIC_LABEL_PHRASES_EN = [
 export function labelTag(tag, locale = "zh") {
   if (!tag) return "";
   const t = String(tag).trim();
-  if (locale !== "en") return t;
+  if (baseLocale(locale) !== "en") return t;
   if (LABELS_EN[t]) return LABELS_EN[t];
   let out = t;
   for (const [zh, en] of DYNAMIC_LABEL_PHRASES_EN) {

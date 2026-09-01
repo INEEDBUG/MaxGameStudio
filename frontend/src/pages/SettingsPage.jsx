@@ -955,7 +955,11 @@ export default function SettingsPage() {
                     options={[
                       { value: "auto", label: t("settings.localeAuto") },
                       { value: "zh", label: t("settings.localeZh") },
+                      { value: "zh-HK", label: t("settings.localeZhHk") },
+                      { value: "zh-TW", label: t("settings.localeZhTw") },
                       { value: "en", label: t("settings.localeEn") },
+                      { value: "ms-MY", label: t("settings.localeMsMy") },
+                      { value: "ru-RU", label: t("settings.localeRuRu") },
                     ]}
                   />
                 </FieldRow>

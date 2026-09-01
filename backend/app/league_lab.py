@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -1130,6 +1131,13 @@ class LeagueLabService:
         }
         self._event_wakeup = asyncio.Event()
         self._event_connected = False
+        self._event_sequence = 0
+        self._auto_accept_terminal_response = False
+        self._auto_accept_submitted = False
+        self._auto_accept_credentials: LcuCredentials | None = None
+        self._auto_accept_observed_phase = ""
+        self._auto_accept_round_identity: str | None = None
+        self._auto_accept_round_generation = 0
         # ``snapshot`` is called by several status consumers (including the
         # Mini lifecycle).  Keep only a short-lived refresh marker here: the
         # public status is still rebuilt on every call so countdowns remain
@@ -1273,7 +1281,6 @@ class LeagueLabService:
             self._cancel_auto_accept_waiter()
             self._accept_due_at = None
         if not settings.auto_select_enabled:
-            self._accept_due_at = None
             self._handled_champion_actions.clear()
             self._champion_action_due_at.clear()
             self._delayed_action_plan.clear()
@@ -1332,14 +1339,89 @@ class LeagueLabService:
         submitting the same accept request concurrently.
         """
         self._cancel_auto_accept_waiter()
-        if delay <= 0:
-            return
         self._auto_accept_waiter = asyncio.create_task(
-            self._wait_and_auto_accept(delay),
+            self._wait_and_auto_accept(
+                delay,
+                expected_generation=self._auto_accept_round_generation,
+                expected_credentials=self._auto_accept_credentials,
+            ),
             name="league-auto-accept",
         )
 
-    async def _wait_and_auto_accept(self, delay: float) -> None:
+    def _ready_check_can_accept(self) -> bool:
+        """Require the authoritative gameflow phase before an account write."""
+        return self.phase == "ReadyCheck"
+
+    def _reset_auto_accept_round(self, phase: str) -> None:
+        """Reset per-ballot state only after authoritative round evidence."""
+        self._auto_accept_round_generation += 1
+        self._auto_accept_observed_phase = phase
+        self._auto_accept_round_identity = None
+        self._auto_accept_submitted = False
+        self._auto_accept_terminal_response = False
+        self._auto_accept_credentials = None
+        self._accept_due_at = None
+        self._cancel_auto_accept_waiter()
+
+    def _observe_auto_accept_phase(self, phase: str) -> None:
+        if phase != self._auto_accept_observed_phase:
+            self._reset_auto_accept_round(phase)
+
+    def _observe_ready_check_identity(self, ready_check: dict | None) -> None:
+        if self.phase != "ReadyCheck" or not isinstance(ready_check, dict):
+            return
+        identity = str(ready_check.get("round_id") or "").strip() or None
+        if identity is None:
+            return
+        if (
+            self._auto_accept_round_identity is not None
+            and identity != self._auto_accept_round_identity
+        ):
+            self._reset_auto_accept_round("ReadyCheck")
+        self._auto_accept_round_identity = identity
+
+    async def _ensure_auto_accept_scheduled(
+        self,
+        expected_event_sequence: int | None = None,
+    ) -> None:
+        """Create one deadline per ReadyCheck without restarting it on events."""
+        if (
+            (
+                expected_event_sequence is not None
+                and self._event_sequence != expected_event_sequence
+            )
+            or not self.settings.automation_enabled
+            or not self.settings.auto_accept_enabled
+            or not self._ready_check_can_accept()
+            or self._auto_accept_terminal_response
+            or self._auto_accept_submitted
+        ):
+            return
+
+        if self._accept_due_at is None:
+            delay = max(0.0, float(self.settings.auto_accept_delay_seconds))
+            self._accept_due_at = time.monotonic() + delay
+            self._auto_accept_credentials = self.credentials
+            self._start_auto_accept_waiter(delay)
+
+        if self._accept_due_at == float("inf"):
+            return
+
+        remaining = self._accept_due_at - time.monotonic()
+        if remaining <= 0:
+            if self._auto_accept_waiter is None or self._auto_accept_waiter.done():
+                self._start_auto_accept_waiter(0.0)
+            await asyncio.sleep(0)
+        elif self._auto_accept_waiter is None or self._auto_accept_waiter.done():
+            self._start_auto_accept_waiter(remaining)
+
+    async def _wait_and_auto_accept(
+        self,
+        delay: float,
+        *,
+        expected_generation: int | None = None,
+        expected_credentials: LcuCredentials | None = None,
+    ) -> None:
         try:
             # ``asyncio.sleep`` may resume a fraction before the monotonic
             # deadline on Windows.  A one-shot sleep would then make
@@ -1354,40 +1436,76 @@ class LeagueLabService:
                 if remaining <= 0:
                     break
                 await asyncio.sleep(remaining)
-            await self._try_auto_accept()
+            await self._try_auto_accept(
+                expected_generation=expected_generation,
+                expected_credentials=expected_credentials,
+            )
         except asyncio.CancelledError:
             raise
         finally:
             if self._auto_accept_waiter is asyncio.current_task():
                 self._auto_accept_waiter = None
 
-    async def _try_auto_accept(self) -> None:
+    async def _try_auto_accept(
+        self,
+        *,
+        expected_generation: int | None = None,
+        expected_credentials: LcuCredentials | None = None,
+    ) -> None:
         """Accept once when the event-driven ReadyCheck deadline is due."""
         if (
-            self.phase != "ReadyCheck"
+            not self._ready_check_can_accept()
             or not self.settings.automation_enabled
             or not self.settings.auto_accept_enabled
+            or self._auto_accept_submitted
+            or (
+                expected_generation is not None
+                and expected_generation != self._auto_accept_round_generation
+            )
             or self._accept_due_at is None
             or self._accept_due_at == float("inf")
             or time.monotonic() < self._accept_due_at
         ):
+            return
+        credentials = (
+            expected_credentials
+            if expected_generation is not None
+            else self._auto_accept_credentials
+        )
+        if credentials is not None and self.credentials != credentials:
             return
         ready_check = self.ready_check or {}
         response = str(
             ready_check.get("player_response") or ready_check.get("playerResponse") or ""
         ).upper()
         if response in {"ACCEPTED", "DECLINED"}:
+            self._auto_accept_terminal_response = True
             self._accept_due_at = None
             return
-        # Mark terminal before awaiting the LCU request.  The polling loop or
-        # another ReadyCheck event must not issue a duplicate accept.
+        # Mark submitted before awaiting the LCU request. Settings toggles,
+        # polling, duplicate events and uncertain timeouts must never submit
+        # the same ReadyCheck twice.
+        self._auto_accept_submitted = True
         self._accept_due_at = float("inf")
         try:
-            await self._record_action("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")
+            if credentials is None:
+                await self._record_action(
+                    "已自动接受对局",
+                    "POST",
+                    "/lol-matchmaking/v1/ready-check/accept",
+                )
+            else:
+                await self._record_action(
+                    "已自动接受对局",
+                    "POST",
+                    "/lol-matchmaking/v1/ready-check/accept",
+                    credentials=credentials,
+                )
         except RuntimeError:
-            # Preserve the old recovery behavior: a failed request can be
-            # retried by the polling path while the phase remains active.
-            self._accept_due_at = None
+            # The request may have reached LCU even when its response timed
+            # out.  Keep the per-ReadyCheck sentinel to guarantee at-most-once
+            # submission; the next phase transition resets it.
+            logger.info("League auto-accept request failed or timed out; not retrying this ReadyCheck")
 
     async def refresh_connection(self, *, force: bool = False) -> bool:
         now = time.monotonic()
@@ -1422,7 +1540,7 @@ class LeagueLabService:
             self._acted_phase = ""
             self._phase_action_done = ""
             self._phase_action_due_at = None
-            self._accept_due_at = None
+            self._reset_auto_accept_round("")
             self._champion_action_due_at.clear()
             self._delayed_action_plan.clear()
             self._handled_champion_actions.clear()
@@ -1610,37 +1728,164 @@ class LeagueLabService:
             name="league-dodge-loop",
         )
 
-    async def _run_event_stream(self, credentials: LcuCredentials) -> None:
-        """Subscribe to LCU JsonApi events; the polling loop remains a recovery fallback."""
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+    async def _prime_event_stream_state(
+        self,
+        credentials: LcuCredentials,
+        expected_event_sequence: int | None = None,
+    ) -> None:
+        """Read the two time-sensitive states after subscribing.
+
+        WebSocket events emitted during the handshake are not replayed by LCU.
+        A concurrent read closes that gap without waiting for the full polling
+        refresh (which also loads several unrelated endpoints).
+        """
+        headers = {"Authorization": credentials.auth_header}
         try:
-            async with websockets.connect(
-                f"wss://127.0.0.1:{credentials.port}",
-                additional_headers={"Authorization": credentials.auth_header},
-                ssl=context,
-                open_timeout=3,
-                close_timeout=1,
-                ping_interval=20,
-            ) as socket:
-                self._event_connected = True
-                await socket.send(json.dumps([5, "OnJsonApiEvent"]))
-                async for raw in socket:
-                    try:
-                        event = json.loads(raw)
-                    except (TypeError, ValueError):
-                        continue
-                    if isinstance(event, list) and len(event) >= 3 and event[0] == 8:
-                        self._last_event_at = time.time()
-                        await self._handle_lcu_event(event[2] if isinstance(event[2], dict) else {})
-                        self._event_wakeup.set()
+            async with httpx.AsyncClient(verify=False, timeout=1.5) as client:
+                phase_result, ready_result = await asyncio.gather(
+                    client.get(f"{credentials.base_url}/lol-gameflow/v1/gameflow-phase", headers=headers),
+                    client.get(f"{credentials.base_url}/lol-matchmaking/v1/ready-check", headers=headers),
+                    return_exceptions=True,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.info("League LCU event stream unavailable; polling fallback remains active: %s", type(exc).__name__)
-        finally:
-            self._event_connected = False
+            logger.debug("Unable to prime League LCU event state: %s", type(exc).__name__)
+            return
+
+        if (
+            expected_event_sequence is not None
+            and self._event_sequence != expected_event_sequence
+        ):
+            # A live event arrived while these GETs were in flight.  The event
+            # is newer than this handshake snapshot, so never overwrite it.
+            return
+
+        ready_check = None
+        if isinstance(ready_result, httpx.Response) and ready_result.is_success:
+            try:
+                ready_payload = ready_result.json()
+            except ValueError:
+                ready_payload = None
+            ready_check = _normalize_ready_check(ready_payload)
+
+        phase = None
+        if isinstance(phase_result, httpx.Response) and phase_result.is_success:
+            try:
+                phase = phase_result.json()
+            except ValueError:
+                phase = None
+
+        if (
+            expected_event_sequence is not None
+            and self._event_sequence != expected_event_sequence
+        ):
+            return
+        if self.credentials != credentials:
+            return
+
+        # Apply the handshake snapshot without awaiting or invoking the normal
+        # event handler.  This makes phase + response one atomic read-only state
+        # update relative to newer WebSocket events.
+        self._invalidate_snapshot_cache()
+        if not isinstance(phase, str):
+            return
+
+        self.phase = phase
+        self._observe_auto_accept_phase(phase)
+        self._acted_phase = phase
+        self._phase_action_done = ""
+        incoming_round_identity = (
+            str((ready_check or {}).get("round_id") or "").strip() or None
+        )
+        if (
+            phase == "ReadyCheck"
+            and ready_check is not None
+            and self._auto_accept_terminal_response
+            and (
+                incoming_round_identity is None
+                or self._auto_accept_round_identity is None
+                or incoming_round_identity != self._auto_accept_round_identity
+            )
+            and str(ready_check.get("player_response") or "").upper()
+            not in {"ACCEPTED", "DECLINED"}
+        ):
+            # A reconnect prime is an authoritative GET, not a delayed event.
+            # If it observes a pending ballot after this process already saw a
+            # terminal response, the intervening phase edge was missed while
+            # the WebSocket was down. Start a new local generation. Ordinary
+            # late Pending events never take this path and remain latched.
+            self._reset_auto_accept_round("ReadyCheck")
+        if ready_check is not None:
+            self._observe_ready_check_identity(ready_check)
+            self.ready_check = ready_check
+        response = str((self.ready_check or {}).get("player_response") or "").upper()
+        if phase != "ReadyCheck":
+            self.ready_check = None
+            return
+        if response in {"ACCEPTED", "DECLINED"}:
+            self._auto_accept_terminal_response = True
+            self._accept_due_at = None
+            self._cancel_auto_accept_waiter()
+            return
+        await self._ensure_auto_accept_scheduled(expected_event_sequence)
+
+    async def _run_event_stream(self, credentials: LcuCredentials) -> None:
+        """Keep one LCU event subscription alive; polling remains fallback."""
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        retry_count = 0
+
+        while self.credentials == credentials:
+            try:
+                async with websockets.connect(
+                    f"wss://127.0.0.1:{credentials.port}",
+                    additional_headers={"Authorization": credentials.auth_header},
+                    ssl=context,
+                    open_timeout=3,
+                    close_timeout=1,
+                    ping_interval=20,
+                ) as socket:
+                    self._event_connected = True
+                    retry_count = 0
+                    await socket.send(json.dumps([5, "OnJsonApiEvent"]))
+                    prime_task = asyncio.create_task(
+                        self._prime_event_stream_state(credentials, self._event_sequence),
+                        name="league-lcu-event-prime",
+                    )
+                    try:
+                        async for raw in socket:
+                            try:
+                                event = json.loads(raw)
+                            except (TypeError, ValueError):
+                                continue
+                            if isinstance(event, list) and len(event) >= 3 and event[0] == 8:
+                                self._event_sequence += 1
+                                self._last_event_at = time.time()
+                                await self._handle_lcu_event(event[2] if isinstance(event[2], dict) else {})
+                                self._event_wakeup.set()
+                    finally:
+                        if not prime_task.done():
+                            prime_task.cancel()
+                        await asyncio.gather(prime_task, return_exceptions=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log = logger.info if retry_count == 0 else logger.debug
+                log(
+                    "League LCU event stream disconnected; polling fallback remains active: %s",
+                    type(exc).__name__,
+                )
+            finally:
+                if self._event_task is asyncio.current_task():
+                    self._event_connected = False
+
+            if self.credentials != credentials:
+                return
+            retry_count += 1
+            retry_delay = min(2.0, 0.25 * (2 ** min(retry_count - 1, 3)))
+            await asyncio.sleep(retry_delay)
 
     async def _handle_lcu_event(self, event: dict) -> None:
         self._invalidate_snapshot_cache()
@@ -1652,21 +1897,19 @@ class LeagueLabService:
             # refresh before its zero-delay action can run.
             next_phase = str(data or "")
             self.phase = next_phase
+            self._observe_auto_accept_phase(next_phase)
             self._acted_phase = next_phase
             self._phase_action_done = ""
             if next_phase != "ReadyCheck":
-                self._accept_due_at = None
-                self._cancel_auto_accept_waiter()
-            elif self.settings.automation_enabled and self.settings.auto_accept_enabled:
-                delay = max(0.0, float(self.settings.auto_accept_delay_seconds))
-                self._accept_due_at = time.monotonic() + delay
-                self._start_auto_accept_waiter(delay)
-                if delay <= 0:
-                    await self._try_auto_accept()
+                self.ready_check = None
+            else:
+                if self.settings.automation_enabled and self.settings.auto_accept_enabled:
+                    await self._ensure_auto_accept_scheduled()
 
         if uri == "/lol-matchmaking/v1/ready-check":
             normalized = _normalize_ready_check(data)
             if normalized is not None:
+                self._observe_ready_check_identity(normalized)
                 self.ready_check = normalized
             response = str(
                 (normalized or {}).get("player_response")
@@ -1674,19 +1917,11 @@ class LeagueLabService:
                 or ""
             ).upper()
             if response in {"ACCEPTED", "DECLINED"}:
+                self._auto_accept_terminal_response = True
                 self._accept_due_at = None
                 self._cancel_auto_accept_waiter()
-            elif (
-                self.phase == "ReadyCheck"
-                and self.settings.automation_enabled
-                and self.settings.auto_accept_enabled
-                and self._accept_due_at is None
-            ):
-                delay = max(0.0, float(self.settings.auto_accept_delay_seconds))
-                self._accept_due_at = time.monotonic() + delay
-                self._start_auto_accept_waiter(delay)
-                if delay <= 0:
-                    await self._try_auto_accept()
+            elif self.settings.automation_enabled and self.settings.auto_accept_enabled:
+                await self._ensure_auto_accept_scheduled()
         # LeagueAkari completes the pre-end mission celebration before its
         # play-again timer.  Without this event, clients that remain in
         # PreEndOfGame can wait on a ballot that never becomes actionable.
@@ -1782,16 +2017,29 @@ class LeagueLabService:
                     self.last_action = f"已自动邀请好友 {data.get('gameName') or puuid}"
                     self.last_action_at = time.time()
 
-    async def request(self, method: str, path: str, *, json_body=None, params=None):
-        if not await self.refresh_connection():
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body=None,
+        params=None,
+        credentials: LcuCredentials | None = None,
+    ):
+        if credentials is None:
+            if not await self.refresh_connection():
+                raise RuntimeError("未检测到正在运行的英雄联盟客户端")
+            credentials = self.credentials
+        elif self.credentials != credentials:
+            raise RuntimeError("英雄联盟客户端已切换，已放弃过期自动操作")
+        if credentials is None:
             raise RuntimeError("未检测到正在运行的英雄联盟客户端")
-        assert self.credentials is not None
         try:
             async with httpx.AsyncClient(verify=False, timeout=3.0) as client:
                 response = await client.request(
                     method,
-                    f"{self.credentials.base_url}{path}",
-                    headers={"Authorization": self.credentials.auth_header},
+                    f"{credentials.base_url}{path}",
+                    headers={"Authorization": credentials.auth_header},
                     json=json_body,
                     params=params,
                 )
@@ -2367,8 +2615,18 @@ class LeagueLabService:
         except (httpx.HTTPError, TypeError, ValueError):
             self.respawn_timer = {"available": False, "dead": False, "time_left": 0.0, "total_time": 0.0}
 
-    async def _record_action(self, label: str, method: str, path: str) -> None:
-        await self.request(method, path)
+    async def _record_action(
+        self,
+        label: str,
+        method: str,
+        path: str,
+        *,
+        credentials: LcuCredentials | None = None,
+    ) -> None:
+        if credentials is None:
+            await self.request(method, path)
+        else:
+            await self.request(method, path, credentials=credentials)
         self.last_action = label
         self.last_action_at = time.time()
 
@@ -3878,6 +4136,7 @@ class LeagueLabService:
     async def _run_automation(self) -> None:
         settings = self.settings
         phase = self.phase
+        self._observe_auto_accept_phase(phase)
         await self._run_chat_ready_automation()
         if not settings.automation_enabled:
             self._cancel_auto_accept_waiter()
@@ -3898,8 +4157,9 @@ class LeagueLabService:
         if phase != self._acted_phase:
             self._acted_phase = phase
             self._phase_action_done = ""
-            self._cancel_auto_accept_waiter()
-            self._accept_due_at = None
+            if not self._ready_check_can_accept():
+                self._cancel_auto_accept_waiter()
+                self._accept_due_at = None
             delay_by_phase = {
                 "WaitingForStats": 10.0,
                 "PreEndOfGame": 3.25,
@@ -3909,19 +4169,17 @@ class LeagueLabService:
             delay = delay_by_phase.get(phase)
             self._phase_action_due_at = time.monotonic() + delay if delay is not None else None
 
-        if phase == "ReadyCheck" and settings.auto_accept_enabled:
+        if self._ready_check_can_accept() and settings.auto_accept_enabled:
             ready_check = self.ready_check or {}
+            self._observe_ready_check_identity(ready_check)
             player_response = str(
                 ready_check.get("player_response") or ready_check.get("playerResponse") or ""
             ).upper()
             if player_response in {"ACCEPTED", "DECLINED"}:
+                self._auto_accept_terminal_response = True
                 self._accept_due_at = None
             else:
-                if self._accept_due_at is None:
-                    delay = max(0.0, float(settings.auto_accept_delay_seconds))
-                    self._accept_due_at = time.monotonic() + delay
-                    self._start_auto_accept_waiter(delay)
-                await self._try_auto_accept()
+                await self._ensure_auto_accept_scheduled()
         else:
             self._accept_due_at = None
             self._cancel_auto_accept_waiter()
@@ -4035,6 +4293,33 @@ def _normalize_skin_selector(info, rows) -> dict:
     }
 
 
+_READY_CHECK_ROUND_ID_KEYS = (
+    "readyCheckId",
+    "ready_check_id",
+    "matchId",
+    "match_id",
+    "gameId",
+    "game_id",
+    "sessionId",
+    "session_id",
+    "id",
+)
+
+
+def _ready_check_round_identity(payload) -> str | None:
+    """Extract a stable per-ballot id when an LCU build exposes one."""
+    if not isinstance(payload, dict):
+        return None
+    for key in _READY_CHECK_ROUND_ID_KEYS:
+        value = payload.get(key)
+        if isinstance(value, (dict, list, tuple, set)):
+            continue
+        text = str(value or "").strip()
+        if text:
+            return f"{key}:{text}"
+    return None
+
+
 def _normalize_ready_check(payload) -> dict | None:
     """Keep useful, read-only ReadyCheck evidence in a stable shape."""
     if not isinstance(payload, dict):
@@ -4055,6 +4340,7 @@ def _normalize_ready_check(payload) -> dict | None:
     can_accept = available and response_upper != "ACCEPTED"
     can_decline = available and response_upper != "DECLINED"
     return {
+        "round_id": _ready_check_round_identity(payload),
         "state": state,
         "player_response": player_response,
         "response_state": response_upper.lower() or "pending",
@@ -4389,12 +4675,28 @@ async def _riot_player_account_aliases(game_name: str, tag_line: str) -> list[di
     return [row for row in (payload or []) if isinstance(row, dict) and row.get("puuid")]
 
 
+_champion_names_cache: tuple[float, dict[int, str]] | None = None
+
+
 async def _champion_names() -> dict[int, str]:
+    """Return the LCU champion catalog with a short in-memory TTL.
+
+    The catalog is immutable for the lifetime of a client patch and is needed
+    by several cards.  Avoiding a full catalog request on every 5-second live
+    game refresh removes a surprisingly expensive LCU round trip while still
+    allowing a new patch to be picked up after the TTL.
+    """
+    global _champion_names_cache
+    if _champion_names_cache and time.monotonic() - _champion_names_cache[0] < 900:
+        return _champion_names_cache[1]
     try:
         rows = await league_lab_service.request("GET", "/lol-game-data/assets/v1/champion-summary.json")
     except RuntimeError:
         return {}
-    return {int(row.get("id")): str(row.get("name") or row.get("alias") or row.get("id")) for row in (rows or []) if isinstance(row, dict) and row.get("id")}
+    names = {int(row.get("id")): str(row.get("name") or row.get("alias") or row.get("id")) for row in (rows or []) if isinstance(row, dict) and row.get("id")}
+    if names:
+        _champion_names_cache = (time.monotonic(), names)
+    return names
 
 
 def _champion_catalog_path() -> Path:
@@ -5531,18 +5833,47 @@ def _normalize_game_preview(game: dict, names: dict[int, str], source: str, time
 
 
 def _infer_premade_groups(histories: dict[str, dict], active_puuids: set[str], threshold: int = 3) -> dict[str, int]:
+    """Infer premade groups using LeagueAkari's all-pairs rule.
+
+    A player pair is evidence-backed only when they appeared on the same team
+    in ``threshold`` distinct games.  A group is valid only when *every* pair
+    in that group has reached the threshold.  This intentionally rejects the
+    tempting connected-components shortcut (A-B and B-C must not imply an
+    A/B/C premade).  Overlapping candidates are merged only when their union
+    remains a valid all-pairs group.
+    """
+    threshold = max(1, int(threshold or 1))
     game_teams: dict[str, list[set[str]]] = {}
     for payload in histories.values():
         for game in (((payload or {}).get("games") or {}).get("games") or []):
+            if not isinstance(game, dict):
+                continue
             game_id = str(game.get("gameId") or "")
             if not game_id or game_id in game_teams:
                 continue
             team_members: dict[int, set[str]] = {}
-            participants = {row.get("participantId"): row for row in (game.get("participants") or [])}
-            for identity in game.get("participantIdentities") or []:
+            participants = {
+                row.get("participantId"): row
+                for row in (game.get("participants") or [])
+                if isinstance(row, dict)
+            }
+            identities = game.get("participantIdentities") or []
+            # Some LCU/SGP payloads already put puuid on participants.  Keep
+            # that form as a fallback instead of dropping otherwise valid
+            # teammate evidence.
+            for identity in identities:
+                if not isinstance(identity, dict):
+                    continue
                 player = identity.get("player") or {}
                 puuid = str(player.get("puuid") or identity.get("puuid") or "")
                 participant = participants.get(identity.get("participantId")) or {}
+                team_id = int(participant.get("teamId") or 0)
+                if puuid and team_id:
+                    team_members.setdefault(team_id, set()).add(puuid)
+            for participant_id, participant in participants.items():
+                if not isinstance(participant, dict):
+                    continue
+                puuid = str(participant.get("puuid") or participant.get("playerPuuid") or "")
                 team_id = int(participant.get("teamId") or 0)
                 if puuid and team_id:
                     team_members.setdefault(team_id, set()).add(puuid)
@@ -5554,28 +5885,62 @@ def _infer_premade_groups(histories: dict[str, dict], active_puuids: set[str], t
             for index, first in enumerate(visible):
                 for second in visible[index + 1:]:
                     together[(first, second)] = together.get((first, second), 0) + 1
-    graph = {puuid: set() for puuid in active_puuids}
-    for (first, second), count in together.items():
-        if count >= threshold:
-            graph[first].add(second)
-            graph[second].add(first)
+    players = sorted(active_puuids)
+
+    def is_valid_group(group: tuple[str, ...]) -> bool:
+        return all(
+            together.get((first, second), 0) >= threshold
+            for first, second in combinations(group, 2)
+        )
+
+    # Enumerating subsets is bounded by the ten players in a live game and
+    # mirrors LeagueAkari's combinations -> removeSubsets pipeline.
+    candidates = [
+        group
+        for size in range(2, len(players) + 1)
+        for group in combinations(players, size)
+        if is_valid_group(group)
+    ]
+    maximal = [
+        group for group in candidates
+        if not any(set(group) < set(other) for other in candidates)
+    ]
+    maximal.sort(key=lambda group: (-len(group), group))
+
+    # Only merge overlapping sets if doing so does not turn a pairwise-valid
+    # collection into the connected-components false positive described above.
+    merged: list[tuple[str, ...]] = []
+    for candidate in maximal:
+        current = set(candidate)
+        changed = True
+        while changed:
+            changed = False
+            for index, existing in enumerate(merged):
+                union = tuple(sorted(current | set(existing)))
+                if current.intersection(existing) and is_valid_group(union):
+                    current = set(union)
+                    merged.pop(index)
+                    changed = True
+                    break
+        merged.append(tuple(sorted(current)))
+    merged.sort()
+
+    # A player can occur in two overlapping, incompatible cliques.  The
+    # deterministic first assignment keeps the public legacy map shape while
+    # never labelling a non-clique as one premade team.
     groups: dict[str, int] = {}
-    seen: set[str] = set()
-    group_id = 0
-    for puuid in sorted(active_puuids):
-        if puuid in seen or not graph[puuid]:
+    assigned: set[str] = set()
+    for group_id, group in enumerate(merged, start=1):
+        if len(group) < 2:
             continue
-        stack, members = [puuid], []
-        while stack:
-            current = stack.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            members.append(current)
-            stack.extend(graph[current] - seen)
-        if len(members) > 1:
-            group_id += 1
-            groups.update({member: group_id for member in members})
+        # Incompatible overlapping cliques (for example AB and BC) are not a
+        # single premade.  Keep the strongest deterministic candidate and do
+        # not assign a second label to an already assigned player.
+        if assigned.intersection(group):
+            continue
+        for puuid in group:
+            groups[puuid] = group_id
+        assigned.update(group)
     return groups
 
 
@@ -5592,6 +5957,17 @@ def _ongoing_performance_tags(
         return tags
     enabled = tag_settings or {}
 
+    def known_result(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "win", "won", "victory", "胜利", "胜"}:
+                return True
+            if normalized in {"false", "loss", "lost", "defeat", "失败", "负"}:
+                return False
+        return None
+
     def is_enabled(tag_id: str, default: bool = True) -> bool:
         return bool(enabled.get(tag_id, default))
 
@@ -5600,23 +5976,28 @@ def _ongoing_performance_tags(
             tags.append({"id": tag_id, "label": label, "tone": tone, "title": title})
 
     if show_streaks:
-        first_result = bool(matches[0].get("win"))
+        first_result = next((known_result(match.get("win")) for match in matches if known_result(match.get("win")) is not None), None)
+        if first_result is None:
+            first_result = None
         streak = 0
         for match in matches:
-            if bool(match.get("win")) != first_result:
+            result = known_result(match.get("win"))
+            if result is None or result != first_result:
                 break
             streak += 1
-        if streak >= 3:
+        if first_result is not None and streak >= 3:
             tag_id = "winning-streak" if first_result else "losing-streak"
             add(tag_id, f"{streak} 连{'胜' if first_result else '败'}", "positive" if first_result else "negative", f"最近 {streak} 场结果连续为{'胜利' if first_result else '失败'}。")
     if not show_performance:
         return tags
 
     sample = len(matches)
-    win_rate = sum(1 for match in matches if match.get("win")) / sample
-    if sample >= 5 and win_rate >= 0.6:
+    known_results = [known_result(match.get("win")) for match in matches]
+    known_results = [result for result in known_results if result is not None]
+    win_rate = sum(1 for result in known_results if result) / len(known_results) if known_results else None
+    if len(known_results) >= 5 and win_rate is not None and win_rate >= 0.6:
         add("high-win-rate", f"近况强势 {win_rate:.0%}", "positive", f"最近 {sample} 场赢下 {sum(1 for match in matches if match.get('win'))} 场。")
-    elif sample >= 5 and win_rate <= 0.4:
+    elif len(known_results) >= 5 and win_rate is not None and win_rate <= 0.4:
         add("high-win-rate", f"近况低迷 {win_rate:.0%}", "negative", f"最近 {sample} 场胜率偏低；标签只描述样本，不代表账号水平。")
 
     def average(key: str) -> float:
@@ -5781,9 +6162,19 @@ def _ongoing_rating_summary(matches: list[dict]) -> dict:
         {"position": position, "count": count}
         for position, count in sorted(position_counts.items(), key=lambda item: (-item[1], position_order.get(item[0], 99)))[:2]
     ]
+    known_results = [
+        match.get("win")
+        for match in matches
+        if isinstance(match.get("win"), bool)
+    ]
     return {
         "sample_count": sample,
-        "win_rate": sum(1 for match in matches if match.get("win")) / sample,
+        "win_rate": (
+            sum(1 for result in known_results if result) / len(known_results)
+            if known_results else None
+        ),
+        "known_result_count": len(known_results),
+        "unknown_result_count": sample - len(known_results),
         "avg_kda": average([
             (number(match.get("kills")) + number(match.get("assists"))) / max(1.0, number(match.get("deaths")))
             for match in matches
@@ -5806,7 +6197,7 @@ def _ongoing_rating_summary(matches: list[dict]) -> dict:
     }
 
 
-def _ongoing_analysis_payload(players: list[dict]) -> dict:
+def _ongoing_analysis_payload(players: list[dict], team_tags: list[dict] | None = None) -> dict:
     """Return the compact analysis contract consumed by LeagueAkari's cards.
 
     The upstream panel keeps the raw match rows separate from its aggregated
@@ -5817,6 +6208,18 @@ def _ongoing_analysis_payload(players: list[dict]) -> dict:
     actually returned, so an empty history remains empty evidence.
     """
     analyses: dict[str, dict] = {}
+
+    def known_result(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "win", "won", "victory", "胜利", "胜"}:
+                return True
+            if normalized in {"false", "loss", "lost", "defeat", "失败", "负"}:
+                return False
+        return None
+
     for player in players:
         puuid = str(player.get("puuid") or "")
         if not puuid:
@@ -5824,15 +6227,25 @@ def _ongoing_analysis_payload(players: list[dict]) -> dict:
         recent = player.get("recent") if isinstance(player.get("recent"), dict) else {}
         summary = player.get("rating_summary") if isinstance(player.get("rating_summary"), dict) else {}
         matches = player.get("recent_matches") if isinstance(player.get("recent_matches"), list) else []
-        wins = int(recent.get("wins") or 0)
         count = int(recent.get("matches") or len(matches) or 0)
-        losses = max(0, count - wins)
+        match_results = [known_result(row.get("win")) for row in matches if isinstance(row, dict)]
+        known_count = len([result for result in match_results if result is not None])
+        wins = sum(1 for result in match_results if result is True)
+        losses = sum(1 for result in match_results if result is False)
+        # Preserve an aggregate supplied by the loader when no normalized rows
+        # are available, but never turn an unknown result into a loss.
+        if not match_results and count:
+            wins = max(0, min(count, int(recent.get("wins") or 0)))
+            losses = max(0, min(count - wins, int(recent.get("losses") or 0)))
+            known_count = wins + losses
         result_streak = 0
         result_streak_value = None
         for row in matches:
             if not isinstance(row, dict):
                 continue
-            value = bool(row.get("win"))
+            value = known_result(row.get("win"))
+            if value is None:
+                break
             if result_streak_value is None:
                 result_streak_value = value
             if value != result_streak_value:
@@ -5840,10 +6253,12 @@ def _ongoing_analysis_payload(players: list[dict]) -> dict:
             result_streak += 1
         winning_streak = result_streak if result_streak_value is True else 0
         losing_streak = result_streak if result_streak_value is False else 0
-        win_rate = (wins / count) if count else 0.0
+        win_rate = (wins / known_count) if known_count else None
         akari_score = float(recent.get("akari_score") or 0.0)
         analyses[puuid] = {
             "count": count,
+            "knownResultCount": known_count,
+            "unknownResultCount": max(0, count - known_count),
             "detailsCount": int(recent.get("details_analyzed") or len(matches) or 0),
             "summary": {
                 "avgKda": float(recent.get("average_kda") or summary.get("avg_kda") or 0.0),
@@ -5889,7 +6304,7 @@ def _ongoing_analysis_payload(players: list[dict]) -> dict:
                     {"championId": champion_id, "count": 0, "wins": 0},
                 )
                 champion["count"] += 1
-                champion["wins"] += int(bool(row.get("win")))
+                champion["wins"] += int(known_result(row.get("win")) is True)
             if position:
                 analyses[puuid]["positions"][position] = analyses[puuid]["positions"].get(position, 0) + 1
 
@@ -5900,19 +6315,107 @@ def _ongoing_analysis_payload(players: list[dict]) -> dict:
         analysis = analyses.get(puuid)
         if not analysis:
             continue
-        bucket = teams.setdefault(team_key, {"players": [], "wins": 0, "games": 0, "kills": 0, "deaths": 0, "assists": 0})
+        bucket = teams.setdefault(team_key, {"players": [], "wins": 0, "games": 0, "knownGames": 0, "unknownGames": 0, "kills": 0, "deaths": 0, "assists": 0})
         bucket["players"].append(puuid)
         all_stats = analysis["winLoss"]["all"]
         bucket["wins"] += int(all_stats["wins"])
         bucket["games"] += int(all_stats["count"])
+        bucket["knownGames"] += int(analysis.get("knownResultCount") or 0)
+        bucket["unknownGames"] += int(analysis.get("unknownResultCount") or 0)
         bucket["kills"] += float(analysis["summary"]["kills"])
         bucket["deaths"] += float(analysis["summary"]["deaths"])
         bucket["assists"] += float(analysis["summary"]["assists"])
     for bucket in teams.values():
-        bucket["avgWinRate"] = bucket["wins"] / bucket["games"] if bucket["games"] else 0.0
+        bucket["avgWinRate"] = bucket["wins"] / bucket["knownGames"] if bucket["knownGames"] else None
+        bucket["winRateEvidence"] = {
+            "wins": bucket["wins"],
+            "knownGames": bucket["knownGames"],
+            "unknownGames": bucket["unknownGames"],
+            "sampleSufficient": bucket["knownGames"] >= 5,
+        }
         bucket["avgKda"] = (bucket["kills"] + bucket["assists"]) / max(1.0, bucket["deaths"])
 
+    for tag in team_tags or []:
+        group_players = set(tag.get("players") or [])
+        for team in teams.values():
+            if group_players.intersection(team["players"]):
+                team.setdefault("winRateTeams", []).append(tag)
+
     return {"players": analyses, "teams": teams}
+
+
+def _ongoing_win_rate_team_tags(players: list[dict]) -> list[dict]:
+    """Return LeagueAkari's evidence-backed premade win/loss team tags.
+
+    The thresholds intentionally match the upstream TeamTagsArea constants:
+    a win-rate team needs at least three premade members, one member with at
+    least 13 known games and >=90% wins, and an average winning streak of four
+    for the remaining members.  A loss-rate team needs at least two members,
+    each with at least two known games and <=25% wins.  Missing/unknown
+    results never qualify a tag.
+    """
+    by_group: dict[int, list[dict]] = {}
+    for player in players:
+        group_id = player.get("premade_group")
+        if group_id is None:
+            continue
+        by_group.setdefault(int(group_id), []).append(player)
+
+    result: list[dict] = []
+    for group_id, members in sorted(by_group.items()):
+        analyses = []
+        for player in members:
+            recent = player.get("recent") if isinstance(player.get("recent"), dict) else {}
+            summary = player.get("rating_summary") if isinstance(player.get("rating_summary"), dict) else {}
+            matches = player.get("recent_matches") if isinstance(player.get("recent_matches"), list) else []
+            known = [row.get("win") for row in matches if isinstance(row, dict) and isinstance(row.get("win"), bool)]
+            known_count = len(known)
+            wins = sum(1 for value in known if value)
+            # Preserve a loader aggregate only when it explicitly provides a
+            # known sample count.  Do not infer unknown rows as losses.
+            if not known and int(summary.get("known_result_count") or 0) > 0:
+                known_count = int(summary["known_result_count"])
+                wins = int(round(float(summary.get("win_rate") or 0) * known_count))
+            rate = wins / known_count if known_count else None
+            streak = 0
+            for row in matches:
+                if not isinstance(row, dict) or not isinstance(row.get("win"), bool):
+                    break
+                if row["win"]:
+                    streak += 1
+                else:
+                    break
+            analyses.append({"puuid": player.get("puuid"), "known": known_count, "win_rate": rate, "winning_streak": streak})
+        if len(analyses) >= 3:
+            high = next((row for row in analyses if row["known"] >= 13 and row["win_rate"] is not None and row["win_rate"] >= 0.9), None)
+            if high:
+                others = [row for row in analyses if row is not high]
+                average_streak = sum(row["winning_streak"] for row in others) / len(others) if others else 0
+                if average_streak >= 4:
+                    result.append({
+                        "premade_id": group_id,
+                        "type": "win-rate-team",
+                        "players": [row["puuid"] for row in analyses],
+                        "evidence": {
+                            "min_size": 3,
+                            "high_win_rate_member": {"puuid": high["puuid"], "known_matches": high["known"], "win_rate": high["win_rate"]},
+                            "other_members_average_winning_streak": average_streak,
+                        },
+                    })
+        if len(analyses) >= 2 and all(
+            row["known"] >= 2 and row["win_rate"] is not None and row["win_rate"] <= 0.25
+            for row in analyses
+        ):
+            result.append({
+                "premade_id": group_id,
+                "type": "loss-rate-team",
+                "players": [row["puuid"] for row in analyses],
+                "evidence": {
+                    "min_size": 2,
+                    "members": [{"puuid": row["puuid"], "known_matches": row["known"], "win_rate": row["win_rate"]} for row in analyses],
+                },
+            })
+    return result
 
 
 def _ongoing_jungle_main_champions(matches: list[dict], names: dict[int, str]) -> list[dict]:
@@ -5985,7 +6488,8 @@ def _ongoing_akari_score(matches: list[dict]) -> float:
     deaths = sum(number(row.get("deaths")) for row in matches)
     assists = sum(number(row.get("assists")) for row in matches)
     kda = (kills + assists) / max(1.0, deaths)
-    win_rate = sum(1 for row in matches if row.get("win")) / len(matches)
+    known_results = [row.get("win") for row in matches if isinstance(row.get("win"), bool)]
+    win_rate = sum(1 for result in known_results if result) / len(known_results) if known_results else 0.5
     def mean(key: str) -> float:
         return sum(row[key] for row in part_rows) / len(part_rows)
     score = (
@@ -6287,6 +6791,7 @@ async def _load_jungle_analysis(
     limit: int = 6,
     server_id: str | None = None,
     prefer_sgp: bool = False,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> dict:
     candidates = []
     for game in _history_games(history):
@@ -6301,19 +6806,28 @@ async def _load_jungle_analysis(
         game_id, participant_id, game = entry
         timeline = None
         source = "sgp" if prefer_sgp else "lcu"
+
+        async def limited(coro):
+            if semaphore is None:
+                return await coro
+            async with semaphore:
+                return await coro
+
         if prefer_sgp:
             try:
-                timeline = await _sgp_game_details(game_id, server_id)
+                timeline = await limited(_sgp_game_details(game_id, server_id))
             except RuntimeError:
                 return None
         else:
             try:
-                timeline = await league_lab_service.request(
-                    "GET", f"/lol-match-history/v1/game-timelines/{game_id}"
+                timeline = await limited(
+                    league_lab_service.request(
+                        "GET", f"/lol-match-history/v1/game-timelines/{game_id}"
+                    )
                 )
             except RuntimeError:
                 try:
-                    timeline = await _sgp_game_details(game_id, server_id)
+                    timeline = await limited(_sgp_game_details(game_id, server_id))
                     source = "sgp"
                 except RuntimeError:
                     return None
@@ -7339,14 +7853,48 @@ async def save_league_player_tag(puuid: str, body: PlayerTagBody):
 
 
 _ongoing_cache: dict = {"key": "", "expires_at": 0.0, "payload": None}
+_ongoing_inflight: dict[str, asyncio.Task] = {}
+_ongoing_deferred: dict[str, asyncio.Task] = {}
+_ongoing_background_full: dict[str, asyncio.Task] = {}
 
 
-@router.get("/ongoing-game")
-async def league_ongoing_game():
+def _consume_ongoing_task(task: asyncio.Task, label: str) -> None:
+    """Consume detached task failures so asyncio never reports them unhandled."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("%s failed", label)
+
+
+def _ongoing_inflight_key(settings: LeagueLabSettings) -> str:
+    """Coalesce overlapping refreshes without coupling callers to a task."""
+    return json.dumps(
+        [
+            str(league_lab_service.phase or ""),
+            settings.ongoing_match_history_load_count,
+            settings.ongoing_query_concurrency,
+            settings.ongoing_match_history_tag_preference,
+            settings.ongoing_query_in_lobby_phase,
+            settings.ongoing_premade_threshold,
+            settings.ongoing_jungle_analysis_count,
+            settings.ongoing_show_jungle_pathing,
+            settings.ongoing_show_jungle_pathing_for_all_players,
+            settings.ongoing_show_premade_tag,
+        ],
+        separators=(",", ":"),
+    )
+
+
+async def _league_ongoing_game_impl(*, snapshot: bool = False, force_refresh: bool = False):
     settings = league_lab_service.settings
     try:
         gameflow = await league_lab_service.request("GET", "/lol-gameflow/v1/session")
-        names = await _champion_names()
+        # A snapshot is deliberately limited to gameflow/lobby/selection
+        # reads.  It must never wait on the champion catalog or per-player
+        # enrichment; those are part of the background full refresh.
+        names = {} if snapshot else await _champion_names()
     except RuntimeError as exc:
         idle_phases = {"", "None", "Matchmaking", "PreEndOfGame", "WaitingForStats", "EndOfGame"}
         live_phase = str(league_lab_service.phase or "")
@@ -7399,6 +7947,8 @@ async def league_ongoing_game():
     selections.extend(row for puuid, row in team_metadata.items() if puuid not in seen)
     cache_key = json.dumps(
         [
+            live_phase,
+            "lobby" if isinstance(lobby, dict) else ("champ-select" if live_phase == "ChampSelect" else "in-game"),
             game_data.get("gameId") or (lobby or {}).get("partyId"),
             [
                 settings.ongoing_match_history_load_count,
@@ -7426,9 +7976,86 @@ async def league_ongoing_game():
         ],
         ensure_ascii=False,
     )
-    if _ongoing_cache["key"] == cache_key and time.monotonic() < _ongoing_cache["expires_at"]:
+    start_generation = int(_ongoing_cache.get("generation") or 0)
+    if (
+        not force_refresh
+        and _ongoing_cache["key"] == cache_key
+        and time.monotonic() < _ongoing_cache["expires_at"]
+        and (snapshot or _ongoing_cache.get("kind") == "full")
+    ):
         return _ongoing_cache["payload"]
+
+    if snapshot:
+        cached_players = {
+            str(row.get("puuid") or ""): row
+            for row in ((_ongoing_cache.get("payload") or {}).get("players") or [])
+            if isinstance(row, dict) and row.get("puuid")
+        } if _ongoing_cache.get("key") == cache_key else {}
+        snapshot_players = []
+        queue_data = game_data.get("queue") or ((lobby or {}).get("gameConfig") or {})
+        usage_mode = settings.ongoing_champion_usage_mode if settings.ongoing_show_champion_usage else "none"
+        for row in selections:
+            if not isinstance(row, dict):
+                continue
+            puuid = str(row.get("puuid") or row.get("playerPuuid") or "")
+            if not puuid:
+                continue
+            cached = cached_players.get(puuid) or {}
+            player = dict(cached) if cached else {
+                "puuid": puuid,
+                "team": row.get("team") or row.get("teamId"),
+                "champion_id": int(row.get("championId") or 0),
+                "champion_name": "",
+                "position": str(row.get("selectedPosition") or row.get("assignedPosition") or "").upper(),
+                "summoner": {key: row[key] for key in ("gameName", "displayName", "tagLine", "profileIconId") if row.get(key) is not None},
+                "ranked": {},
+                "tag": {},
+                "recent": {"matches": 0, "wins": 0, "average_kda": 0, "akari_score": 0, "details_analyzed": 0},
+                "recent_matches": [],
+                "rating_summary": _ongoing_rating_summary([]),
+                "champion_usage": {"mode": usage_mode, "matches": 0, "wins": 0, "average_kda": 0, "mastery_level": 0, "mastery_points": 0},
+                "jungle_analysis": None,
+                "performance_tags": [],
+                "data_availability": {"summoner": False, "ranked": False, "history": False, "mastery": usage_mode != "mastery", "unavailable": [], "history_source": None, "deferred": ["summoner", "ranked", "history"] + (["mastery"] if usage_mode == "mastery" else [])},
+                "load_state": "loading",
+            }
+            # Refresh the live identity fields even when an older full card is
+            # available; this prevents a stale phase/selection from leaking.
+            player["team"] = row.get("team") or row.get("teamId") or player.get("team")
+            player["champion_id"] = int(row.get("championId") or player.get("champion_id") or 0)
+            player["position"] = str(row.get("selectedPosition") or row.get("assignedPosition") or player.get("position") or "").upper()
+            snapshot_players.append(player)
+        team_tags = _ongoing_win_rate_team_tags(snapshot_players)
+        analysis = _ongoing_analysis_payload(snapshot_players, team_tags)
+        result = {
+            "phase": live_phase,
+            "query_stage": "lobby" if isinstance(lobby, dict) else ("champ-select" if live_phase == "ChampSelect" else "in-game"),
+            "queue": queue_data,
+            "game_id": game_data.get("gameId") or (lobby or {}).get("partyId"),
+            "players": snapshot_players,
+            "teams": {team: list(info.get("players") or []) for team, info in analysis.get("teams", {}).items()},
+            "analysis": analysis,
+            "team_tags": team_tags,
+            "available": bool(snapshot_players),
+            "partial": True,
+            "snapshot": True,
+            "show_match_history_item_border": settings.ongoing_show_match_history_item_border,
+            "order_player_by": settings.ongoing_order_player_by,
+        }
+        _ongoing_cache.update({"key": cache_key, "expires_at": time.monotonic() + 30.0, "payload": result, "kind": "snapshot", "generation": start_generation + 1})
+        if cache_key not in _ongoing_background_full or _ongoing_background_full[cache_key].done():
+            task = asyncio.create_task(_league_ongoing_game_impl(force_refresh=True))
+            _ongoing_background_full[cache_key] = task
+            def _clear_background(done_task):
+                if _ongoing_background_full.get(cache_key) is done_task:
+                    _ongoing_background_full.pop(cache_key, None)
+                _consume_ongoing_task(done_task, "ongoing full enrichment")
+            task.add_done_callback(_clear_background)
+        return result
     query_semaphore = asyncio.Semaphore(settings.ongoing_query_concurrency)
+    # Timeline calls are much heavier than identity/history reads.  Keep them
+    # on a separate, bounded lane so an all-player scan cannot flood the LCU.
+    timeline_semaphore = asyncio.Semaphore(max(1, min(settings.ongoing_query_concurrency, 4)))
     sgp_server_id = _sgp_server_id(league_lab_service.credentials)
     # Player tags are stored in one local JSON document. Snapshot it once for
     # the whole 10-player analysis instead of reopening and parsing the same
@@ -7477,10 +8104,9 @@ async def league_ongoing_game():
                     load_errors.pop("history", None)
                 except RuntimeError as exc:
                     load_errors["history_sgp"] = str(exc)
-            if settings.ongoing_champion_usage_mode == "mastery":
-                mastery = await load_optional(
-                    "mastery", f"/lol-champion-mastery/v1/{puuid}/champion-mastery"
-                )
+            # Mastery and timeline data are deferred below.  They are useful
+            # card enrichments, but must not delay the first ten-player roster
+            # response when the LCU is under load.
         champion_id = int(row.get("championId") or 0)
         matches = _normalize_match_rows(history or {}, names, puuid)
         queue_data = game_data.get("queue") or ((lobby or {}).get("gameConfig") or {})
@@ -7489,19 +8115,21 @@ async def league_ongoing_game():
             matches = [match for match in matches if int(match.get("queue_id") or 0) == queue_id]
         detail_matches = matches[:settings.ongoing_game_details_load_count]
         usage_mode = settings.ongoing_champion_usage_mode if settings.ongoing_show_champion_usage else "none"
+        selected_position = str(row.get("selectedPosition") or row.get("assignedPosition") or "").upper()
+        jungle_requested = bool(
+            settings.ongoing_show_jungle_pathing
+            and (selected_position == "JUNGLE" or settings.ongoing_show_jungle_pathing_for_all_players)
+            and isinstance(history, dict)
+        )
+        deferred_fields = (["mastery"] if usage_mode == "mastery" else []) + (["jungle"] if jungle_requested else [])
         champion_matches = [match for match in matches if match.get("champion_id") == champion_id] if usage_mode == "recent" else []
         champion_mastery = next(
             (item for item in mastery or [] if int(item.get("championId") or 0) == champion_id),
             {},
         ) if isinstance(mastery, list) and champion_id else {}
-        selected_position = str(row.get("selectedPosition") or row.get("assignedPosition") or "").upper()
         jungle_analysis = None
-        if settings.ongoing_show_jungle_pathing and (
-            selected_position == "JUNGLE" or settings.ongoing_show_jungle_pathing_for_all_players
-        ) and isinstance(history, dict):
-            jungle_analysis = await _load_jungle_analysis(puuid, history, limit=settings.ongoing_jungle_analysis_count)
-            if isinstance(jungle_analysis, dict):
-                jungle_analysis["main_champions"] = _ongoing_jungle_main_champions(matches, names)
+        # Jungle timelines are scheduled after the response is cached.  The
+        # returned player remains explicit about deferred data availability.
         recent_kda = round(sum(
             (float(match.get("kills") or 0) + float(match.get("assists") or 0))
             / max(1.0, float(match.get("deaths") or 0))
@@ -7528,6 +8156,26 @@ async def league_ongoing_game():
             extra_tags.append({"id": "met", "label": "遇到过", "tone": "info", "title": "当前账号的近期对局样本中出现过这名玩家。"})
         if str((summoner or {}).get("privacy") or "").upper() == "PRIVATE" and tag_flags.get("privacy", True):
             extra_tags.append({"id": "privacy", "label": "战绩私密", "tone": "negative", "title": "客户端将该玩家的战绩隐私状态标记为 PRIVATE。"})
+        data_availability = {
+            "summoner": summoner is not None,
+            "ranked": ranked is not None,
+            "history": history is not None,
+            "mastery": usage_mode != "mastery" or mastery is not None,
+            "unavailable": sorted(load_errors),
+            "history_source": history_source if isinstance(history, dict) else None,
+        }
+        if deferred_fields:
+            data_availability["deferred"] = deferred_fields
+        known_results = [
+            match.get("win")
+            for match in matches
+            if isinstance(match.get("win"), bool)
+        ]
+        champion_known_results = [
+            match.get("win")
+            for match in champion_matches
+            if isinstance(match.get("win"), bool)
+        ]
         return ({
             "puuid": puuid,
             "team": row.get("team") or row.get("teamId"),
@@ -7539,7 +8187,9 @@ async def league_ongoing_game():
             "tag": local_tag,
             "recent": {
                 "matches": len(matches),
-                "wins": sum(1 for match in matches if match.get("win")),
+                "known_results": len(known_results),
+                "unknown_results": len(matches) - len(known_results),
+                "wins": sum(1 for result in known_results if result),
                 "average_kda": recent_kda,
                 "akari_score": _ongoing_akari_score(detail_matches),
                 "details_analyzed": len(detail_matches),
@@ -7552,22 +8202,18 @@ async def league_ongoing_game():
             "champion_usage": {
                 "mode": usage_mode,
                 "matches": len(champion_matches),
-                "wins": sum(1 for match in champion_matches if match.get("win")),
+                "known_results": len(champion_known_results),
+                "unknown_results": len(champion_matches) - len(champion_known_results),
+                "wins": sum(1 for result in champion_known_results if result),
                 "average_kda": round(sum((match.get("kills", 0) + match.get("assists", 0)) / max(1, match.get("deaths", 0)) for match in champion_matches) / max(1, len(champion_matches)), 2),
                 "mastery_level": champion_mastery.get("championLevel", 0),
                 "mastery_points": champion_mastery.get("championPoints", 0),
             },
             "jungle_analysis": jungle_analysis,
             "performance_tags": extra_tags + card_tags,
-            "data_availability": {
-                "summoner": summoner is not None,
-                "ranked": ranked is not None,
-                "history": history is not None,
-                "mastery": usage_mode != "mastery" or mastery is not None,
-                "unavailable": sorted(load_errors),
-                "history_source": history_source if isinstance(history, dict) else None,
-            },
-        }, history or {})
+            "data_availability": data_availability,
+            "load_state": "partial" if deferred_fields else "ready",
+            }, history or {})
     enriched = await asyncio.gather(*(enrich(row) for row in selections))
     players = [result[0] for result in enriched if result[0]]
     histories = {result[0]["puuid"]: result[1] for result in enriched if result[0] and result[0].get("puuid")}
@@ -7580,7 +8226,7 @@ async def league_ongoing_game():
         player["premade_group"] = premade_groups.get(player.get("puuid"))
     position_order = {"TOP": 0, "JUNGLE": 1, "MIDDLE": 2, "MID": 2, "BOTTOM": 3, "UTILITY": 4}
     sorters = {
-        "win-rate": lambda player: -float(player["recent"]["wins"]) / max(1, int(player["recent"]["matches"])),
+        "win-rate": lambda player: -float(player["recent"]["wins"]) / max(1, int(player["recent"].get("known_results") or 0)),
         "kda": lambda player: -float(player["recent"]["average_kda"]),
         "akari-score": lambda player: -float(player["recent"]["akari_score"]),
         "position": lambda player: position_order.get(str(player.get("position") or "").upper(), 99),
@@ -7591,7 +8237,8 @@ async def league_ongoing_game():
     # Keep the raw player rows for compatibility, while also exposing the
     # upstream LeagueAkari-shaped aggregate contract for the rich ongoing
     # cards (team badges, KDA outliers and tag popovers).
-    analysis = _ongoing_analysis_payload(players)
+    team_tags = _ongoing_win_rate_team_tags(players)
+    analysis = _ongoing_analysis_payload(players, team_tags)
     queue = game_data.get("queue") or ((lobby or {}).get("gameConfig") or {})
     result = {
         "phase": live_phase,
@@ -7604,19 +8251,113 @@ async def league_ongoing_game():
             for team, info in analysis.get("teams", {}).items()
         },
         "analysis": analysis,
+        "team_tags": team_tags,
         "available": bool(players),
+        "partial": any(player.get("load_state") == "partial" for player in players),
         "show_match_history_item_border": settings.ongoing_show_match_history_item_border,
         "order_player_by": settings.ongoing_order_player_by,
     }
     if players and not isinstance(lobby, dict):
         _remember_recent_players(players, game_data.get("gameId"))
     has_partial_data = any(player.get("data_availability", {}).get("unavailable") for player in players)
+    # A newer snapshot for another game/phase may have replaced the cache
+    # while this full task was waiting on slow history.  Never publish that
+    # stale result over the newer generation.
+    if (
+        _ongoing_cache.get("key") != cache_key
+        and int(_ongoing_cache.get("generation") or 0) > start_generation
+    ):
+        return _ongoing_cache.get("payload")
     _ongoing_cache.update({
         "key": cache_key,
-        "expires_at": time.monotonic() + (5.0 if has_partial_data else 30.0),
+        # A partial payload is still a valid snapshot.  Keeping it briefly in
+        # cache lets the deferred task fill it in instead of causing another
+        # ten-player enrichment on every frontend poll.
+        "expires_at": time.monotonic() + 30.0,
         "payload": result,
+        "kind": "full",
     })
+
+    async def deferred_enrichment():
+        """Fill optional card fields after the fast roster is available."""
+        try:
+            for player in players:
+                if _ongoing_cache.get("key") != cache_key:
+                    return
+                puuid = str(player.get("puuid") or "")
+                if not puuid:
+                    continue
+                availability = player.setdefault("data_availability", {})
+                deferred = set(availability.get("deferred") or [])
+                if "mastery" in deferred:
+                    try:
+                        async with query_semaphore:
+                            mastery = await league_lab_service.request(
+                                "GET", f"/lol-champion-mastery/v1/{puuid}/champion-mastery"
+                            )
+                        champion_id = int(player.get("champion_id") or 0)
+                        champion_mastery = next(
+                            (item for item in mastery or [] if int(item.get("championId") or 0) == champion_id),
+                            {},
+                        ) if isinstance(mastery, list) and champion_id else {}
+                        usage = player.setdefault("champion_usage", {})
+                        usage["mastery_level"] = champion_mastery.get("championLevel", 0)
+                        usage["mastery_points"] = champion_mastery.get("championPoints", 0)
+                        availability["mastery"] = True
+                    except RuntimeError as exc:
+                        availability.setdefault("unavailable", []).append("mastery")
+                        logger.debug("ongoing mastery deferred load failed for %s: %s", puuid, exc)
+                    deferred.discard("mastery")
+                if "jungle" in deferred:
+                    history = histories.get(puuid) or {}
+                    try:
+                        jungle = await _load_jungle_analysis(
+                            puuid,
+                            history,
+                            limit=settings.ongoing_jungle_analysis_count,
+                            server_id=sgp_server_id or None,
+                            semaphore=timeline_semaphore,
+                        )
+                        if isinstance(jungle, dict):
+                            jungle["main_champions"] = _ongoing_jungle_main_champions(
+                                player.get("recent_matches") or [], names
+                            )
+                            player["jungle_analysis"] = jungle
+                        availability["jungle"] = True
+                    except RuntimeError as exc:
+                        availability.setdefault("unavailable", []).append("jungle")
+                        logger.debug("ongoing jungle deferred load failed for %s: %s", puuid, exc)
+                    deferred.discard("jungle")
+                availability["deferred"] = sorted(deferred)
+                player["load_state"] = "partial" if deferred or availability.get("unavailable") else "ready"
+            result["team_tags"] = _ongoing_win_rate_team_tags(players)
+            result["analysis"] = _ongoing_analysis_payload(players, result["team_tags"])
+            result["partial"] = any(player.get("load_state") == "partial" for player in players)
+            _ongoing_cache["payload"] = result
+        finally:
+            _ongoing_deferred.pop(cache_key, None)
+
+    if any(player.get("data_availability", {}).get("deferred") for player in players):
+        task = asyncio.create_task(deferred_enrichment())
+        _ongoing_deferred[cache_key] = task
+        task.add_done_callback(lambda done_task: _consume_ongoing_task(done_task, "ongoing deferred enrichment"))
     return result
+
+
+@router.get("/ongoing-game")
+async def league_ongoing_game(snapshot: bool = False):
+    settings = league_lab_service.settings
+    key = f"{_ongoing_inflight_key(settings)}:{'snapshot' if snapshot else 'full'}"
+    existing = _ongoing_inflight.get(key)
+    if existing and not existing.done():
+        return await asyncio.shield(existing)
+    task = asyncio.create_task(_league_ongoing_game_impl(snapshot=snapshot))
+    _ongoing_inflight[key] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if _ongoing_inflight.get(key) is task:
+            _ongoing_inflight.pop(key, None)
 
 
 @router.get("/cooldown-timer/state")

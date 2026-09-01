@@ -201,8 +201,11 @@ export async function importLeaguePlayerTags(rows) {
   return data;
 }
 
-export async function fetchLeagueOngoingGame() {
-  const { data } = await API.get("/league-lab/ongoing-game");
+export async function fetchLeagueOngoingGame({ snapshot = false } = {}) {
+  const response = snapshot
+    ? await API.get("/league-lab/ongoing-game", { params: { snapshot: true } })
+    : await API.get("/league-lab/ongoing-game");
+  const { data } = response;
   return data;
 }
 

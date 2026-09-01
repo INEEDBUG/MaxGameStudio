@@ -16,6 +16,11 @@ describe("weaponDisplayName", () => {
     expect(weaponDisplayName("沙鹰", "en")).toBe("Desert Eagle");
   });
 
+  test("ms/ru use the English fallback in the bilingual weapon map", () => {
+    expect(weaponDisplayName("沙鹰", "ms-MY")).toBe("Desert Eagle");
+    expect(weaponDisplayName("沙鹰", "ru-RU")).toBe("Desert Eagle");
+  });
+
   test("en maps 大狙 (AWP) → AWP", () => {
     expect(weaponDisplayName("大狙 (AWP)", "en")).toBe("AWP");
   });

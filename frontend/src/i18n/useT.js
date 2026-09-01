@@ -2,8 +2,9 @@ import { useCallback } from "react";
 import { useLocaleStore } from "./localeStore.js";
 import zh from "./dict/zh.js";
 import en from "./dict/en.js";
+import { msMY, ruRU, zhHK, zhTW } from "./dict/regional.js";
 
-const DICTS = { zh, en };
+export const DICTS = { zh, "zh-HK": zhHK, "zh-TW": zhTW, en, "ms-MY": msMY, "ru-RU": ruRU };
 
 function interpolate(str, params) {
   if (!params) return str;
@@ -14,8 +15,10 @@ function interpolate(str, params) {
 
 export function translate(locale, key, params) {
   const dict = DICTS[locale] || DICTS.zh;
+  const base = String(locale || "zh").toLowerCase().startsWith("zh") ? DICTS.zh : DICTS.en;
   let value = dict[key];
-  if (value === undefined) value = DICTS.zh[key]; // 回退到中文
+  if (value === undefined) value = base[key];
+  if (value === undefined) value = DICTS.zh[key];
   if (value === undefined) {
     if (import.meta.env?.DEV) {
       console.warn(`[i18n] missing key: ${key}`);

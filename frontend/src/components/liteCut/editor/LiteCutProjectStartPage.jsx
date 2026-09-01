@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 import { Clock3, FilePlus2, FolderOpen, Loader2, RefreshCw } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
 import LiteCutNewProjectDialog from "./LiteCutNewProjectDialog.jsx";
+import { intlLocale } from "../../../i18n/localeUtils.js";
 
 function formatProjectTime(value, locale) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+  return date.toLocaleString(intlLocale(locale), {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }

@@ -16,7 +16,7 @@
 > **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **The current stable release is `v3.0.3`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.3`. The CS2 workspace, League features, and VALORANT features ship in one installer.
+> **The current stable release is `v3.0.4`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.4`. The CS2 workspace, League features, and VALORANT features ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
@@ -43,10 +43,10 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ---
 
-## What's new in v3.0.3
+## What's new in v3.0.4
 
 > [!TIP]
-> League of Legends is the primary focus of this release. See the [v3.0.3 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.3) for the complete technical notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
+> This release continues the League ongoing-game and navigation work and adds four regional language choices. See the [v3.0.4 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.4) for the complete technical notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
 
 | Section | Directly accessible features |
 | --- | --- |
@@ -55,15 +55,19 @@ This repository does not display upstream donation QR codes or solicit money on 
 | **VALORANT** | Safe true-stretch guide and crosshair/share-code tools |
 | **Peripheral Tuning** | Sensitivity and magnetic-key input labs, no longer grouped under CS2 |
 
-League improvements include:
+Highlights:
 
-- **Shallower navigation** — Stable match-history, player-center, and ongoing-game features are now first-class entries. Legacy URLs still redirect with their query parameters intact.
-- **Safer page state** — Stale responses can no longer overwrite a newer page state after navigation or unmount; loading, empty, and error states are explicit.
-- **More reliable Mini lifecycle** — Native-window synchronization retains the newest pending state so a rapid transition into the game cannot lose the hide event.
-- **Fewer duplicate reads** — Four resident managers share one 1.5-second status source. In the fixed one-minute model, requests fall from 60 to 40, while the embedded ongoing-game view's extra status reads fall from 12 per minute to zero.
-- **Less repeated I/O** — A ten-player analysis reads the local tag file once instead of up to ten times, and concurrent status reads inside a 350ms window share one actual refresh.
+- **Regional language choices** — Traditional Chinese (Hong Kong), Traditional Chinese (Taiwan), Malay, and Russian are selectable. Malay and Russian are marked Beta because deeper screens can still fall back to English or Simplified Chinese.
+- **Collapsible active sections** — Entering a game section still opens it automatically, while an explicit user collapse now remains respected.
+- **No duplicate League navigation** — The five canonical League entries are no longer repeated inside the page body.
+- **Dedicated ongoing-game page** — `/league/ongoing` now has its own page with settings, refresh, and standalone-window actions instead of reusing the large automation shell.
+- **Progressive player loading** — The roster and player cards appear first; cards awaiting history show an explicit skeleton and update independently when richer data arrives.
+- **Stricter premade inference** — Every player pair in a candidate group must meet the shared-match threshold, reducing chained false positives. Win-rate-team labels retain their sample evidence.
+- **Bounded polling** — Partial snapshots refresh briefly at a faster interval, then return to the normal five-second cadence when ready. Unmounts and historical previews stop live requests.
+- **Faster Mini auto-accept** — ReadyCheck events start the 0/0.1-second timer directly, duplicate events no longer reset the deadline, and transient event-stream failures reconnect and prime the current state.
+- **Readable light theme** — Win rate, KDA, and Akari metrics retain sufficient contrast inside the dark ongoing-game player cards.
 
-These figures come from deterministic code paths and automated-test models; they are not promises of absolute latency or memory use on every PC. Release validation did not execute League account actions or fabricate a complete Lobby → ReadyCheck → ChampSelect → InProgress live-client chain.
+These behaviors are covered by targeted automated tests, but they are not promises of absolute latency on every PC. Release preparation did not execute League account actions and does not claim a complete live-client Lobby → ReadyCheck → ChampSelect → InProgress validation chain.
 
 ---
 
@@ -71,7 +75,7 @@ These figures come from deterministic code paths and automated-test models; they
 
 ### Screenshots
 
-These screenshots come from the `v2.5.16` desktop UI baseline and local demo fixtures; they are not presented as `v3.0.3`-specific screenshots. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
+These screenshots come from the `v2.5.16` desktop UI baseline and local demo fixtures; they are not presented as `v3.0.4`-specific screenshots. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
 
 <table>
   <tr>
@@ -186,7 +190,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v2.5.17 · Withdrawn** | Critical upgrade-installation and automatic-update boundary defects | ⛔ Withdrawn |
 | **v3.0.1 · Upgrade fixes** | Fixes safe cleanup, version skipping/forced updates, and Release title version parsing | ✅ Released |
 | **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
-| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Current stable |
+| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Released |
+| **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Current stable |
 
 ### Planned
 

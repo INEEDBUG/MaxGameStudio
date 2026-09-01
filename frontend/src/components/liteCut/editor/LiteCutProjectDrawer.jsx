@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, FilePlus2, FolderOpen, Loader2, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
+import { intlLocale } from "../../../i18n/localeUtils.js";
 
 function projectStats(body) {
   const tracks = Array.isArray(body?.tracks) ? body.tracks : [];
@@ -12,7 +13,7 @@ function formatProjectTime(value, locale) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+  return date.toLocaleString(intlLocale(locale), {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }

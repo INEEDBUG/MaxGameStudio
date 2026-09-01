@@ -14,3 +14,9 @@ def test_english_prompt_is_english_and_plain():
 def test_meme_montage_english_prompt():
     assert "English" in select_meme_montage_prompt("en")
     assert "中文" in select_meme_montage_prompt("zh")
+
+
+def test_regional_prompts_request_the_selected_output_language():
+    assert "Bahasa Melayu" in select_reviewer_prompt("ms-MY")
+    assert "Russian" in select_meme_montage_prompt("ru-RU")
+    assert "中文" in select_reviewer_prompt("zh-TW")

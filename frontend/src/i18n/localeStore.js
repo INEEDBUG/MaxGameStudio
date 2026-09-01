@@ -1,28 +1,41 @@
 import { create } from "zustand";
 import API from "../api/api";
 
-export const SUPPORTED_LOCALES = ["auto", "zh", "en"];
+export const SUPPORTED_LOCALES = ["auto", "zh", "zh-HK", "zh-TW", "en", "ms-MY", "ru-RU"];
+export const LOCALE_LABEL_KEYS = {
+  auto: "settings.localeAuto",
+  zh: "settings.localeZh",
+  "zh-HK": "settings.localeZhHk",
+  "zh-TW": "settings.localeZhTw",
+  en: "settings.localeEn",
+  "ms-MY": "settings.localeMsMy",
+  "ru-RU": "settings.localeRuRu",
+};
 const DEFAULT_LOCALE = "auto";
 
-// 解析 "auto" 为实际语言代码（zh/en）
-function resolveEffectiveLocale(locale) {
+// 解析 "auto" 为实际区域语言代码
+export function resolveEffectiveLocale(locale, language = null) {
   if (locale === "auto") {
-    // 检测浏览器/操作系统语言
-    const browserLang = navigator.language || navigator.userLanguage || "";
-    return browserLang.toLowerCase().includes("zh") ? "zh" : "en";
+    const browserLang = String(language ?? navigator.language ?? navigator.userLanguage ?? "").toLowerCase();
+    if (browserLang.startsWith("zh-hk") || browserLang.startsWith("zh-mo")) return "zh-HK";
+    if (browserLang.startsWith("zh-tw")) return "zh-TW";
+    if (browserLang.startsWith("zh")) return "zh";
+    if (browserLang.startsWith("ms")) return "ms-MY";
+    if (browserLang.startsWith("ru")) return "ru-RU";
+    return "en";
   }
   return locale;
 }
 
-// 验证配置值是否合法（auto/zh/en）
+// 验证配置值是否合法
 function normalizeConfig(next) {
   return SUPPORTED_LOCALES.includes(next) ? next : DEFAULT_LOCALE;
 }
 
-// 验证实际语言代码是否合法（zh/en）
+// 验证实际语言代码是否合法
 function normalizeEffective(next) {
   const resolved = resolveEffectiveLocale(next);
-  return resolved === "zh" || resolved === "en" ? resolved : "zh";
+  return SUPPORTED_LOCALES.includes(resolved) && resolved !== "auto" ? resolved : "zh";
 }
 
 export const useLocaleStore = create((set, get) => ({

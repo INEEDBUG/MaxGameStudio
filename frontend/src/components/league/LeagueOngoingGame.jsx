@@ -29,6 +29,14 @@ const HISTORY_QUEUE_LABELS = {
   490: "快速游戏",
 };
 
+const RAPID_POLL_MS = 1000;
+const STEADY_POLL_MS = 5000;
+const MAX_RAPID_POLLS = 10;
+
+function isProgressivePayload(payload) {
+  return Boolean(payload?.partial || (payload?.players || []).some((player) => ["loading", "partial"].includes(String(player?.load_state || ""))));
+}
+
 function objectValue(value) {
   return value && typeof value === "object" ? value : {};
 }
@@ -379,12 +387,14 @@ function PlayerCard({ player, index, data, privacy, onOpenPlayer, onError, onPre
   const tagLine = playerTagLine(player);
   const iconId = playerProfileIconId(player);
   const cardBorder = data?.show_match_history_item_border ? "border-cyan-400/30" : "border-white/10";
-  const winRate = analysisValue(analysis, ["summary.winRate", "win_rate"], recent.matches ? Number(recent.wins || 0) / Number(recent.matches) : null);
-  const averageKda = analysisValue(analysis, ["summary.avgKda", "summary.averageKda", "average_kda"], recent.average_kda);
-  const akariScore = analysisValue(analysis, ["akariScore.total", "akari_score"], recent.akari_score);
+  const loadState = String(player.load_state || "ready");
+  const historyLoading = loadState === "loading" || (loadState === "partial" && !player?.data_availability?.history);
+  const winRate = historyLoading ? null : analysisValue(analysis, ["summary.winRate", "win_rate"], recent.matches ? Number(recent.wins || 0) / Number(recent.matches) : null);
+  const averageKda = historyLoading ? null : analysisValue(analysis, ["summary.avgKda", "summary.averageKda", "average_kda"], recent.average_kda);
+  const akariScore = historyLoading ? null : analysisValue(analysis, ["akariScore.total", "akari_score"], recent.akari_score);
   const position = String(player.position || player.selectedPosition || player.assignedPosition || "").toUpperCase();
   const historyPreview = miniHistoryRows(player);
-  const usageLine = usage.mode === "mastery"
+  const usageLine = historyLoading ? "正在加载战绩…" : usage.mode === "mastery"
     ? `${player.champion_name || "当前英雄"} · 熟练度 ${usage.mastery_level || 0} / ${numberValue(usage.mastery_points).toLocaleString()} 点`
     : usage.mode === "none"
       ? `近 ${recent.matches || 0} 场胜率 ${recent.matches ? Math.round(recent.wins / recent.matches * 100) : 0}% · KDA ${recent.average_kda || 0}`
@@ -409,17 +419,17 @@ function PlayerCard({ player, index, data, privacy, onOpenPlayer, onError, onPre
       </div>
       <button type="button" aria-label={expanded ? `收起 ${playerName} 详情` : `展开 ${playerName} 详情`} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="grid h-7 w-7 shrink-0 place-items-center rounded border border-white/10 text-white/50 hover:bg-white/5 hover:text-white">{expanded ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}</button>
     </div>
-    <div className="grid grid-cols-3 gap-px border-b border-white/10 bg-white/5 text-center text-[10px]">
-      <span className="bg-cs2-bg-elevated/90 px-1 py-1.5"><span className="block text-white/45">胜率</span><b className={Number(winRate) >= .53 ? "text-emerald-300" : Number(winRate) <= .47 ? "text-rose-300" : "text-white/85"}>{winRate == null ? "—" : `${Math.round(Number(winRate) * 100)}%`}</b></span>
-      <span className="bg-cs2-bg-elevated/90 px-1 py-1.5"><span className="block text-white/45">KDA</span><b className="text-white/85">{averageKda == null ? "—" : Number(averageKda).toFixed(2)}</b></span>
-      <span className="bg-cs2-bg-elevated/90 px-1 py-1.5"><span className="block text-white/45">Akari {akariScore == null ? "—" : Number(akariScore).toFixed(2)}</span><b className={outlier === "below" ? "text-rose-300" : "text-cyan-200"}>{akariScore == null ? "—" : Number(akariScore).toFixed(2)}</b></span>
+    <div data-testid="ongoing-player-metrics" className="grid grid-cols-3 gap-px border-b border-white/10 bg-white/5 text-center text-[10px]">
+      <span className="bg-[#202126]/95 px-1 py-1.5"><span className="block text-white/45">胜率</span><b className={Number(winRate) >= .53 ? "text-emerald-300" : Number(winRate) <= .47 ? "text-rose-300" : "text-white/85"}>{winRate == null ? "—" : `${Math.round(Number(winRate) * 100)}%`}</b></span>
+      <span className="bg-[#202126]/95 px-1 py-1.5"><span className="block text-white/45">KDA</span><b className="text-white/85">{averageKda == null ? "—" : Number(averageKda).toFixed(2)}</b></span>
+      <span className="bg-[#202126]/95 px-1 py-1.5"><span className="block text-white/45">Akari {akariScore == null ? "—" : Number(akariScore).toFixed(2)}</span><b className={outlier === "below" ? "text-rose-300" : "text-cyan-200"}>{akariScore == null ? "—" : Number(akariScore).toFixed(2)}</b></span>
     </div>
     <div className="min-h-0 flex-1 p-2">
       {data?.historical_preview ? <p className="mb-1 text-[10px] text-white/55">本局 {match.kills || 0}/{match.deaths || 0}/{match.assists || 0} · KDA {match.kda || 0} · 伤害 {match.damage || 0}</p> : <p className="mb-1 truncate text-[10px] text-white/55">{usageLine}</p>}
       {analysisTags.length ? <div className="mb-1 flex max-h-7 flex-wrap gap-1 overflow-hidden">{analysisTags.map((tag) => <em key={tag.id || tag.label} title={tag.title || tag.label} className={`rounded px-1.5 py-0.5 text-[9px] font-semibold not-italic ${TAG_TONES[tag.tone] || TAG_TONES.info}`}>{tag.label}</em>)}</div> : null}
       {championUsageRows.length ? <div className="mb-1 flex h-5 gap-1 overflow-hidden">{championUsageRows.slice(0, 9).map((champion, championIndex) => { const championId = Number(champion.champion_id ?? champion.championId ?? champion.id ?? 0); return <span key={`${championId}-${championIndex}`} title={champion.champion_name || champion.championName || `英雄 ${championId}`} className="h-5 w-5 shrink-0 overflow-hidden rounded border border-white/10 bg-white/5">{championId ? <img src={getLeagueChampionIconUrl(championId)} alt={champion.champion_name || champion.championName || "英雄"} className="h-full w-full object-cover"/> : null}</span>; })}</div> : null}
       {jungle.games_analyzed > 0 ? <p className="mb-1 line-clamp-2 text-[10px] leading-4 text-amber-200">打野画像：{jungle.draft}</p> : null}
-      {historyPreview.length ? <div data-testid="ongoing-mini-history" className="min-h-0 space-y-0.5 overflow-hidden">{historyPreview.slice(0, 8).map((item) => <PlayerHistoryRow key={item.id} item={item} onPreviewGame={onPreviewGame} puuid={player.puuid}/>)}</div> : <div className="flex h-20 items-center justify-center rounded bg-white/[.03] text-[10px] text-white/40">{player.data_availability?.unavailable?.includes("history") ? "战绩不可用" : "暂无近期战绩"}</div>}
+      {historyPreview.length ? <div data-testid="ongoing-mini-history" className="min-h-0 space-y-0.5 overflow-hidden">{historyPreview.slice(0, 8).map((item) => <PlayerHistoryRow key={item.id} item={item} onPreviewGame={onPreviewGame} puuid={player.puuid}/>)}</div> : historyLoading ? <div data-testid={`ongoing-player-loading-${player.puuid || index}`} className="flex h-20 animate-pulse items-center justify-center rounded bg-white/[.045] text-[10px] text-cyan-200/70">正在加载战绩…</div> : <div className="flex h-20 items-center justify-center rounded bg-white/[.03] text-[10px] text-white/40">{player.data_availability?.unavailable?.includes("history") ? "战绩不可用" : "暂无近期战绩"}</div>}
     </div>
     {expanded ? <PlayerDetails player={player} privacy={privacy} recentMatches={recentMatches} onOpenPlayer={onOpenPlayer} onError={onError}/> : null}
   </article>;
@@ -447,21 +457,24 @@ export default function LeagueOngoingGame({ streamerMode, useAliases, previewDat
   const [privacy, setPrivacy] = useState({ enabled: Boolean(streamerMode), aliases: Boolean(useAliases) });
   const requestInFlight = useRef(false);
   const requestSequence = useRef(0);
+  const pollState = useRef({ key: "", rapidCount: 0 });
   const load = async () => {
-    if (requestInFlight.current) return;
+    if (requestInFlight.current) return null;
     requestInFlight.current = true;
     const sequence = ++requestSequence.current;
     setBusy(true);
     try {
       const privacyProvided = streamerMode != null && useAliases != null;
       const [game, status] = privacyProvided
-        ? [await fetchLeagueOngoingGame(), null]
-        : await Promise.all([fetchLeagueOngoingGame(), fetchLeagueLabStatus()]);
-      if (sequence !== requestSequence.current) return;
+        ? [await fetchLeagueOngoingGame({ snapshot: true }), null]
+        : await Promise.all([fetchLeagueOngoingGame({ snapshot: true }), fetchLeagueLabStatus()]);
+      if (sequence !== requestSequence.current) return null;
       setData(game);
       setPrivacy({ enabled: streamerMode ?? Boolean(status?.settings?.streamer_mode_enabled), aliases: useAliases ?? Boolean(status?.settings?.streamer_mode_use_aliases) });
+      return game;
     } catch (error) {
       if (sequence === requestSequence.current) onError(error?.response?.data?.detail || "实时对局读取失败");
+      return null;
     } finally {
       if (sequence === requestSequence.current) {
         requestInFlight.current = false;
@@ -477,10 +490,23 @@ export default function LeagueOngoingGame({ streamerMode, useAliases, previewDat
       setData(previewData);
       return undefined;
     }
-    load();
-    const timer = setInterval(load, 5000);
+    let disposed = false;
+    let timer = null;
+    const poll = async () => {
+      const next = await load();
+      if (disposed) return;
+      const key = `${next?.game_id ?? "none"}:${next?.query_stage || next?.phase || "idle"}`;
+      if (pollState.current.key !== key) pollState.current = { key, rapidCount: 0 };
+      const progressive = isProgressivePayload(next);
+      if (!progressive) pollState.current.rapidCount = 0;
+      const useRapidPoll = progressive && pollState.current.rapidCount < MAX_RAPID_POLLS;
+      if (useRapidPoll) pollState.current.rapidCount += 1;
+      timer = setTimeout(poll, useRapidPoll ? RAPID_POLL_MS : STEADY_POLL_MS);
+    };
+    poll();
     return () => {
-      clearInterval(timer);
+      disposed = true;
+      clearTimeout(timer);
       requestSequence.current += 1;
       requestInFlight.current = false;
     };

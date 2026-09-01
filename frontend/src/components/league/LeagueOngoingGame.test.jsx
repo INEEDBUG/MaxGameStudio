@@ -42,7 +42,7 @@ describe("LeagueOngoingGame", () => {
     expect(screen.getByText(/Akari 7.5/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "打开 Tester 玩家中心" }));
     expect(onOpenPlayer).toHaveBeenCalledWith("player-1");
-    await waitFor(() => expect(fetchLeagueOngoingGame).toHaveBeenCalled());
+    await waitFor(() => expect(fetchLeagueOngoingGame).toHaveBeenCalledWith({ snapshot: true }));
   });
 
   it("does not refetch global status when privacy settings are already provided", async () => {
@@ -51,6 +51,79 @@ describe("LeagueOngoingGame", () => {
     await screen.findByText("当前房间");
     expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
     expect(fetchLeagueLabStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps the compact player metric strip on a dark surface in light mode", async () => {
+    document.documentElement.dataset.theme = "light";
+    render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
+    const strip = await screen.findByTestId("ongoing-player-metrics");
+    for (const cell of strip.children) {
+      expect(cell.className).toContain("bg-[#202126]/95");
+      expect(cell.className).not.toContain("bg-cs2-bg-elevated");
+    }
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("renders ready players while another card is still loading, then promotes the snapshot to ready", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchLeagueOngoingGame
+        .mockResolvedValueOnce({
+          available: true,
+          partial: true,
+          game_id: 42,
+          query_stage: "in-game",
+          players: [
+            { puuid: "ready", team: 100, load_state: "ready", summoner: { gameName: "Ready" }, recent: { matches: 3, wins: 2, average_kda: 3 }, champion_usage: { mode: "none" }, performance_tags: [], data_availability: { history: true } },
+            { puuid: "loading", team: 100, load_state: "loading", summoner: { gameName: "Loading" }, recent: { matches: 0, wins: 0 }, champion_usage: { mode: "none" }, performance_tags: [], data_availability: { history: false } },
+          ],
+        })
+        .mockResolvedValueOnce({
+          available: true,
+          partial: false,
+          game_id: 42,
+          query_stage: "in-game",
+          players: [
+            { puuid: "ready", team: 100, load_state: "ready", summoner: { gameName: "Ready" }, recent: { matches: 3, wins: 2, average_kda: 3 }, champion_usage: { mode: "none" }, performance_tags: [], data_availability: { history: true } },
+            { puuid: "loading", team: 100, load_state: "ready", summoner: { gameName: "Loading" }, recent: { matches: 4, wins: 3, average_kda: 4 }, champion_usage: { mode: "none" }, performance_tags: [], data_availability: { history: true } },
+          ],
+        });
+
+      render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
+      await act(async () => { await Promise.resolve(); });
+
+      expect(screen.getByText("Ready")).toBeTruthy();
+      expect(screen.getByTestId("ongoing-player-loading-loading")).toBeTruthy();
+      expect(screen.getByTestId("ongoing-player-card-ready").textContent).toContain("67%");
+      expect(screen.getByTestId("ongoing-player-card-loading").textContent).not.toContain("0%");
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId("ongoing-player-loading-loading")).toBeNull();
+      expect(screen.getByTestId("ongoing-player-card-loading").textContent).toContain("75%");
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the progressive polling timer on unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchLeagueOngoingGame.mockResolvedValue({ available: true, partial: true, game_id: 7, query_stage: "lobby", players: [] });
+      const { unmount } = render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("expands and collapses one player card without changing the player navigation", async () => {
@@ -162,6 +235,13 @@ describe("LeagueOngoingGame", () => {
     });
     expect(screen.queryByTestId("ongoing-loading-state")).toBeNull();
     expect(screen.queryByTestId("ongoing-idle-state")).toBeNull();
+  });
+
+  it("does not request a live snapshot for historical preview data", async () => {
+    render(<LeagueOngoingGame previewData={{ historical_preview: true, available: true, game_id: 7000, players: [] }} />);
+    expect(await screen.findByText("历史对局模拟 · Game 7000")).toBeTruthy();
+    expect(fetchLeagueOngoingGame).not.toHaveBeenCalled();
+    expect(fetchLeagueLabStatus).not.toHaveBeenCalled();
   });
 
   it("does not let a live response overwrite a newly opened historical preview", async () => {

@@ -14,6 +14,10 @@ describe("tag i18n", () => {
   test("labelTag 英文返回译名（保留 emoji）", () => {
     expect(labelTag("🔫 手枪哥", "en")).toBe("🔫 Pistol Headshot");
   });
+  test("labelTag 马来语/俄语使用英文回退", () => {
+    expect(labelTag("🔫 手枪哥", "ms-MY")).toBe("🔫 Pistol Headshot");
+    expect(labelTag("🔫 手枪哥", "ru-RU")).toBe("🔫 Pistol Headshot");
+  });
   test("labelTag 英文缺译名时回退原 tag", () => {
     expect(labelTag("🌀 未知标签", "en")).toBe("🌀 未知标签");
   });

@@ -397,7 +397,7 @@ class AppConfig(BaseModel):
     # Demo 库扫描深度：0=仅所选目录，1=再含一级子目录，依此类推。
     demo_watch_scan_depth: int = Field(default=2, ge=0, le=32)
     ai_mode: bool = False
-    # 前端界面语言：auto=跟随操作系统（中文系统→zh，其他→en）；亦可显式设为 zh / en
+    # 前端界面语言：支持基础语言与区域语言。
     locale: str = "auto"
     # Desktop window close behavior. close_to_tray is retained for backward compatibility.
     close_to_tray: bool = True
@@ -1003,16 +1003,25 @@ def resolve_rajdhani_fonts() -> tuple[Optional[Path], Optional[Path]]:
 
 
 def resolve_system_locale() -> str:
-    """检测操作系统语言，返回 'zh' 或 'en'。
+    """检测操作系统语言并返回支持的区域 locale。
 
     Windows 下通过 locale.getdefaultlocale() 获取系统语言标签，
-    如果包含 'zh'（中文）则返回 'zh'，否则默认返回 'en'。
+    未识别的语言默认返回 'en'。
     """
     try:
         import locale
         sys_lang, _ = locale.getdefaultlocale()
-        if sys_lang and "zh" in sys_lang.lower():
+        value = str(sys_lang or "").lower().replace("_", "-")
+        if value.startswith(("zh-hk", "zh-mo")):
+            return "zh-HK"
+        if value.startswith("zh-tw"):
+            return "zh-TW"
+        if value.startswith("zh"):
             return "zh"
+        if value.startswith("ms"):
+            return "ms-MY"
+        if value.startswith("ru"):
+            return "ru-RU"
     except Exception:
         pass
     return "en"
@@ -1021,13 +1030,13 @@ def resolve_system_locale() -> str:
 def resolve_effective_locale(config_locale: str) -> str:
     """解析配置中的 locale 值，返回实际应使用的语言代码。
 
-    - 'auto' → 根据系统语言解析为 'zh' 或 'en'
-    - 'zh' / 'en' → 直接返回
+    - 'auto' → 根据系统语言解析为支持的区域 locale
+    - 显式支持的 locale → 直接返回
     - 其他值 → 回退到 'zh'
     """
     if config_locale == "auto":
         return resolve_system_locale()
-    if config_locale in ("zh", "en"):
+    if config_locale in ("zh", "zh-HK", "zh-TW", "en", "ms-MY", "ru-RU"):
         return config_locale
     return "zh"
 

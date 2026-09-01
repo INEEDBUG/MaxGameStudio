@@ -4,7 +4,7 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 const putMock = vi.fn(() => Promise.resolve({ data: {} }));
 vi.mock("../../api/api", () => ({ default: { put: (...a) => putMock(...a) } }));
 
-import { useLocaleStore } from "../localeStore.js";
+import { resolveEffectiveLocale, useLocaleStore } from "../localeStore.js";
 
 describe("localeStore", () => {
   beforeEach(() => {
@@ -38,5 +38,18 @@ describe("localeStore", () => {
     useLocaleStore.getState().setLocale("fr");
     expect(useLocaleStore.getState().locale).toBe("auto");
     expect(putMock).toHaveBeenCalledWith("config", { locale: "auto" });
+  });
+
+  test.each(["zh-HK", "zh-TW", "ms-MY", "ru-RU"])("支持区域 locale %s", (locale) => {
+    useLocaleStore.getState().setLocale(locale);
+    expect(useLocaleStore.getState().locale).toBe(locale);
+    expect(useLocaleStore.getState().effectiveLocale).toBe(locale);
+    expect(putMock).toHaveBeenCalledWith("config", { locale });
+  });
+
+  test.each([
+    ["zh-HK", "zh-HK"], ["zh-TW", "zh-TW"], ["ms-MY", "ms-MY"], ["ru-RU", "ru-RU"], ["fr-FR", "en"],
+  ])("auto 根据系统语言映射 %s", (language, expected) => {
+    expect(resolveEffectiveLocale("auto", language)).toBe(expected);
   });
 });

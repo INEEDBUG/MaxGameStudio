@@ -207,12 +207,18 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
   const location = useLocation();
   const activeGroup = ["cs2", "valorant", "league", "peripherals"].find((groupId) => groupMatchesPath(groupId, location.pathname));
   const [expandedGroups, setExpandedGroups] = useState(readSidebarGroups);
+  const previousActiveGroup = useRef();
 
   useEffect(() => {
-    if (activeGroup && !expandedGroups[activeGroup]) {
-      setExpandedGroups((current) => ({ ...current, [activeGroup]: true }));
+    // Open a group when navigation enters it, but do not fight an explicit
+    // collapse while the user remains on one of its child routes.
+    if (activeGroup && previousActiveGroup.current !== activeGroup) {
+      previousActiveGroup.current = activeGroup;
+      setExpandedGroups((current) => current[activeGroup] ? current : ({ ...current, [activeGroup]: true }));
+    } else if (!activeGroup) {
+      previousActiveGroup.current = undefined;
     }
-  }, [activeGroup, expandedGroups]);
+  }, [activeGroup]);
 
   useEffect(() => {
     try {

@@ -142,9 +142,12 @@ const API = axios.create({
 });
 
 API.interceptors.request.use((config) => {
-  const locale = useLocaleStore.getState().locale || "zh";
+  const localeState = useLocaleStore.getState();
+  const locale = localeState.locale || "zh";
+  const effectiveLocale = localeState.effectiveLocale || "zh";
   config.headers = config.headers ?? {};
   config.headers["X-CS2-Insight-Locale"] = locale;
+  config.headers["Accept-Language"] = effectiveLocale;
   if (desktopSessionToken) {
     config.headers["X-CS2-Insight-Token"] = desktopSessionToken;
   }

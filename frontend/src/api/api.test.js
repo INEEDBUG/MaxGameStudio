@@ -91,4 +91,19 @@ describe("desktop backend asset URLs", () => {
 
     expect(requestConfig.headers.get("X-CS2-Insight-Token")).toBe("session-123");
   });
+
+  test("sends configured and effective locale headers", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    vi.resetModules();
+    const { default: API } = await import("./api.js");
+    const { useLocaleStore } = await import("../i18n/localeStore.js");
+    useLocaleStore.getState().hydrate("ms-MY");
+    let requestConfig;
+    await API.get("/config", { adapter: async (config) => {
+      requestConfig = config;
+      return { data: {}, status: 200, statusText: "OK", headers: {}, config, request: {} };
+    } });
+    expect(requestConfig.headers.get("X-CS2-Insight-Locale")).toBe("ms-MY");
+    expect(requestConfig.headers.get("Accept-Language")).toBe("ms-MY");
+  });
 });

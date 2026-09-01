@@ -15,6 +15,14 @@ describe("useT", () => {
     expect(result.current("common.cancel")).toBe("Cancel");
   });
 
+  test("区域 locale 使用对应字典中的 shell 文案", () => {
+    useLocaleStore.getState().hydrate("ms-MY");
+    const { result } = renderHook(() => useT());
+    expect(result.current("nav.mainNav")).toBe("Navigasi utama");
+    act(() => useLocaleStore.getState().hydrate("ru-RU"));
+    expect(result.current("nav.mainNav")).toBe("Главная навигация");
+  });
+
   test("缺 key 时回退到 zh", () => {
     useLocaleStore.getState().hydrate("en");
     const { result } = renderHook(() => useT());

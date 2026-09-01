@@ -1,3 +1,5 @@
+import { baseLocale } from "./localeUtils.js";
+
 /**
  * Locale-aware weapon name display.
  *
@@ -100,7 +102,7 @@ export function weaponDisplayName(weaponName, locale) {
   if (weaponName == null) return weaponName;
   if (typeof weaponName !== "string") return String(weaponName);
   if (!weaponName) return weaponName;
-  if (locale !== "en") return weaponName;
+  if (baseLocale(locale) !== "en") return weaponName;
   return WEAPON_NAME_ZH_TO_EN[weaponName] ?? weaponName;
 }
 

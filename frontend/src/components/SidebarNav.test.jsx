@@ -50,6 +50,18 @@ describe("SidebarNav", () => {
     expect(screen.queryByRole("link", { name: "nav.sensitivityLab" })).toBeNull();
   });
 
+  test("allows the active section to stay collapsed until navigation changes", () => {
+    render(
+      <MemoryRouter initialEntries={["/league/history"]}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+    const leagueGroup = screen.getByRole("button", { name: "nav.sectionLeague" });
+    fireEvent.click(leagueGroup);
+    expect(leagueGroup.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("link", { name: "nav.leagueHistory" })).toBeNull();
+  });
+
   test("persists collapsible group state and exposes keyboard-friendly aria state", () => {
     render(
       <MemoryRouter initialEntries={["/settings"]}>

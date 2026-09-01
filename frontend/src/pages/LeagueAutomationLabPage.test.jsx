@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import LeagueAutomationLabPage from "./LeagueAutomationLabPage";
 import { fetchLeagueClientInstallations, fetchLeagueClients, fetchLeagueLabStatus, fetchLeagueMatches, fetchLeagueOngoingGame, fetchLeagueReplay, runLeagueLabAction, saveLeagueLabSettings } from "../api/leagueLabApi";
+import { useLocaleStore } from "../i18n/localeStore.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(null) }));
 
@@ -44,6 +45,7 @@ const status = {
 describe("LeagueAutomationLabPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useLocaleStore.getState().hydrate("zh");
     fetchLeagueLabStatus.mockResolvedValue(status);
     fetchLeagueClients.mockResolvedValue({ clients: [], selected_pid: 0 });
     fetchLeagueClientInstallations.mockResolvedValue({ installations: [] });
@@ -53,13 +55,10 @@ describe("LeagueAutomationLabPage", () => {
     saveLeagueLabSettings.mockResolvedValue({ ...status, settings: { ...status.settings, automation_enabled: true } });
   });
 
-  it("keeps canonical League routes synchronized with the page tabs", async () => {
-    const onNavigateTab = vi.fn();
-    render(<LeagueAutomationLabPage routeTab="history" onNavigateTab={onNavigateTab} />);
-
+  it("leaves canonical League navigation to the sidebar", async () => {
+    render(<LeagueAutomationLabPage routeTab="history" />);
     expect(await screen.findByText("已连接：Tester")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "自动化" }));
-    expect(onNavigateTab).toHaveBeenCalledWith("automation", {});
+    expect(screen.queryByRole("button", { name: "自动化" })).toBeNull();
   });
 
   it("shows the detected League client and persists the master switch", async () => {
@@ -93,32 +92,24 @@ describe("LeagueAutomationLabPage", () => {
   });
 
   it("uses the detailed match card in the current-account history", async () => {
-    render(<LeagueAutomationLabPage />);
+    render(<LeagueAutomationLabPage routeTab="history" />);
     await screen.findByText("已连接：Tester");
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "我的战绩" }));
-    });
     await waitFor(() => expect(fetchLeagueMatches).toHaveBeenCalledWith(20));
     expect(await screen.findByRole("button", { name: "展开战绩详情" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "结算后自动刷新战绩" })).toBeTruthy();
   });
 
-  it("returns the League page scroll container to the top when switching tabs", async () => {
+  it("renders the canonical history route with a scroll container", async () => {
     const scrollTo = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
-    render(<LeagueAutomationLabPage />);
+    render(<LeagueAutomationLabPage routeTab="history" />);
     await screen.findByText("已连接：Tester");
-    scrollTo.mockClear();
-
-    fireEvent.click(screen.getByRole("button", { name: "我的战绩" }));
-
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
+    expect(scrollTo).toBeDefined();
   });
 
   it("exposes configurable ongoing-game analysis controls", async () => {
-    render(<LeagueAutomationLabPage />);
+    render(<LeagueAutomationLabPage routeTab="ongoing" />);
     await screen.findByText("已连接：Tester");
-    fireEvent.click(screen.getByRole("button", { name: "实时对局" }));
     expect(screen.getByRole("switch", { name: "在房间阶段分析队友" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "所有玩家都分析打野路线" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "战绩条目强调边框" })).toBeTruthy();
@@ -152,9 +143,8 @@ describe("LeagueAutomationLabPage", () => {
       },
     });
 
-    render(<LeagueAutomationLabPage />);
+    render(<LeagueAutomationLabPage routeTab="automation" />);
     await screen.findByText("已连接：Tester");
-    fireEvent.click(screen.getByRole("button", { name: "自动化" }));
     fireEvent.click(screen.getByRole("button", { name: "自动选择 / 禁用" }));
 
     expect(await screen.findByTestId("main-auto-select-runtime")).toBeTruthy();

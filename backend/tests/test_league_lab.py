@@ -797,6 +797,294 @@ def test_ready_check_gameflow_event_accepts_immediately(monkeypatch):
     assert service._accept_due_at == float("inf")
 
 
+def test_auto_accept_submission_survives_settings_toggle(monkeypatch):
+    service = LeagueLabService()
+    settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    service.settings = settings
+    service.phase = "ReadyCheck"
+    service.ready_check = {"state": "InProgress", "player_response": "None"}
+    calls = []
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(service, "_write_settings", lambda _settings: None)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    async def exercise():
+        await service._run_automation()
+        service.update_settings(settings.model_copy(update={"automation_enabled": False}))
+        await service._run_automation()
+        service.update_settings(settings)
+        await service._run_automation()
+
+    asyncio.run(exercise())
+
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
+def test_zero_delay_auto_accept_survives_prime_cancellation(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    ensure_started = asyncio.Event()
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "None"},
+            )
+
+    async def record(label, method, path, **_kwargs):
+        calls.append((label, method, path))
+        write_started.set()
+        await release_write.wait()
+
+    original_ensure = service._ensure_auto_accept_scheduled
+
+    async def blocking_ensure(expected_event_sequence=None):
+        await original_ensure(expected_event_sequence)
+        ensure_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+    monkeypatch.setattr(service, "_ensure_auto_accept_scheduled", blocking_ensure)
+
+    async def exercise():
+        prime = asyncio.create_task(service._prime_event_stream_state(credentials))
+        await ensure_started.wait()
+        await write_started.wait()
+        waiter = service._auto_accept_waiter
+        assert waiter is not None
+        prime.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await prime
+        release_write.set()
+        await waiter
+
+    asyncio.run(exercise())
+
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
+def test_bound_auto_accept_request_rejects_replacement_credentials(monkeypatch):
+    service = LeagueLabService()
+    old_credentials = league_lab.LcuCredentials(port=54321, token="old")
+    new_credentials = league_lab.LcuCredentials(port=54322, token="new")
+    service.credentials = new_credentials
+    writes = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def request(self, *args, **kwargs):
+            writes.append((args, kwargs))
+            return league_lab.httpx.Response(204)
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(RuntimeError, match="客户端已切换"):
+        asyncio.run(service.request(
+            "POST",
+            "/lol-matchmaking/v1/ready-check/accept",
+            credentials=old_credentials,
+        ))
+
+    assert writes == []
+
+
+def test_ready_check_round_id_change_allows_new_ballot_without_phase_edge(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    calls = []
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(service, "_record_action", record)
+
+    async def exercise():
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "ReadyCheck",
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-matchmaking/v1/ready-check",
+            "data": {"readyCheckId": "round-1", "state": "InProgress", "playerResponse": "Accepted"},
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-matchmaking/v1/ready-check",
+            "data": {"readyCheckId": "round-2", "state": "InProgress", "playerResponse": "None"},
+        })
+
+    asyncio.run(exercise())
+
+    assert len(calls) == 2
+
+
+def test_event_auto_accept_uses_existing_credentials_without_discovery(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    discoveries = []
+    writes = []
+
+    async def discover():
+        discoveries.append(True)
+        raise AssertionError("event-driven auto-accept must not rediscover the client")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def request(self, method, url, **kwargs):
+            writes.append((method, url, kwargs["headers"]["Authorization"]))
+            return league_lab.httpx.Response(204)
+
+    monkeypatch.setattr(league_lab, "discover_lcu_clients", discover)
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+
+    asyncio.run(service._handle_lcu_event({
+        "uri": "/lol-gameflow/v1/gameflow-phase",
+        "data": "ReadyCheck",
+    }))
+
+    assert discoveries == []
+    assert writes == [(
+        "POST",
+        f"{credentials.base_url}/lol-matchmaking/v1/ready-check/accept",
+        credentials.auth_header,
+    )]
+
+
+def test_ready_check_payload_waits_for_authoritative_phase(monkeypatch):
+    """A payload updates evidence but cannot write while gameflow phase lags."""
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    calls = []
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(service, "_record_action", record)
+    asyncio.run(service._handle_lcu_event({
+        "uri": "/lol-matchmaking/v1/ready-check",
+        "data": {"state": "InProgress", "playerResponse": "None"},
+    }))
+
+    assert service.phase == ""
+    assert service.ready_check["can_accept"] is True
+    assert calls == []
+    assert service._accept_due_at is None
+
+    asyncio.run(service._handle_lcu_event({
+        "uri": "/lol-gameflow/v1/gameflow-phase",
+        "data": "ReadyCheck",
+    }))
+
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+    assert service._accept_due_at == float("inf")
+
+
+def test_duplicate_ready_check_phase_event_does_not_restart_deadline(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=5,
+    )
+    clock = [100.0]
+
+    monkeypatch.setattr(league_lab.time, "monotonic", lambda: clock[0])
+
+    async def exercise():
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "ReadyCheck",
+        })
+        first_due_at = service._accept_due_at
+        clock[0] = 102.0
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "ReadyCheck",
+        })
+        second_due_at = service._accept_due_at
+        service._cancel_auto_accept_waiter()
+        await asyncio.sleep(0)
+        return first_due_at, second_due_at
+
+    first_due_at, second_due_at = asyncio.run(exercise())
+
+    assert first_due_at == 105.0
+    assert second_due_at == first_due_at
+
+
+def test_disabling_auto_select_does_not_cancel_pending_auto_accept(monkeypatch):
+    service = LeagueLabService()
+    service._accept_due_at = time.monotonic() + 1
+    monkeypatch.setattr(service, "_write_settings", lambda _settings: None)
+    settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_select_enabled=False,
+    )
+
+    service.update_settings(settings)
+
+    assert service._accept_due_at is not None
+
+
 def test_ready_check_event_invalidates_status_snapshot_without_changing_acceptance(monkeypatch):
     service = LeagueLabService()
     service.settings = LeagueLabSettings(
@@ -818,6 +1106,439 @@ def test_ready_check_event_invalidates_status_snapshot_without_changing_acceptan
 
     assert service._snapshot_cache_at == 0.0
     assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
+def test_event_stream_prime_recovers_ready_check_missed_during_handshake(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "None"},
+            )
+
+    async def record(label, method, path, **_kwargs):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._prime_event_stream_state(credentials))
+
+    assert service.phase == "ReadyCheck"
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+
+
+def test_event_stream_prime_does_not_reaccept_terminal_ready_check(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "Accepted"},
+            )
+
+    async def record(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._prime_event_stream_state(credentials))
+
+    assert service.phase == "ReadyCheck"
+    assert service.ready_check["response_state"] == "accepted"
+    assert calls == []
+    assert service._accept_due_at is None
+
+
+def test_event_stream_prime_pending_after_terminal_starts_missed_new_round(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    service.phase = "ReadyCheck"
+    service._auto_accept_observed_phase = "ReadyCheck"
+    service.ready_check = {"state": "InProgress", "player_response": "Accepted"}
+    service._auto_accept_terminal_response = True
+    service._auto_accept_submitted = True
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "None"},
+            )
+
+    async def record(label, method, path, **_kwargs):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._prime_event_stream_state(credentials))
+
+    assert calls == [("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept")]
+    assert service._auto_accept_submitted is True
+
+
+def test_event_stream_prime_same_round_id_does_not_reaccept_pending_snapshot(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    service.phase = "ReadyCheck"
+    service._auto_accept_observed_phase = "ReadyCheck"
+    service._auto_accept_round_identity = "readyCheckId:round-1"
+    service.ready_check = {
+        "round_id": "readyCheckId:round-1",
+        "state": "InProgress",
+        "player_response": "Accepted",
+    }
+    service._auto_accept_terminal_response = True
+    service._auto_accept_submitted = True
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={
+                    "readyCheckId": "round-1",
+                    "state": "InProgress",
+                    "playerResponse": "None",
+                },
+            )
+
+    async def record(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._prime_event_stream_state(credentials))
+
+    assert calls == []
+    assert service._auto_accept_submitted is True
+
+
+def test_event_stream_prime_discards_snapshot_after_newer_event(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    release_reads = asyncio.Event()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            await release_reads.wait()
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "None"},
+            )
+
+    async def record(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    async def exercise():
+        prime = asyncio.create_task(service._prime_event_stream_state(credentials, 0))
+        await asyncio.sleep(0)
+        service._event_sequence = 1
+        service.phase = "Lobby"
+        release_reads.set()
+        await prime
+
+    asyncio.run(exercise())
+
+    assert service.phase == "Lobby"
+    assert service.ready_check is None
+    assert service._accept_due_at is None
+    assert calls == []
+
+
+def test_event_stream_prime_discards_snapshot_after_disconnect(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, **_kwargs):
+            if url.endswith("/lol-gameflow/v1/gameflow-phase"):
+                return league_lab.httpx.Response(200, json="ReadyCheck")
+            return league_lab.httpx.Response(
+                200,
+                json={"state": "InProgress", "playerResponse": "None"},
+            )
+
+    async def record(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(league_lab.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(service, "_record_action", record)
+
+    asyncio.run(service._prime_event_stream_state(credentials))
+
+    assert service.phase == ""
+    assert service.ready_check is None
+    assert service._accept_due_at is None
+    assert calls == []
+
+
+def test_terminal_ready_check_latch_ignores_late_pending_until_next_round(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    calls = []
+
+    async def record(label, method, path):
+        calls.append((label, method, path))
+
+    monkeypatch.setattr(service, "_record_action", record)
+
+    async def exercise():
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "ReadyCheck",
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-matchmaking/v1/ready-check",
+            "data": {"state": "InProgress", "playerResponse": "Accepted"},
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-matchmaking/v1/ready-check",
+            "data": {"state": "InProgress", "playerResponse": "None"},
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "Lobby",
+        })
+        await service._handle_lcu_event({
+            "uri": "/lol-gameflow/v1/gameflow-phase",
+            "data": "ReadyCheck",
+        })
+
+    asyncio.run(exercise())
+
+    assert calls == [
+        ("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept"),
+        ("已自动接受对局", "POST", "/lol-matchmaking/v1/ready-check/accept"),
+    ]
+
+
+def test_event_stream_reconnects_after_transient_failure(monkeypatch):
+    service = LeagueLabService()
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    connect_calls = []
+
+    class FakeSocket:
+        async def send(self, _payload):
+            return None
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.CancelledError
+
+    class FakeConnection:
+        def __init__(self, attempt):
+            self.attempt = attempt
+
+        async def __aenter__(self):
+            if self.attempt == 1:
+                raise OSError("transient")
+            return FakeSocket()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    def connect(*_args, **_kwargs):
+        connect_calls.append(len(connect_calls) + 1)
+        return FakeConnection(connect_calls[-1])
+
+    async def no_prime(_credentials, _expected_event_sequence=None):
+        return None
+
+    async def no_wait(_delay):
+        return None
+
+    monkeypatch.setattr(league_lab.websockets, "connect", connect)
+    monkeypatch.setattr(service, "_prime_event_stream_state", no_prime)
+    monkeypatch.setattr(league_lab.asyncio, "sleep", no_wait)
+
+    async def exercise():
+        service._event_task = asyncio.current_task()
+        await service._run_event_stream(credentials)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(exercise())
+
+    assert connect_calls == [1, 2]
+    assert service._event_connected is False
+
+
+def test_event_stream_reads_events_while_handshake_prime_is_pending(monkeypatch):
+    service = LeagueLabService()
+    credentials = league_lab.LcuCredentials(port=54321, token="memory-only")
+    service.credentials = credentials
+    prime_cancelled = []
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent_event = False
+
+        async def send(self, _payload):
+            return None
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.sent_event:
+                await asyncio.sleep(0)
+                self.sent_event = True
+                return json.dumps([
+                    8,
+                    "OnJsonApiEvent",
+                    {"uri": "/lol-gameflow/v1/gameflow-phase", "data": "ReadyCheck"},
+                ])
+            raise asyncio.CancelledError
+
+    class FakeConnection:
+        async def __aenter__(self):
+            return FakeSocket()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def pending_prime(_credentials, _expected_event_sequence=None):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            prime_cancelled.append(True)
+            raise
+
+    monkeypatch.setattr(league_lab.websockets, "connect", lambda *_args, **_kwargs: FakeConnection())
+    monkeypatch.setattr(service, "_prime_event_stream_state", pending_prime)
+
+    async def exercise():
+        service._event_task = asyncio.current_task()
+        await service._run_event_stream(credentials)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(exercise())
+
+    assert service.phase == "ReadyCheck"
+    assert service._event_sequence == 1
+    assert prime_cancelled == [True]
 
 
 def test_snapshot_single_flight_coalesces_concurrent_refreshes(monkeypatch):
@@ -1025,6 +1746,29 @@ def test_ready_check_auto_accept_requires_master_gate(monkeypatch):
 
     assert calls == []
     assert service._accept_due_at is None
+
+
+def test_auto_accept_timeout_is_not_retried_in_same_ready_check(monkeypatch):
+    service = LeagueLabService()
+    service.settings = LeagueLabSettings(
+        automation_enabled=True,
+        auto_accept_enabled=True,
+        auto_accept_delay_seconds=0,
+    )
+    service.phase = "ReadyCheck"
+    calls = []
+
+    async def uncertain_write(*args):
+        calls.append(args)
+        raise RuntimeError("response timed out")
+
+    monkeypatch.setattr(service, "_record_action", uncertain_write)
+
+    asyncio.run(service._run_automation())
+    asyncio.run(service._run_automation())
+
+    assert len(calls) == 1
+    assert service._accept_due_at == float("inf")
 
 
 @pytest.mark.parametrize("player_response", ["Accepted", "DECLINED"])
@@ -2373,6 +3117,158 @@ def test_premade_groups_require_repeated_same_team_matches():
 
     assert groups["a"] == groups["b"]
     assert "c" not in groups
+
+
+def test_premade_groups_reject_chain_without_all_pair_evidence():
+    def match(game_id, teammates):
+        identities = [
+            {"participantId": index + 1, "player": {"puuid": puuid}}
+            for index, puuid in enumerate(teammates)
+        ]
+        participants = [
+            {"participantId": index + 1, "teamId": 100}
+            for index in range(len(teammates))
+        ]
+        return {"gameId": game_id, "participantIdentities": identities, "participants": participants}
+
+    histories = {
+        "a": {"games": {"games": [match(f"ab-{i}", ["a", "b"]) for i in range(3)]}},
+        "c": {"games": {"games": [match(f"bc-{i}", ["b", "c"]) for i in range(3)]}},
+    }
+    groups = league_lab._infer_premade_groups(histories, {"a", "b", "c"}, threshold=3)
+
+    assert groups["a"] == groups["b"]
+    assert "c" not in groups
+
+
+def test_ongoing_analysis_keeps_unknown_results_out_of_win_rate():
+    result = league_lab._ongoing_analysis_payload([
+        {
+            "puuid": "unknown",
+            "team": 100,
+            "recent": {"matches": 2, "wins": 0},
+            "recent_matches": [{"win": None}, {"win": None}],
+        }
+    ])
+
+    player = result["players"]["unknown"]
+    assert player["knownResultCount"] == 0
+    assert player["unknownResultCount"] == 2
+    assert player["winLoss"]["all"]["winRate"] is None
+    assert result["teams"]["100"]["avgWinRate"] is None
+    assert result["teams"]["100"]["winRateEvidence"]["sampleSufficient"] is False
+
+
+def test_ongoing_win_rate_team_tags_require_upstream_evidence_thresholds():
+    def player(puuid, wins, streak=0, group=1):
+        matches = [{"win": index < wins} for index in range(13)]
+        # Keep a deterministic current streak for the secondary members.
+        if streak:
+            matches = [{"win": True} for _ in range(streak)] + [{"win": False} for _ in range(13 - streak)]
+        return {
+            "puuid": puuid,
+            "premade_group": group,
+            "recent": {"matches": 13, "wins": wins},
+            "recent_matches": matches,
+        }
+
+    tags = league_lab._ongoing_win_rate_team_tags([
+        player("high", 12),
+        player("ally-a", 13, streak=4),
+        player("ally-b", 13, streak=4),
+    ])
+
+    win_tag = next(tag for tag in tags if tag["type"] == "win-rate-team")
+    assert win_tag["evidence"]["high_win_rate_member"]["puuid"] == "high"
+    assert win_tag["evidence"]["high_win_rate_member"]["known_matches"] == 13
+    assert win_tag["evidence"]["other_members_average_winning_streak"] == 4
+
+
+def test_ongoing_win_rate_team_does_not_qualify_unknown_or_small_samples():
+    tags = league_lab._ongoing_win_rate_team_tags([
+        {
+            "puuid": "a",
+            "premade_group": 1,
+            "recent_matches": [{"win": None}, {"win": True}],
+            "recent": {"matches": 2},
+        },
+        {
+            "puuid": "b",
+            "premade_group": 1,
+            "recent_matches": [{"win": False}, {"win": None}],
+            "recent": {"matches": 2},
+        },
+    ])
+
+    assert tags == []
+
+
+def test_ongoing_game_coalesces_overlapping_refreshes(monkeypatch):
+    calls = []
+
+    async def impl(**_kwargs):
+        calls.append(True)
+        await asyncio.sleep(0.01)
+        return {"phase": "InProgress", "players": [], "available": False}
+
+    monkeypatch.setattr(league_lab, "_league_ongoing_game_impl", impl)
+    monkeypatch.setattr(league_lab, "_ongoing_inflight", {})
+    async def run_calls():
+        return await asyncio.gather(
+            league_lab.league_ongoing_game(),
+            league_lab.league_ongoing_game(),
+        )
+
+    results = asyncio.run(run_calls())
+
+    assert len(calls) == 1
+    assert results[0] == results[1]
+
+
+def test_ongoing_snapshot_returns_roster_before_slow_history(monkeypatch):
+    requests = []
+
+    async def request(method, path, *, json_body=None, params=None):
+        requests.append(path)
+        if path == "/lol-gameflow/v1/session":
+            return {
+                "phase": "InProgress",
+                "gameData": {
+                    "gameId": 9001,
+                    "queue": {"id": 450, "gameMode": "ARAM"},
+                    "teamOne": [{"puuid": "slow", "gameName": "Slow"}],
+                    "playerChampionSelections": [{"puuid": "slow", "championId": 1, "team": 100}],
+                },
+            }
+        if path.endswith("/matches"):
+            await asyncio.sleep(0.2)
+            return {"games": {"games": []}}
+        if path.startswith("/lol-summoner/") or path.startswith("/lol-ranked/"):
+            return {}
+        if path == "/lol-game-data/assets/v1/champion-summary.json":
+            return []
+        raise AssertionError(f"unexpected LCU request: {method} {path}")
+
+    async def run():
+        monkeypatch.setattr(league_lab.league_lab_service, "settings", LeagueLabSettings(ongoing_show_jungle_pathing=False))
+        monkeypatch.setattr(league_lab.league_lab_service, "phase", "InProgress")
+        monkeypatch.setattr(league_lab.league_lab_service, "request", request)
+        monkeypatch.setattr(league_lab, "_ongoing_cache", {"key": "", "expires_at": 0.0, "payload": None})
+        monkeypatch.setattr(league_lab, "_ongoing_background_full", {})
+        started = time.perf_counter()
+        payload = await league_lab.league_ongoing_game(snapshot=True)
+        elapsed = time.perf_counter() - started
+        # Let the background task finish so the test loop does not leave work
+        # behind, and verify the snapshot did not itself request history.
+        await asyncio.sleep(0.25)
+        return payload, elapsed
+
+    payload, elapsed = asyncio.run(run())
+
+    assert elapsed < 0.15
+    assert payload["snapshot"] is True
+    assert payload["players"][0]["load_state"] == "loading"
+    assert "/lol-match-history/v1/products/lol/slow/matches" not in requests[:2]
 
 
 def test_toolkit_overview_is_read_only(monkeypatch):

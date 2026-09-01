@@ -1310,7 +1310,7 @@ async def update_config(payload: ConfigPayload):
         cfg.ai_mode = payload.ai_mode
     if payload.obs_agent_auto_prepare is not None:
         cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
-    if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
+    if payload.locale is not None and payload.locale in ("zh", "zh-HK", "zh-TW", "en", "ms-MY", "ru-RU", "auto"):
         cfg.locale = payload.locale
     if payload.close_to_tray is not None:
         cfg.close_to_tray = bool(payload.close_to_tray)
