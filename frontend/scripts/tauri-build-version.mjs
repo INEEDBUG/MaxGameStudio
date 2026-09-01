@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,21 @@ function run(command, args, env = process.env, shell = process.platform === "win
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function assertBundledFrontendVersion(root, expectedVersion) {
+  const assetsRoot = join(root, "dist", "assets");
+  const marker = `maxgamestudio:${expectedVersion}`;
+  const sidebarBundle = readdirSync(assetsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+    .map((entry) => join(assetsRoot, entry.name))
+    .find((file) => readFileSync(file, "utf8").includes(marker));
+  if (!sidebarBundle) {
+    throw new Error(
+      `Built frontend is missing the SidebarNav version marker ${marker}`,
+    );
+  }
+  console.log(`[desktop] validated frontend version ${expectedVersion}: ${sidebarBundle}`);
+}
+
 run(
   process.execPath,
   [join(frontendRoot, "scripts", "stage-python-runtime.mjs")],
@@ -112,12 +127,17 @@ if (certificateThumbprint) {
     },
   };
 }
+// A release-candidate build must never reuse a previous candidate's Vite
+// output. The desktop metadata and backend marker are validated elsewhere;
+// this clean build plus the post-build assertion covers the user-visible UI.
+rmSync(join(frontendRoot, "dist"), { recursive: true, force: true });
 run(
   process.execPath,
   [tauri, "build", "--config", JSON.stringify(buildConfig)],
   buildEnv,
   false,
 );
+assertBundledFrontendVersion(frontendRoot, version);
 
 if (process.platform === "win32") {
   const loader = join(releaseRoot, "WebView2Loader.dll");

@@ -17,7 +17,7 @@ export const HOME_RELEASE_NOTES = {
     optimized: [
       "实时对局先显示阵容，再逐名补齐战绩；较慢的玩家不会挡住其他卡片。",
       "移除游戏内发送、房间/无尽狂潮、本地标签管理和设置迁移等不再保留的工具入口。",
-      "独立实时对局窗口提前在后台准备，减少进局时的白窗和首次打开等待。",
+      "独立实时对局窗口在进入对局时直接显示深色启动页，避免隐藏 WebView 在 Windows 上恢复为白窗。",
     ],
   },
   en: {
@@ -34,7 +34,7 @@ export const HOME_RELEASE_NOTES = {
     optimized: [
       "Ongoing-game cards show the roster first and enrich players independently.",
       "Obsolete in-game-send, room/Swarm, tag-manager, and settings-transfer surfaces were removed.",
-      "The ongoing-game WebView is prepared while hidden to reduce white flashes and first-open latency.",
+      "The ongoing-game window now opens on a dark boot surface instead of restoring a hidden WebView as a white window.",
     ],
   },
 };

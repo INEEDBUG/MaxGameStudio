@@ -237,7 +237,12 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         <img src="/cs2-ultimate-insight-logo.png" alt={t("nav.brand")} width={42} height={42} decoding="async" className="h-10 w-10 shrink-0 object-contain drop-shadow-sm" />
         <div className="min-w-0">
           <div className="truncate text-[13px] font-semibold tracking-[-0.01em] text-cs2-text-primary">{t("nav.brand")}</div>
-          <div className="mt-0.5 text-[9px] font-medium tracking-[0.08em] text-cs2-text-muted">STUDIO · {__APP_VERSION__}</div>
+          <div
+            data-build-version={`maxgamestudio:${__APP_VERSION__}`}
+            className="mt-0.5 text-[9px] font-medium tracking-[0.08em] text-cs2-text-muted"
+          >
+            STUDIO · {__APP_VERSION__}
+          </div>
         </div>
       </div>
 

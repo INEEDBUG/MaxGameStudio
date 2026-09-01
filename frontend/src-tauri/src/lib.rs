@@ -46,6 +46,18 @@ fn mini_auto_context_allows_show(context: &str) -> bool {
     )
 }
 
+/// The independent ongoing window is an in-game surface. Keep the phase gate
+/// in the native layer as well as React so stale UI snapshots cannot create it
+/// after the client has already returned to the lobby.
+fn ongoing_auto_context_allows_show(context: &str) -> bool {
+    let mut parts = context.split(':');
+    matches!(parts.next(), Some("connected"))
+        && matches!(
+            parts.next(),
+            Some("GameStart") | Some("InProgress") | Some("Reconnect")
+        )
+}
+
 #[tauri::command]
 async fn open_league_mini(app: AppHandle) -> Result<(), String> {
     show_league_mini(app, true).await
@@ -135,30 +147,16 @@ fn build_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
     // window boots. Transparent decorated windows can render as a persistent
     // white surface on Windows/WebView2, even after the React frame commits.
     .background_color(Color(17, 18, 20, 255))
-    .visible(false)
+    // Hidden WebView2 controllers can stay on an unpainted white composition
+    // surface when they are shown later. Build this window only when the
+    // game phase requests it, and make the opaque boot surface visible from
+    // the first frame instead of priming a hidden controller at app startup.
+    .visible(true)
     .focused(false)
     .content_protected(content_protected)
     .build()
     .map(|_| ())
     .map_err(|error| error.to_string())
-}
-
-/// Build the ongoing WebView during app setup. It remains hidden until
-/// `mark_league_window_ready` observes a committed React frame, so a later
-/// GameStart/InProgress event only needs to show an already-initialized
-/// surface instead of creating a new WebView on the game's critical path.
-fn prime_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
-    let lifecycle = app.state::<LeagueOngoingLifecycle>();
-    if app.get_webview_window("league-ongoing").is_some() {
-        return Ok(());
-    }
-    lifecycle.bootstrapping.store(true, Ordering::SeqCst);
-    lifecycle.ready.store(false, Ordering::SeqCst);
-    if let Err(error) = build_league_ongoing_window(app) {
-        lifecycle.bootstrapping.store(false, Ordering::SeqCst);
-        return Err(error);
-    }
-    Ok(())
 }
 
 async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), String> {
@@ -173,9 +171,6 @@ async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), 
     {
         return Ok(());
     }
-    if lifecycle.bootstrapping.load(Ordering::SeqCst) {
-        return Ok(());
-    }
     if let Some(window) = app.get_webview_window("league-ongoing") {
         if !lifecycle.ready.load(Ordering::SeqCst) {
             return Ok(());
@@ -187,15 +182,29 @@ async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), 
         }
         return Ok(());
     }
-    lifecycle.bootstrapping.store(true, Ordering::SeqCst);
+    if lifecycle
+        .bootstrapping
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Ok(());
+    }
+    lifecycle.ready.store(false, Ordering::SeqCst);
     if let Err(error) = build_league_ongoing_window(&app) {
         lifecycle.bootstrapping.store(false, Ordering::SeqCst);
         lifecycle.ready.store(false, Ordering::SeqCst);
         return Err(error);
     }
-    // A window can be created by a future retry after an earlier bootstrap
-    // was destroyed; never carry the old ready bit into that new WebView.
-    lifecycle.ready.store(false, Ordering::SeqCst);
+    // A phase change may arrive while WebView2 is constructing the visible
+    // dark boot surface. Honour the newest state before returning so a stale
+    // GameStart request cannot leave the auxiliary window on screen.
+    if !lifecycle.should_show.load(Ordering::SeqCst)
+        || lifecycle.manually_hidden.load(Ordering::SeqCst)
+    {
+        if let Some(window) = app.get_webview_window("league-ongoing") {
+            window.hide().map_err(|error| error.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -302,6 +311,9 @@ fn mark_league_window_ready(app: AppHandle, kind: String) -> Result<(), String> 
                 }
             } else {
                 lifecycle.focus_requested.store(false, Ordering::SeqCst);
+                if let Some(window) = app.get_webview_window(label) {
+                    window.hide().map_err(|error| error.to_string())?;
+                }
             }
         }
         "cooldown" => {
@@ -576,6 +588,7 @@ async fn sync_league_ongoing(
     context: String,
 ) -> Result<(), String> {
     let lifecycle = app.state::<LeagueOngoingLifecycle>();
+    let should_show = should_show && ongoing_auto_context_allows_show(&context);
     lifecycle.should_show.store(should_show, Ordering::SeqCst);
     {
         let mut saved_context = lifecycle
@@ -1153,14 +1166,6 @@ pub fn run() {
             }
             tray.build(app)?;
 
-            // Prime the independent live-game WebView while the app is
-            // starting. It stays invisible until React acknowledges its first
-            // committed frame, then GameStart/InProgress only toggles native
-            // visibility instead of creating a WebView on the game path.
-            if let Err(error) = prime_league_ongoing_window(app.handle()) {
-                eprintln!("failed to prime League ongoing window: {error}");
-            }
-
             // Start the backend on a worker thread so the window (and its
             // "connecting to backend" splash) appears immediately instead of
             // after the Python process answers HTTP.
@@ -1349,6 +1354,26 @@ mod tests {
     }
 
     #[test]
+    fn ongoing_auto_context_only_allows_connected_game_phases() {
+        for context in [
+            "connected:GameStart:ARAM",
+            "connected:InProgress:CLASSIC",
+            "connected:Reconnect:unknown",
+        ] {
+            assert!(ongoing_auto_context_allows_show(context), "{context}");
+        }
+        for context in [
+            "offline:InProgress:ARAM",
+            "connected:Lobby:ARAM",
+            "connected:ChampSelect:ARAM",
+            "connected:None:unknown",
+            "connected::unknown",
+        ] {
+            assert!(!ongoing_auto_context_allows_show(context), "{context}");
+        }
+    }
+
+    #[test]
     fn mini_auto_hide_destroys_the_stale_webview() {
         let source = include_str!("lib.rs");
         let start = source
@@ -1365,7 +1390,7 @@ mod tests {
     }
 
     #[test]
-    fn league_html_aux_windows_are_created_hidden_before_react_ready() {
+    fn league_html_aux_windows_use_safe_visibility_before_react_ready() {
         let source = include_str!("lib.rs");
         let section = |marker: &str, next_marker: &str| {
             let start = source
@@ -1387,9 +1412,9 @@ mod tests {
 
         let ongoing_builder = section(
             "fn build_league_ongoing_window",
-            "fn prime_league_ongoing_window",
+            "async fn show_league_ongoing",
         );
-        assert!(ongoing_builder.contains(".visible(false)"));
+        assert!(ongoing_builder.contains(".visible(true)"));
         assert!(ongoing_builder.contains(".background_color(Color(17, 18, 20, 255))"));
         assert!(!ongoing_builder.contains(".transparent(true)"));
         assert!(ongoing_builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
@@ -1439,7 +1464,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_primes_the_ongoing_window_before_the_first_phase_event() {
+    fn ongoing_window_is_created_on_demand_instead_of_hidden_at_startup() {
         let source = include_str!("lib.rs");
         let setup = source
             .split_once(".setup(|app|")
@@ -1449,35 +1474,32 @@ mod tests {
             .split_once(".build(tauri::generate_context!())")
             .map(|(body, _)| body)
             .expect("setup should finish before the app build");
-        assert!(
-            setup_body.contains("prime_league_ongoing_window"),
-            "ongoing must be pre-created during app setup"
-        );
-
-        let start = source
-            .find("fn prime_league_ongoing_window")
-            .expect("ongoing priming helper should exist");
-        let helper = &source[start..];
-        let end = helper
-            .find("async fn show_league_ongoing")
-            .expect("ongoing show helper should follow priming helper");
-        let helper = &helper[..end];
-        assert!(helper.contains("build_league_ongoing_window"));
-        assert!(helper.contains("lifecycle.bootstrapping.store(true"));
-        assert!(helper.contains("lifecycle.ready.store(false"));
+        assert!(!setup_body.contains("prime_league_ongoing_window"));
+        assert!(!source.contains("fn prime_league_ongoing_window"));
 
         let builder_start = source
             .find("fn build_league_ongoing_window")
             .expect("ongoing window builder should exist");
         let builder = &source[builder_start..];
         let builder_end = builder
-            .find("fn prime_league_ongoing_window")
-            .expect("ongoing priming helper should follow builder");
+            .find("async fn show_league_ongoing")
+            .expect("ongoing show helper should follow builder");
         let builder = &builder[..builder_end];
         assert!(builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
-        assert!(builder.contains(".visible(false)"));
+        assert!(builder.contains(".visible(true)"));
         assert!(builder.contains(".background_color(Color(17, 18, 20, 255))"));
         assert!(!builder.contains(".transparent(true)"));
+
+        let show_start = source
+            .find("async fn show_league_ongoing")
+            .expect("ongoing show helper should exist");
+        let show = &source[show_start..];
+        let show_end = show
+            .find("#[tauri::command]")
+            .expect("next command should delimit ongoing show helper");
+        let show = &show[..show_end];
+        assert!(show.contains("compare_exchange(false, true"));
+        assert!(show.contains("window.hide()"));
     }
 
     #[test]
