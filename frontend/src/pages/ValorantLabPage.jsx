@@ -9,12 +9,15 @@ import {
   Gamepad2,
   Gauge,
   HardDriveDownload,
+  LockKeyhole,
   Monitor,
   RefreshCw,
+  RotateCcw,
   Save,
   ScanSearch,
   ShieldAlert,
   SlidersHorizontal,
+  Unlock,
   Upload,
 } from "lucide-react";
 import {
@@ -27,8 +30,10 @@ import {
   isValorantLabApiUnavailable,
   openValorantDeviceManager,
   prepareValorantStretch,
+  restoreValorantStretchCfg,
   restoreValorantStretch,
   saveValorantCrosshair,
+  unlockValorantStretchCfg,
 } from "../api/valorantLabApi";
 import { useT } from "../i18n/useT.js";
 import {
@@ -216,13 +221,117 @@ function DisplayStatusCard({ icon: Icon, label, detail, status, statusLabel }) {
   );
 }
 
+const CFG_STATUS_LABEL_KEYS = {
+  locked: "valorant.cfg.status.locked",
+  unlocked: "valorant.cfg.status.unlocked",
+  synced: "valorant.cfg.status.synced",
+  out_of_sync: "valorant.cfg.status.outOfSync",
+  missing: "valorant.cfg.status.missing",
+  error: "valorant.cfg.status.error",
+  unknown: "valorant.cfg.status.unknown",
+};
+
+function formatCfgResolution(value) {
+  if (value == null || value === "") return "—";
+  if (typeof value === "object") {
+    const width = value.width;
+    const height = value.height;
+    if (width != null && height != null) return `${width}×${height}`;
+  }
+  return "—";
+}
+
+function readCfgStatus(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const backendState = String(raw.state || "unknown");
+  const status = backendState === "not_found" ? "missing" : ["drift", "recreated"].includes(backendState) ? "out_of_sync" : CFG_STATUS_LABEL_KEYS[backendState] ? backendState : "unknown";
+  return {
+    status,
+    visualStatus: ["locked", "synced"].includes(status) ? "ready" : ["unlocked", "out_of_sync", "missing"].includes(status) ? "warning" : status === "error" ? "error" : "unknown",
+    current: raw.current_resolution,
+    canUnlock: raw.can_unlock === true,
+    canRestore: raw.can_restore === true,
+    location: [raw.profile, raw.windows_dir].filter(Boolean).join(" / "),
+    warning: raw.error || "",
+  };
+}
+
+function preserveCfgStatus(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  return raw.cfg_status;
+}
+
+function normalizeDisplayPayload(value) {
+  const normalized = normalizeDisplayStatus(value);
+  const cfgStatus = preserveCfgStatus(value);
+  if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "cfg_status")) {
+    return { ...normalized, cfg_status: cfgStatus };
+  }
+  return normalized;
+}
+
+function mergeCfgStatus(displayStatus, cfgStatus) {
+  return { ...displayStatus, cfg_status: cfgStatus };
+}
+
+function isGameRunning409(error) {
+  if (error?.response?.status !== 409) return false;
+  const detail = error?.response?.data?.detail ?? error?.response?.data ?? "";
+  const text = typeof detail === "string" ? detail : JSON.stringify(detail);
+  return /running/i.test(text) && /\b(?:game|valorant)\b/i.test(text);
+}
+
+function requestErrorDetail(error) {
+  const detail = error?.response?.data?.detail ?? error?.response?.data?.message ?? error?.message;
+  if (detail == null || detail === "") return "";
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "object") {
+    const message = detail.message ?? detail.reason ?? detail.detail ?? detail.error;
+    const code = detail.code;
+    if (message && code && String(message) !== String(code)) return `${message} (${code})`;
+    if (message || code) return String(message || code);
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
+function CfgStatusPanel({ cfgStatus, target, cfgAction, onUnlock, onRestore, t }) {
+  const statusLabelKey = CFG_STATUS_LABEL_KEYS[cfgStatus.status] || CFG_STATUS_LABEL_KEYS.unknown;
+  const statusLabel = t(statusLabelKey);
+  return (
+    <div className="mt-3 border-t border-cs2-border-subtle pt-3" aria-label={t("valorant.cfg.title")}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2"><LockKeyhole className="h-4 w-4 shrink-0 text-cs2-accent" /><div><div className="text-xs font-bold text-cs2-text-primary">{t("valorant.cfg.title")}</div><div className="mt-0.5 text-[10px] text-cs2-text-muted">{t("valorant.cfg.subtitle")}</div></div></div>
+        <StatusBadge status={cfgStatus.visualStatus}>{statusLabel}</StatusBadge>
+      </div>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+        <div className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-2"><dt className="text-[9px] font-bold uppercase tracking-[0.12em] text-cs2-text-muted">{t("valorant.cfg.current")}</dt><dd className="mt-1 truncate font-mono text-xs font-semibold text-cs2-text-primary">{formatCfgResolution(cfgStatus.current)}</dd></div>
+        <div className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-2"><dt className="text-[9px] font-bold uppercase tracking-[0.12em] text-cs2-text-muted">{t("valorant.cfg.target")}</dt><dd className="mt-1 truncate font-mono text-xs font-semibold text-cs2-accent">{target}</dd></div>
+        <div className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-2"><dt className="text-[9px] font-bold uppercase tracking-[0.12em] text-cs2-text-muted">{t("valorant.cfg.status")}</dt><dd className="mt-1 truncate text-xs font-semibold text-cs2-text-primary">{statusLabel}</dd></div>
+      </dl>
+      {cfgStatus.location ? <div className="mt-2 truncate text-[10px] text-cs2-text-muted" title={cfgStatus.location}>{t("valorant.cfg.path")}: {cfgStatus.location}</div> : null}
+      {cfgStatus.warning ? <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-2.5 py-2 text-[10px] leading-4 text-amber-100/80">{cfgStatus.warning}</div> : null}
+      {cfgStatus.canUnlock || cfgStatus.canRestore ? <div className="mt-3 flex flex-wrap gap-2">
+        {cfgStatus.canUnlock ? <button type="button" onClick={onUnlock} disabled={Boolean(cfgAction)} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[10px] font-semibold text-cs2-text-secondary transition-[background-color,transform] duration-150 hover:bg-cs2-bg-hover active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"><Unlock className="h-3.5 w-3.5" />{cfgAction === "unlock" ? t("valorant.cfg.unlocking") : t("valorant.cfg.unlock")}</button> : null}
+        {cfgStatus.canRestore ? <button type="button" onClick={onRestore} disabled={Boolean(cfgAction)} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[10px] font-semibold text-cs2-text-secondary transition-[background-color,transform] duration-150 hover:bg-cs2-bg-hover active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5" />{cfgAction === "restore" ? t("valorant.cfg.restoring") : t("valorant.cfg.restore")}</button> : null}
+      </div> : null}
+    </div>
+  );
+}
+
 function StretchWizard({ t }) {
   const [selection, setSelection] = useState("1568x1080");
   const [custom, setCustom] = useState({ width: 1568, height: 1080 });
+  const [lockCfg, setLockCfg] = useState(true);
   const [displayStatus, setDisplayStatus] = useState(DEFAULT_DISPLAY_STATUS);
   const [detecting, setDetecting] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [cfgAction, setCfgAction] = useState("");
   const [prepared, setPrepared] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [rollbackDeadline, setRollbackDeadline] = useState(null);
@@ -230,19 +339,24 @@ function StretchWizard({ t }) {
   const [openingDeviceManager, setOpeningDeviceManager] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [gameRunningError, setGameRunningError] = useState(false);
   const resolution = useMemo(() => resolutionFromSelection(selection, custom), [selection, custom]);
   const statusReady = isDisplayStatusReady(displayStatus);
+  const cfgStatus = readCfgStatus(displayStatus.cfg_status);
   const statusLabel = (status) => t("valorant.status." + (status || "unknown"));
 
   const detect = useCallback(async () => {
     setDetecting(true);
     setNotice("");
     setError("");
+    setGameRunningError(false);
     try {
-      setDisplayStatus(normalizeDisplayStatus(await fetchValorantDisplayStatus()));
+      setDisplayStatus(normalizeDisplayPayload(await fetchValorantDisplayStatus()));
     } catch (requestError) {
       setDisplayStatus(DEFAULT_DISPLAY_STATUS);
-      setError(isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.detectFailed"));
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.detectFailed"));
     } finally {
       setDetecting(false);
     }
@@ -280,13 +394,16 @@ function StretchWizard({ t }) {
     setPreparing(true);
     setNotice("");
     setError("");
+    setGameRunningError(false);
     try {
       await prepareValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched" });
       setPrepared(true);
       setNotice(t("valorant.prepareSuccess"));
     } catch (requestError) {
       setPrepared(false);
-      setError(isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.prepareFailed"));
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.prepareFailed"));
     } finally {
       setPreparing(false);
     }
@@ -300,13 +417,18 @@ function StretchWizard({ t }) {
     setApplying(true);
     setNotice("");
     setError("");
+    setGameRunningError(false);
     try {
-      const result = await applyValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched", confirmed: true, timeout_seconds: 20 });
+      const result = await applyValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched", confirmed: true, timeout_seconds: 20, lock_cfg: lockCfg });
+      const nextCfgStatus = preserveCfgStatus(result);
+      if (nextCfgStatus !== undefined) setDisplayStatus((current) => mergeCfgStatus(current, nextCfgStatus));
       setRollbackDeadline(result?.rollback_deadline || null);
       setNotice(t("valorant.applyPending"));
       setConfirmed(false);
     } catch (requestError) {
-      setError(isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
     } finally {
       setApplying(false);
     }
@@ -315,12 +437,15 @@ function StretchWizard({ t }) {
   async function confirmAppliedMode() {
     setApplying(true);
     setError("");
+    setGameRunningError(false);
     try {
       await confirmValorantStretch();
       setRollbackDeadline(null);
       setNotice(t("valorant.applySuccess"));
     } catch (requestError) {
-      setError(isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
     } finally {
       setApplying(false);
     }
@@ -329,15 +454,47 @@ function StretchWizard({ t }) {
   async function restoreAppliedMode() {
     setApplying(true);
     setError("");
+    setGameRunningError(false);
     try {
-      await restoreValorantStretch();
+      const result = await restoreValorantStretch();
+      const nextCfgStatus = preserveCfgStatus(result);
+      if (nextCfgStatus !== undefined) setDisplayStatus((current) => mergeCfgStatus(current, nextCfgStatus));
       setRollbackDeadline(null);
       setNotice(t("valorant.restoreSuccess"));
     } catch (requestError) {
-      setError(isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.applyFailed"));
     } finally {
       setApplying(false);
     }
+  }
+
+  async function runCfgAction(action, request, successKey) {
+    setCfgAction(action);
+    setNotice("");
+    setError("");
+    setGameRunningError(false);
+    try {
+      const result = await request();
+      const nextCfgStatus = preserveCfgStatus(result);
+      if (nextCfgStatus !== undefined) setDisplayStatus((current) => mergeCfgStatus(current, nextCfgStatus));
+      setNotice(t(successKey));
+    } catch (requestError) {
+      const gameRunning = isGameRunning409(requestError);
+      setGameRunningError(gameRunning);
+      setError(gameRunning ? `${t("valorant.gameRunning")} ${requestErrorDetail(requestError)}` : isValorantLabApiUnavailable(requestError) ? t("valorant.apiUnavailable") : t("valorant.cfg.actionFailed"));
+    } finally {
+      setCfgAction("");
+    }
+  }
+
+  function unlockCfg() {
+    return runCfgAction("unlock", unlockValorantStretchCfg, "valorant.cfg.unlockSuccess");
+  }
+
+  function restoreCfg() {
+    return runCfgAction("restore", restoreValorantStretchCfg, "valorant.cfg.restoreSuccess");
   }
 
   async function openDeviceManager() {
@@ -374,6 +531,8 @@ function StretchWizard({ t }) {
             <button type="button" aria-pressed={selection === "custom"} onClick={() => setSelection("custom")} className={cn("flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.98]", selection === "custom" ? "border-cs2-accent/55 bg-cs2-accent-soft text-cs2-text-primary" : "border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-secondary hover:bg-cs2-bg-hover")}><span className="text-xs font-bold">{t("valorant.stretch.custom")}</span><SlidersHorizontal className="h-3.5 w-3.5" /></button>
           </div>
           {selection === "custom" ? <div className="mt-3 grid gap-3 sm:grid-cols-2"><NumberInput label={t("valorant.stretch.width")} value={custom.width} min={320} max={7680} suffix="px" onChange={(value) => setCustom((current) => ({ ...current, width: value }))} /><NumberInput label={t("valorant.stretch.height")} value={custom.height} min={240} max={4320} suffix="px" onChange={(value) => setCustom((current) => ({ ...current, height: value }))} /></div> : null}
+          <CfgStatusPanel cfgStatus={cfgStatus} target={getResolutionLabel(selection, custom)} cfgAction={cfgAction} onUnlock={() => void unlockCfg()} onRestore={() => void restoreCfg()} t={t} />
+          <label className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] px-3.5 py-3 transition-colors duration-150 hover:bg-amber-300/[0.08]"><input type="checkbox" aria-label={t("valorant.cfg.lock")} checked={lockCfg} onChange={(event) => setLockCfg(event.target.checked)} className="mt-0.5 accent-amber-300" /><span className="min-w-0"><span className="block text-[11px] font-semibold text-amber-100">{t("valorant.cfg.lock")}</span><span className="mt-0.5 block text-[10px] leading-4 text-amber-100/75">{t("valorant.cfg.lockWarning")}</span></span></label>
         </div>
         <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3.5"><div className="flex items-center gap-2 text-xs font-bold text-amber-200"><ShieldAlert className="h-4 w-4" />{t("valorant.stretch.safetyTitle")}</div><p className="mt-2 text-[11px] leading-5 text-amber-100/75">{t("valorant.stretch.safetyBody")}</p><div className="mt-3 space-y-2 text-[10px] leading-4 text-cs2-text-secondary"><div className="flex gap-2"><span className="font-mono text-emerald-300">01</span><span>{t("valorant.stretch.stepDetect")}</span></div><div className="flex gap-2"><span className="font-mono text-sky-300">02</span><span>{t("valorant.stretch.stepPreview")}</span></div><div className="flex gap-2"><span className="font-mono text-amber-300">03</span><span>{t("valorant.stretch.stepApply")}</span></div></div></div>
       </div>
@@ -384,7 +543,7 @@ function StretchWizard({ t }) {
       <label className={cn("mt-3 flex items-start gap-2.5 rounded-xl border px-3.5 py-3 transition-colors duration-150", prepared ? "border-rose-300/25 bg-rose-300/[0.06]" : "border-cs2-border-subtle bg-black/10 opacity-60")}><input type="checkbox" checked={confirmed} disabled={!prepared || !statusReady} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 accent-rose-400" /><span className="text-[11px] leading-5 text-cs2-text-secondary">{t("valorant.applyConfirm")}</span></label>
       {rollbackDeadline ? <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-amber-300/[0.08] p-3.5"><div><div className="text-xs font-bold text-amber-100">{t("valorant.rollbackTitle")}</div><div className="mt-1 text-[11px] text-amber-100/70">{t("valorant.rollbackBody")} <span className="font-mono font-bold text-amber-200">{remainingSeconds ?? 0}s</span></div></div><div className="flex gap-2"><button type="button" onClick={() => void restoreAppliedMode()} disabled={applying} className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-secondary active:scale-[0.97] disabled:opacity-50">{t("valorant.restoreNow")}</button><button type="button" onClick={() => void confirmAppliedMode()} disabled={applying} className="rounded-lg bg-emerald-500 px-3 py-2 text-[11px] font-bold text-white active:scale-[0.97] disabled:opacity-50">{t("valorant.keepMode")}</button></div></div> : null}
       {notice ? <div role="status" className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-2 text-[11px] text-emerald-200">{notice}</div> : null}
-      {error ? <div role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-100"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{error}</div> : null}
+      {error ? <div role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-100"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><div className="min-w-0">{error}{gameRunningError ? <button type="button" onClick={() => void detect()} disabled={detecting} className="ml-2 inline-flex items-center gap-1 rounded-md border border-amber-200/30 px-2 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-200/10 disabled:opacity-60"><RefreshCw className="h-3 w-3" />{t("valorant.redetect")}</button> : null}</div></div> : null}
     </section>
   );
 }

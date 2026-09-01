@@ -28,27 +28,23 @@ export function normalizeUserReleaseNotes(value) {
  * Tauri updater 检查/下载控制器。
  * 状态：checking / available / downloading / installing / not-available / error / cancelled / skipped
  *
- * 默认在发现更新后自动下载并安装，但普通更新会先给用户一个短暂的跳过窗口。
- * 传入 autoInstall: false 时会停在 available，等待 confirm() 再继续；
+ * 发现更新后始终停在 available，必须由用户调用 confirm() 才会下载并安装。
+ * autoInstallGraceMs 作为旧调用方的兼容参数保留，但不再启动自动下载倒计时。
  * defer() 表示跳过当前版本，cancel() 只取消本次检查。
- * force 模式下不等待跳过窗口，且 defer/cancel 在开始下载前会被忽略。
+ * force 模式同样必须由用户明确 confirm()，但不允许 defer()。
  *
  * 注意：Tauri updater 无法中断已经开始的下载；Windows 会在安装器成功启动后退出当前进程。
  */
 export function createDesktopUpdateCheck(
   onStatus,
   {
-    autoInstall = true,
     checkTimeoutMs = 8000,
-    autoInstallGraceMs = 5000,
     skipVersion = "",
   } = {},
 ) {
   let cancelled = false;
   let updateMode = "normal";
   let confirmWait = null;
-  let graceTimer = null;
-  let choiceWindowExpired = false;
   let startedDownload = false;
 
   const emit = (payload) => {
@@ -59,42 +55,23 @@ export function createDesktopUpdateCheck(
     }
   };
 
-  const waitForUserChoice = (timeoutMs = null) =>
+  const waitForUserChoice = () =>
     new Promise((resolve) => {
-      choiceWindowExpired = false;
       confirmWait = resolve;
-      if (timeoutMs === null) return;
-      const duration = Math.max(0, Number(timeoutMs) || 0);
-      if (duration === 0) {
-        confirmWait = null;
-        resolve("timeout");
-        return;
-      }
-      graceTimer = window.setTimeout(() => {
-        graceTimer = null;
-        if (!confirmWait) return;
-        choiceWindowExpired = true;
-        const wait = confirmWait;
-        confirmWait = null;
-        wait("timeout");
-      }, duration);
     });
 
-  const clearChoiceTimer = () => {
-    if (graceTimer !== null) {
-      window.clearTimeout(graceTimer);
-      graceTimer = null;
-    }
-  };
-
-  const resolveChoice = (choice) => {
+  const resolveChoice = (choice, allowForceCancel = false) => {
     if (!confirmWait) return false;
-    if (updateMode === "force" && choice !== "install" && !startedDownload) {
+    if (
+      updateMode === "force" &&
+      choice !== "install" &&
+      !allowForceCancel &&
+      !startedDownload
+    ) {
       return false;
     }
     const wait = confirmWait;
     confirmWait = null;
-    clearChoiceTimer();
     wait(choice);
     return true;
   };
@@ -144,7 +121,9 @@ export function createDesktopUpdateCheck(
       release_notes: notes,
       user_release_notes: userNotes,
       update_mode: updateMode,
-      auto_install: autoInstall,
+      // Automatic installation is intentionally disabled. Keep the field in
+      // the payload so older UI consumers cannot infer an auto-install path.
+      auto_install: false,
     };
     if (
       updateMode !== "force" &&
@@ -160,28 +139,21 @@ export function createDesktopUpdateCheck(
       return;
     }
 
-    const graceMs = Math.max(0, Number(autoInstallGraceMs) || 0);
-    const awaitingChoice = updateMode !== "force" && (autoInstall === false || graceMs > 0);
-    emit({ status: "available", ...base, awaiting_choice: awaitingChoice });
+    emit({ status: "available", ...base, awaiting_choice: true });
 
-    if (updateMode !== "force" && (!autoInstall || graceMs > 0)) {
-      const choice = await waitForUserChoice(autoInstall ? graceMs : null);
-      if (cancelled || choice === "defer" || choice === "cancel") {
-        try {
-          await update.close();
-        } catch {
-          // ignore
-        }
-        emit({
-          status: "cancelled",
-          ...base,
-          ...(choice === "defer" && latest ? { skipped_version: latest } : {}),
-        });
-        return;
+    const choice = await waitForUserChoice();
+    if (cancelled || choice === "defer" || choice === "cancel") {
+      try {
+        await update.close();
+      } catch {
+        // ignore
       }
-      if (autoInstall && choice === "timeout") {
-        emit({ status: "available", ...base, awaiting_choice: false });
-      }
+      emit({
+        status: "cancelled",
+        ...base,
+        ...(choice === "defer" && latest ? { skipped_version: latest } : {}),
+      });
+      return;
     }
 
     startedDownload = true;
@@ -236,14 +208,16 @@ export function createDesktopUpdateCheck(
     },
     /** 稍后再说（force 且尚未开始下载时无效） */
     defer: () => {
-      if (startedDownload || choiceWindowExpired || updateMode === "force") return false;
+      if (startedDownload || updateMode === "force") return false;
       cancelled = true;
       resolveChoice("defer");
       return true;
     },
     cancel: () => {
       cancelled = true;
-      return resolveChoice("cancel");
+      // Internal replacement checks may cancel a force-update controller; this
+      // does not expose a user-visible skip path for the force update itself.
+      return resolveChoice("cancel", true);
     },
   };
 }

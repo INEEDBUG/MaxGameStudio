@@ -13,6 +13,7 @@ import {
   Download,
   Gamepad2,
   History,
+  Home,
   Keyboard,
   Laptop,
   Library,
@@ -170,7 +171,7 @@ function readSidebarGroups() {
 function groupMatchesPath(groupId, pathname) {
   const path = String(pathname || "");
   if (groupId === "cs2") {
-    return path === "/" || path === "/cs2" || path.startsWith("/cs2/") || [
+    return path === "/cs2" || path.startsWith("/cs2/") || [
       "/library", "/analysis", "/demo-analysis-preview", "/queue", "/recorded-videos", "/montage",
       "/lite-cut", "/params", "/player-game-config", "/match-history",
     ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
@@ -241,6 +242,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
       </div>
 
       <nav className="scrollbar-hover flex flex-1 flex-col gap-0.5 overflow-y-auto" aria-label={t("nav.mainNav")} onPointerDownCapture={suspendReplayPlayback}>
+        <NavItem to="/" end icon={Home}>{t("nav.home")}</NavItem>
         <SidebarGroup id="cs2" label={t("nav.sectionCs2")} icon={Gamepad2} active={activeGroup === "cs2"} expanded={Boolean(expandedGroups.cs2)} onToggle={() => toggleGroup("cs2")}>
           <NavItem to="/cs2/guide" end icon={BookOpen}>{t("nav.guide")}</NavItem>
           <NavItem to="/cs2/library" icon={Library}>{t("nav.demoLibrary")}</NavItem>

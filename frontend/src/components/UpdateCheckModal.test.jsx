@@ -44,7 +44,7 @@ describe("UpdateCheckModal automatic install flow", () => {
     expect(screen.getByText("兼容旧版更新说明")).toBeTruthy();
   });
 
-  it("shows automatic download without asking for a second confirmation", () => {
+  it("always shows explicit update and skip actions for a normal update", () => {
     render(
       <UpdateCheckModal
         open
@@ -59,13 +59,14 @@ describe("UpdateCheckModal automatic install flow", () => {
       />,
     );
 
-    expect(screen.getByText(/正在准备下载|Preparing download/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /立即更新|Update now/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /稍后再说|Later/ })).toBeNull();
+    expect(screen.getByText(/发现新版本，是否立即更新|A new version is available. Update now\?/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /立即更新|Update now/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /暂不升级此版本|Skip this version/ })).toBeTruthy();
   });
 
-  it("offers to skip a normal automatic update during its grace window", () => {
+  it("does not show a skip action for a force update, but still requires update confirmation", () => {
     const onClose = vi.fn();
+    const onConfirm = vi.fn();
     render(
       <UpdateCheckModal
         open
@@ -73,15 +74,17 @@ describe("UpdateCheckModal automatic install flow", () => {
           status: "available",
           current_version: "2.5.12",
           latest_version: "2.5.13",
-          auto_install: true,
-          awaiting_choice: true,
+          update_mode: "force",
+          auto_install: false,
         }}
         onClose={onClose}
+        onConfirm={onConfirm}
       />,
     );
 
-    expect(screen.getByText(/暂不升级此版本|Skip this version/)).toBeTruthy();
-    expect(screen.getByText(/几秒后自动下载|download automatically in a few seconds/)).toBeTruthy();
+    expect(screen.getByText(/本次更新涉及重大内容|critical changes/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /立即更新|Update now/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /暂不升级此版本|Skip this version/ })).toBeNull();
   });
 
   it("makes the automatic installation handoff explicit", () => {

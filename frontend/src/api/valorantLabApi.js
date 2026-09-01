@@ -11,6 +11,8 @@ export const VALORANT_LAB_API_CONTRACT = Object.freeze({
   applyStretch: { method: "POST", path: "/valorant-lab/stretch/apply" },
   confirmStretch: { method: "POST", path: "/valorant-lab/stretch/confirm" },
   restoreStretch: { method: "POST", path: "/valorant-lab/stretch/restore" },
+  unlockStretchCfg: { method: "POST", path: "/valorant-lab/stretch/cfg/unlock" },
+  restoreStretchCfg: { method: "POST", path: "/valorant-lab/stretch/cfg/restore" },
   openDeviceManager: { method: "POST", path: "/valorant-lab/display/open-device-manager" },
   crosshair: { method: "GET", path: "/valorant-lab/crosshair" },
   encodeCrosshair: { method: "POST", path: "/valorant-lab/crosshair/encode" },
@@ -24,7 +26,11 @@ export function isValorantLabApiUnavailable(error) {
 
 export async function fetchValorantDisplayStatus() {
   const { data } = await API.get(VALORANT_LAB_API_CONTRACT.displayStatus.path);
-  return normalizeDisplayStatus(data);
+  const normalized = normalizeDisplayStatus(data);
+  if (data && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "cfg_status")) {
+    return { ...normalized, cfg_status: data.cfg_status };
+  }
+  return normalized;
 }
 
 export async function prepareValorantStretch(payload) {
@@ -44,6 +50,16 @@ export async function confirmValorantStretch() {
 
 export async function restoreValorantStretch() {
   const { data } = await API.post(VALORANT_LAB_API_CONTRACT.restoreStretch.path);
+  return data;
+}
+
+export async function unlockValorantStretchCfg() {
+  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.unlockStretchCfg.path);
+  return data;
+}
+
+export async function restoreValorantStretchCfg() {
+  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.restoreStretchCfg.path);
   return data;
 }
 

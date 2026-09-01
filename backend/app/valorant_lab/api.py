@@ -22,12 +22,25 @@ from ..session_auth import request_session_token, session_token_matches
 from .codec import parse_crosshair_code, serialize_crosshair_code
 from .display import ALL_PRESENT_PHYSICAL_MONITORS_DISABLED, collect_display_status
 from .display_session import display_mode_session, enumerate_display_modes, test_display_mode
+from .game_user_settings import (
+    GameUserSettingsConflictError,
+    GameUserSettingsError,
+    GameUserSettingsFormatError,
+    GameUserSettingsNotFoundError,
+    GameUserSettingsProcessRunningError,
+    GameUserSettingsTransactionError,
+    ValorantGameUserSettingsService,
+)
 from .presets import list_display_presets
 from .ui_codec import UICodecError, code_to_ui_profiles, ui_profiles_to_code
 
 
 router = APIRouter(prefix="/api/valorant-lab", tags=["valorant-lab"])
 _profile_lock = threading.RLock()
+_game_user_settings = ValorantGameUserSettingsService(
+    os.environ.get("LOCALAPPDATA"),
+    backup_root=resolve_config_path().parent / "valorant-game-user-settings-backups",
+)
 
 
 class StretchRequest(BaseModel):
@@ -38,6 +51,7 @@ class StretchRequest(BaseModel):
     mode: str = Field(default="real-stretched", max_length=50)
     confirmed: bool = False
     timeout_seconds: int = Field(default=20, ge=10, le=60)
+    lock_cfg: bool = True
 
 
 class CrosshairProfilesPayload(BaseModel):
@@ -136,7 +150,87 @@ def _frontend_display_status() -> dict[str, Any]:
     snapshot["display_mode_session"] = display_mode_session.status()
     snapshot["display_recovery"] = recovery
     snapshot["monitor"]["status"] = "ready" if snapshot.get("safe_to_skip_disable") else snapshot["monitor"].get("status", "unknown")
+    snapshot["cfg_status"] = _cfg_status()
     return snapshot
+
+
+def _current_resolution(values: dict[str, Any]) -> dict[str, int] | None:
+    resolution = values.get("resolution") if isinstance(values.get("resolution"), dict) else {}
+    pairs = (
+        ("ResolutionSizeX", "ResolutionSizeY"),
+        ("LastUserConfirmedResolutionSizeX", "LastUserConfirmedResolutionSizeY"),
+        ("DesiredScreenWidth", "DesiredScreenHeight"),
+        ("LastUserConfirmedDesiredScreenWidth", "LastUserConfirmedDesiredScreenHeight"),
+    )
+    for x_key, y_key in pairs:
+        try:
+            return {"width": int(resolution[x_key]), "height": int(resolution[y_key])}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _cfg_status(width: int | None = None, height: int | None = None) -> dict[str, Any]:
+    try:
+        status = _game_user_settings.status()
+    except GameUserSettingsNotFoundError:
+        return {
+            "found": False,
+            "state": "not_found",
+            "current_resolution": None,
+            "can_unlock": False,
+            "can_restore": False,
+        }
+    except GameUserSettingsError as exc:
+        return {
+            "found": False,
+            "state": "error",
+            "error": str(exc),
+            "current_resolution": None,
+            "can_unlock": False,
+            "can_restore": False,
+        }
+    if status.get("found"):
+        try:
+            status.update(_game_user_settings.get())
+        except GameUserSettingsError as exc:
+            status.update(state="error", error=str(exc))
+    current = _current_resolution(status)
+    status["current_resolution"] = current
+    status["can_unlock"] = status.get("readonly") is True
+    status["can_restore"] = status.get("backup_available") is True
+    if width is not None and height is not None and isinstance(status.get("resolution"), dict):
+        resolution = status["resolution"]
+        x_values = [int(value) for key, value in resolution.items() if key in {
+            "ResolutionSizeX", "LastUserConfirmedResolutionSizeX", "DesiredScreenWidth", "LastUserConfirmedDesiredScreenWidth"
+        } and str(value).strip().isdigit()]
+        y_values = [int(value) for key, value in resolution.items() if key in {
+            "ResolutionSizeY", "LastUserConfirmedResolutionSizeY", "DesiredScreenHeight", "LastUserConfirmedDesiredScreenHeight"
+        } and str(value).strip().isdigit()]
+        status["in_sync"] = bool(x_values or y_values) and all(value == width for value in x_values) and all(value == height for value in y_values)
+        if not status["in_sync"]:
+            status["state"] = "out_of_sync"
+        elif status.get("readonly"):
+            status["state"] = "locked"
+        else:
+            status["state"] = "synced"
+    elif status.get("drifted") or status.get("recreated"):
+        status["state"] = "out_of_sync"
+    return status
+
+
+def _cfg_http_error(exc: GameUserSettingsError) -> HTTPException:
+    if isinstance(exc, GameUserSettingsProcessRunningError):
+        return HTTPException(
+            status_code=409,
+            detail={"code": "valorant_running", "message": "检测到 VALORANT 正在运行，请关闭游戏后再应用真拉伸配置。"},
+        )
+    if isinstance(exc, GameUserSettingsNotFoundError):
+        return HTTPException(status_code=409, detail={"code": "cfg_not_found", "message": "未找到有效的 GameUserSettings.ini。"})
+    if isinstance(exc, (GameUserSettingsFormatError, GameUserSettingsConflictError)):
+        return HTTPException(status_code=409, detail={"code": "cfg_changed_or_invalid", "message": str(exc)})
+    status_code = 500 if isinstance(exc, GameUserSettingsTransactionError) else 409
+    return HTTPException(status_code=status_code, detail={"code": "cfg_operation_failed", "message": str(exc)})
 
 
 @router.get("/display/status")
@@ -187,12 +281,43 @@ async def apply_stretch(body: StretchRequest, request: Request):
     if snapshot.get("raw_monitor_status") != ALL_PRESENT_PHYSICAL_MONITORS_DISABLED:
         raise HTTPException(status_code=409, detail="monitor prerequisite changed; detect again")
     refresh = body.refresh_hz or snapshot.get("refresh_rate", {}).get("value")
+    cfg_changed = False
     try:
+        _game_user_settings.set_resolution(body.width, body.height)
+        cfg_changed = True
+        if body.lock_cfg:
+            _game_user_settings.lock()
+        else:
+            _game_user_settings.unlock()
         result = display_mode_session.apply(body.width, body.height, refresh, body.timeout_seconds)
+    except GameUserSettingsError as exc:
+        if cfg_changed:
+            try:
+                _game_user_settings.restore_latest_backup()
+            except GameUserSettingsError as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail={"code": "cfg_rollback_failed", "message": f"{exc}; rollback failed: {rollback_exc}"},
+                ) from exc
+        raise _cfg_http_error(exc) from exc
     except RuntimeError as exc:
+        if cfg_changed:
+            try:
+                _game_user_settings.restore_latest_backup()
+            except GameUserSettingsError as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail={"code": "cfg_rollback_failed", "message": f"{exc}; rollback failed: {rollback_exc}"},
+                ) from exc
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result.get("applied"):
+        if cfg_changed:
+            try:
+                _game_user_settings.restore_latest_backup()
+            except GameUserSettingsError as rollback_exc:
+                raise HTTPException(status_code=500, detail={"code": "cfg_rollback_failed", "message": str(rollback_exc)}) from rollback_exc
         raise HTTPException(status_code=409, detail=result)
+    result["cfg_status"] = _cfg_status(body.width, body.height)
     return result
 
 
@@ -206,6 +331,26 @@ async def confirm_stretch(request: Request):
 async def restore_stretch(request: Request):
     _require_session(request)
     return display_mode_session.restore()
+
+
+@router.post("/stretch/cfg/unlock")
+async def unlock_stretch_cfg(request: Request):
+    _require_session(request)
+    try:
+        _game_user_settings.unlock()
+    except GameUserSettingsError as exc:
+        raise _cfg_http_error(exc) from exc
+    return {"cfg_status": _cfg_status()}
+
+
+@router.post("/stretch/cfg/restore")
+async def restore_stretch_cfg(request: Request):
+    _require_session(request)
+    try:
+        restored = _game_user_settings.restore_latest_backup()
+    except GameUserSettingsError as exc:
+        raise _cfg_http_error(exc) from exc
+    return {"restored": True, "backup_path": restored.get("backup_path"), "cfg_status": _cfg_status()}
 
 
 @router.post("/display/open-device-manager")

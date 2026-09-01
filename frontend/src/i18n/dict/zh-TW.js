@@ -6,6 +6,7 @@ export default {
   "common.close": "關閉",
   "nav.brand": "MaxGameStudio",
   "nav.mainNav": "主導航",
+  "nav.home": "首頁",
   "nav.sectionWorkflow": "工作流程",
   "nav.sectionCs2": "CS2",
   "nav.sectionValorant": "特戰英豪",

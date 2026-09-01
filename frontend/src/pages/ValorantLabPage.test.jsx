@@ -10,7 +10,9 @@ import {
   fetchValorantDisplayStatus,
   prepareValorantStretch,
   restoreValorantStretch,
+  restoreValorantStretchCfg,
   saveValorantCrosshair,
+  unlockValorantStretchCfg,
   openValorantDeviceManager,
 } from "../api/valorantLabApi.js";
 import { DEFAULT_CROSSHAIR_PROFILES, serializeCrosshairCode } from "../utils/valorantLab.js";
@@ -27,7 +29,9 @@ vi.mock("../api/valorantLabApi.js", () => ({
   openValorantDeviceManager: vi.fn(),
   prepareValorantStretch: vi.fn(),
   restoreValorantStretch: vi.fn(),
+  restoreValorantStretchCfg: vi.fn(),
   saveValorantCrosshair: vi.fn(),
+  unlockValorantStretchCfg: vi.fn(),
 }));
 
 const READY_STATUS = {
@@ -35,6 +39,19 @@ const READY_STATUS = {
   gpu: { status: "ready", name: "RTX test GPU" },
   monitor: { status: "ready", name: "Primary monitor" },
   refreshRate: { status: "ready", value: 240 },
+};
+
+const READY_CFG_STATUS = {
+  ...READY_STATUS,
+  cfg_status: {
+    state: "locked",
+    current_resolution: { width: 1920, height: 1080 },
+    can_unlock: true,
+    can_restore: true,
+    profile: "profile-a",
+    windows_dir: "WindowsClient",
+    path: "C:\\Riot Games\\VALORANT\\GameUserSettings.ini",
+  },
 };
 
 describe("ValorantLabPage", () => {
@@ -49,6 +66,8 @@ describe("ValorantLabPage", () => {
     applyValorantStretch.mockResolvedValue({});
     confirmValorantStretch.mockResolvedValue({});
     restoreValorantStretch.mockResolvedValue({});
+    restoreValorantStretchCfg.mockResolvedValue({ cfg_status: { status: "locked", current_resolution: "1568x1080", can_unlock: true, can_restore: true } });
+    unlockValorantStretchCfg.mockResolvedValue({ cfg_status: { status: "unlocked", current_resolution: "1920x1080", can_unlock: false, can_restore: true } });
     openValorantDeviceManager.mockResolvedValue({ opened: true });
     saveValorantCrosshair.mockRejectedValue({ code: "ERR_NETWORK" });
     Object.defineProperty(navigator, "clipboard", {
@@ -88,6 +107,42 @@ describe("ValorantLabPage", () => {
     expect(applyButton.disabled).toBe(false);
     fireEvent.click(applyButton);
     await waitFor(() => expect(applyValorantStretch).toHaveBeenCalledWith(expect.objectContaining({ width: 1568, height: 1080, confirmed: true })));
+  });
+
+  it("shows CFG sync state, defaults lock on, and sends the selected lock setting with the existing resolution", async () => {
+    fetchValorantDisplayStatus.mockResolvedValue(READY_CFG_STATUS);
+    render(<ValorantLabPage />);
+
+    await waitFor(() => expect(screen.getByText("GameUserSettings.ini 同步")).toBeTruthy());
+    expect(screen.getByText("1920×1080")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "锁定 CFG" }).checked).toBe(true);
+    expect(screen.getByRole("button", { name: "解锁 CFG" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "恢复 CFG" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "预览拉伸设置" }));
+    await waitFor(() => expect(prepareValorantStretch).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("checkbox", { name: /我已确认游戏会短暂切换/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "锁定 CFG" }));
+    fireEvent.click(screen.getByRole("button", { name: "应用真实拉伸" }));
+    await waitFor(() => expect(applyValorantStretch).toHaveBeenCalledWith(expect.objectContaining({ width: 1568, height: 1080, lock_cfg: false })));
+
+    fireEvent.click(screen.getByRole("button", { name: "解锁 CFG" }));
+    await waitFor(() => expect(unlockValorantStretchCfg).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("CFG 已解锁，可手动编辑 GameUserSettings.ini。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "恢复 CFG" }));
+    await waitFor(() => expect(restoreValorantStretchCfg).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows a game-running 409 detail and an explicit re-detect action", async () => {
+    const runningError = { response: { status: 409, data: { detail: { code: "valorant_running", message: "close VALORANT before changing the file" } } } };
+    fetchValorantDisplayStatus.mockRejectedValueOnce(runningError).mockResolvedValueOnce(READY_STATUS);
+    render(<ValorantLabPage />);
+
+    await waitFor(() => expect(screen.getByText(/检测到无畏契约正在运行/)).toBeTruthy());
+    expect(screen.getByText(/close VALORANT before changing the file/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭游戏后重新检测" }));
+    await waitFor(() => expect(fetchValorantDisplayStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("环境已确认，可以先预览设置。")).toBeTruthy());
   });
 
   it("keeps P/A/S profiles separate and supports copying the generated code", async () => {

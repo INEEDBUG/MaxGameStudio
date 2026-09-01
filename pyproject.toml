@@ -1,6 +1,6 @@
 [project]
 name = "max-game-studio-backend"
-version = "3.0.4"
+version = "3.0.5"
 description = "Python backend runtime for MaxGameStudio"
 requires-python = "==3.12.*"
 dependencies = [

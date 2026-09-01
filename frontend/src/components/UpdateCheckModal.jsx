@@ -25,12 +25,9 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
   const upToDate = status === "not-available";
   const isAvailable = status === "available";
   const isUpdating = status === "downloading" || status === "installing";
-  const isAutoInstall = info.auto_install !== false;
-  const awaitingChoice = isAvailable && info.awaiting_choice === true;
   const forceLocked =
     isUpdating ||
-    (isForce && isAvailable) ||
-    (isAutoInstall && isAvailable && !awaitingChoice);
+    (isForce && isAvailable);
 
   let body = null;
   if (err || status === "error") {
@@ -55,10 +52,6 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
       <div className="space-y-2">
         {isForce ? (
           <p className="text-sm font-semibold text-cs2-orange">{t("dialog.updateForceRequired")}</p>
-        ) : awaitingChoice && isAutoInstall ? (
-          <p className="text-sm text-zinc-300">{t("dialog.updateGraceHint")}</p>
-        ) : isAutoInstall ? (
-          <p className="text-sm text-zinc-300">{t("dialog.updateDownloadingStart")}</p>
         ) : (
           <p className="text-sm text-zinc-300">{t("dialog.updateAvailablePrompt")}</p>
         )}
@@ -150,28 +143,24 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
           ) : null}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-4 py-2">
-          {isAvailable && (awaitingChoice || !isAutoInstall) ? (
+          {isAvailable ? (
             <>
               {!isForce ? (
                 <button
                   type="button"
-                  className="text-[11px] font-semibold text-zinc-500 hover:text-white"
+                  className="min-h-9 cursor-pointer rounded-md border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-white/30 hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-orange"
                   onClick={() => onClose?.()}
                 >
-                  {awaitingChoice && isAutoInstall
-                    ? t("dialog.updateSkip")
-                    : t("dialog.updateLater")}
+                  {t("dialog.updateSkip")}
                 </button>
               ) : null}
-              {!isAutoInstall ? (
-                <button
-                  type="button"
-                  className="rounded-md bg-cs2-orange px-3 py-1.5 text-[11px] font-semibold text-black hover:opacity-90"
-                  onClick={() => onConfirm?.()}
-                >
-                  {t("dialog.updateNow")}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="min-h-9 cursor-pointer rounded-md bg-cs2-orange px-4 py-1.5 text-[11px] font-semibold text-black transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                onClick={() => onConfirm?.()}
+              >
+                {t("dialog.updateNow")}
+              </button>
             </>
           ) : null}
           {!forceLocked && !isAvailable ? (

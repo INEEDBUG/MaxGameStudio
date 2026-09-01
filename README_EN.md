@@ -16,7 +16,7 @@
 > **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **The current stable release is `v3.0.4`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.4`. The CS2 workspace, League features, and VALORANT features ship in one installer.
+> **The current stable release is `v3.0.5`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.5`. The CS2 workspace, League features, and VALORANT features ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
@@ -43,10 +43,16 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ---
 
-## What's new in v3.0.4
+## What's new in v3.0.5
 
 > [!TIP]
-> This release continues the League ongoing-game and navigation work and adds four regional language choices. See the [v3.0.4 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.4) for the complete technical notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
+> This release improves the multi-game home experience and update confirmation. See the [v3.0.5 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.5) for the complete notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
+
+- **Explicit update confirmation** — The updater shows both “Update now” and “Skip this version”; downloading, installing, and restarting begin only after “Update now” is clicked.
+- **Multi-game home** — The home route presents MaxGameStudio release notes instead of opening the CS2 guide as the default first screen.
+- **Feedback links** — The home page provides Bug and Feature Issue forms, plus Pull Requests and repository links. Notes are bundled for offline startup.
+- **Clearer navigation** — Home is a standalone sidebar entry, while the CS2 guide remains available inside the CS2 section.
+- **VALORANT CFG sync** — True stretch patches existing resolution fields, creates a full backup, and locks `GameUserSettings.ini` by default, with unlock, restore, and drift detection; writes are refused while the game is running.
 
 | Section | Directly accessible features |
 | --- | --- |
@@ -173,7 +179,7 @@ By default, the window `×` button asks whether to keep the app running in the W
 
 After installation, launch from desktop or start menu. **No browser or manual backend start is required.** The lightweight Tauri shell starts the bundled Python backend and renders the UI with the Windows system WebView2 runtime.
 
-The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases show a plain-language Fixes / New Features / Optimizations summary before they are downloaded, verified, installed in place, and relaunched. A normal update can be skipped for the current version; a manual update check can show it again. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
+The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases show a plain-language Fixes / New Features / Optimizations summary first; downloading, verifying, installing in place, and relaunching begin only after the user clicks “Update now”. “Skip this version” suppresses that release during automatic checks, while a manual check can show it again. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
 
 > **Recommended: Installation path without Chinese characters.** e.g., `D:\MaxGameStudio\` ✅, `D:\游戏工具\MaxGameStudio\` ❌
 
@@ -191,7 +197,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v3.0.1 · Upgrade fixes** | Fixes safe cleanup, version skipping/forced updates, and Release title version parsing | ✅ Released |
 | **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
 | **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Released |
-| **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Current stable |
+| **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Released |
+| **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Current stable |
 
 ### Planned
 

@@ -6,6 +6,7 @@ export default {
   "common.close": "Закрыть",
   "nav.brand": "MaxGameStudio",
   "nav.mainNav": "Главная навигация",
+  "nav.home": "Главная",
   "nav.sectionWorkflow": "Рабочий процесс",
   "nav.sectionCs2": "CS2",
   "nav.sectionValorant": "Valorant",

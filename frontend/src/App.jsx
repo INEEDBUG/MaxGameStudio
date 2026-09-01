@@ -57,7 +57,6 @@ import { desktopBridge } from "./desktop/desktopBridge";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 import DesktopCloseDialog from "./components/DesktopCloseDialog";
-import FirstRunWelcome, { shouldShowFirstRunWelcome } from "./components/FirstRunWelcome";
 import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter";
 import LeagueMiniAutoManager from "./components/LeagueMiniAutoManager";
 import LeagueGlobalShortcutManager from "./components/LeagueGlobalShortcutManager";
@@ -65,6 +64,7 @@ import LeaguePresetShortcutManager from "./components/LeaguePresetShortcutManage
 import LeagueAuxShortcutManager from "./components/LeagueAuxShortcutManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
+const HomePage = lazy(() => import("./pages/HomePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
 const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
@@ -165,7 +165,6 @@ export default function App() {
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [closeDialogRemember, setCloseDialogRemember] = useState(false);
   const [closeDialogBusy, setCloseDialogBusy] = useState(false);
-  const [showFirstRunWelcome] = useState(() => shouldShowFirstRunWelcome());
   /** 后端就绪后的启动流程：先检查更新，再拉取首页配置检查 */
   const [startupInitDone, setStartupInitDone] = useState(false);
   const [startupInitPhase, setStartupInitPhase] = useState(/** @type {"update" | "config" | null} */ (null));
@@ -3155,7 +3154,7 @@ export default function App() {
             resume?.();
           }
         }
-      }, { skipVersion: skippedVersion });
+      }, { autoInstall: false, skipVersion: skippedVersion });
       updateControllerRef.current = controller;
 
       setUpdateInfo({
@@ -3433,10 +3432,6 @@ export default function App() {
           onCancel={() => setCloseDialogOpen(false)}
         />
         <div className="relative flex flex-1 overflow-hidden">
-          <FirstRunWelcome
-            open={backendReady && startupInitDone && showFirstRunWelcome && !isStandalonePreview}
-            onNavigate={navigate}
-          />
           {libraryLoadingOverlay && (
             <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
@@ -3505,7 +3500,7 @@ export default function App() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
-                <Route path="/" element={<GuidePage />} />
+                <Route path="/" element={<HomePage />} />
                 <Route path="/cs2" element={<Navigate to="/cs2/guide" replace />} />
                 <Route path="/cs2/guide" element={<GuidePage />} />
                 <Route path="/cs2/library" element={<DemoLibraryPage />} />

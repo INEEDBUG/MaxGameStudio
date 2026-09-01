@@ -37,6 +37,13 @@ describe("SidebarNav", () => {
     );
   });
 
+  test("exposes Home as an independent top-level route", () => {
+    render(<MemoryRouter initialEntries={["/"]}><SidebarNav /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: "nav.home" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: "nav.home" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "nav.sectionCs2" }).getAttribute("aria-current")).toBeNull();
+  });
+
   test("groups game features and automatically opens the active section", () => {
     render(
       <MemoryRouter initialEntries={["/league/history"]}>

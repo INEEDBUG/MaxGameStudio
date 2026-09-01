@@ -6,6 +6,7 @@ export default {
   "common.close": "Tutup",
   "nav.brand": "MaxGameStudio",
   "nav.mainNav": "Navigasi utama",
+  "nav.home": "Laman utama",
   "nav.sectionWorkflow": "Aliran kerja",
   "nav.sectionCs2": "CS2",
   "nav.sectionValorant": "Valorant",
