@@ -1294,7 +1294,7 @@ pub fn run() {
 mod tests {
     use super::{
         close_action_name, league_window_defaults, mini_auto_context_allows_show,
-        new_session_token, parse_close_action,
+        new_session_token, ongoing_auto_context_allows_show, parse_close_action,
     };
 
     #[test]
