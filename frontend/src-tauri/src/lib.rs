@@ -93,7 +93,6 @@ async fn show_league_mini(app: AppHandle, request_focus: bool) -> Result<(), Str
             .fullscreen(false)
             .decorations(false)
             .background_color(Color(20, 20, 22, 255))
-            .always_on_top(true)
             .visible(false)
             .focused(false)
             .content_protected(content_protected)
@@ -115,6 +114,52 @@ async fn open_league_ongoing(app: AppHandle) -> Result<(), String> {
     lifecycle.manually_hidden.store(false, Ordering::SeqCst);
     lifecycle.should_show.store(true, Ordering::SeqCst);
     show_league_ongoing(app, true).await
+}
+
+fn build_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
+    let content_protected = app
+        .state::<LeaguePrivacyLifecycle>()
+        .content_protected
+        .load(Ordering::SeqCst);
+    WebviewWindowBuilder::new(
+        app,
+        "league-ongoing",
+        WebviewUrl::App("ongoing.html".into()),
+    )
+    .title("MaxGameStudio · League 实时对局")
+    .inner_size(1360.0, 840.0)
+    .min_inner_size(980.0, 640.0)
+    .resizable(true)
+    .decorations(true)
+    // Keep the native surface transparent until the first React frame is
+    // acknowledged. This prevents WebView2's unpainted white surface from
+    // flashing when the game transitions into Loading/InProgress.
+    .transparent(true)
+    .background_color(Color(17, 18, 20, 255))
+    .visible(false)
+    .focused(false)
+    .content_protected(content_protected)
+    .build()
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+/// Build the ongoing WebView during app setup. It remains hidden until
+/// `mark_league_window_ready` observes a committed React frame, so a later
+/// GameStart/InProgress event only needs to show an already-initialized
+/// surface instead of creating a new WebView on the game's critical path.
+fn prime_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
+    let lifecycle = app.state::<LeagueOngoingLifecycle>();
+    if app.get_webview_window("league-ongoing").is_some() {
+        return Ok(());
+    }
+    lifecycle.bootstrapping.store(true, Ordering::SeqCst);
+    lifecycle.ready.store(false, Ordering::SeqCst);
+    if let Err(error) = build_league_ongoing_window(app) {
+        lifecycle.bootstrapping.store(false, Ordering::SeqCst);
+        return Err(error);
+    }
+    Ok(())
 }
 
 async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), String> {
@@ -143,31 +188,15 @@ async fn show_league_ongoing(app: AppHandle, request_focus: bool) -> Result<(), 
         }
         return Ok(());
     }
-    let content_protected = app
-        .state::<LeaguePrivacyLifecycle>()
-        .content_protected
-        .load(Ordering::SeqCst);
     lifecycle.bootstrapping.store(true, Ordering::SeqCst);
-    let build_result = WebviewWindowBuilder::new(
-        &app,
-        "league-ongoing",
-        WebviewUrl::App("ongoing.html".into()),
-    )
-    .title("MaxGameStudio · League 实时对局")
-    .inner_size(1360.0, 840.0)
-    .min_inner_size(980.0, 640.0)
-    .resizable(true)
-    .decorations(true)
-    .background_color(Color(17, 18, 20, 255))
-    .visible(false)
-    .focused(false)
-    .content_protected(content_protected)
-    .build();
-    if let Err(error) = build_result {
+    if let Err(error) = build_league_ongoing_window(&app) {
         lifecycle.bootstrapping.store(false, Ordering::SeqCst);
         lifecycle.ready.store(false, Ordering::SeqCst);
-        return Err(error.to_string());
+        return Err(error);
     }
+    // A window can be created by a future retry after an earlier bootstrap
+    // was destroyed; never carry the old ready bit into that new WebView.
+    lifecycle.ready.store(false, Ordering::SeqCst);
     Ok(())
 }
 
@@ -1125,6 +1154,14 @@ pub fn run() {
             }
             tray.build(app)?;
 
+            // Prime the independent live-game WebView while the app is
+            // starting. It stays invisible until React acknowledges its first
+            // committed frame, then GameStart/InProgress only toggles native
+            // visibility instead of creating a WebView on the game path.
+            if let Err(error) = prime_league_ongoing_window(app.handle()) {
+                eprintln!("failed to prime League ongoing window: {error}");
+            }
+
             // Start the backend on a worker thread so the window (and its
             // "connecting to backend" splash) appears immediately instead of
             // after the Python process answers HTTP.
@@ -1387,6 +1424,44 @@ mod tests {
         let end = command
             .find("#[tauri::command]")
             .expect("next command should delimit ongoing builder");
+        assert!(!command[..end].contains(".always_on_top(true)"));
+    }
+
+    #[test]
+    fn setup_primes_the_ongoing_window_before_the_first_phase_event() {
+        let source = include_str!("lib.rs");
+        let setup = source
+            .split_once(".setup(|app|")
+            .map(|(_, body)| body)
+            .expect("Tauri setup should exist");
+        let setup_body = setup
+            .split_once(".build(tauri::generate_context!())")
+            .map(|(body, _)| body)
+            .expect("setup should finish before the app build");
+        assert!(
+            setup_body.contains("prime_league_ongoing_window"),
+            "ongoing must be pre-created during app setup"
+        );
+
+        let start = source
+            .find("fn prime_league_ongoing_window")
+            .expect("ongoing priming helper should exist");
+        let helper = &source[start..];
+        assert!(helper.contains("WebviewUrl::App(\"ongoing.html\".into())"));
+        assert!(helper.contains(".visible(false)"));
+        assert!(helper.contains(".transparent(true)"));
+    }
+
+    #[test]
+    fn mini_window_is_not_created_always_on_top() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("async fn show_league_mini")
+            .expect("mini window builder should exist");
+        let command = &source[start..];
+        let end = command
+            .find("#[tauri::command]")
+            .expect("next command should delimit mini builder");
         assert!(!command[..end].contains(".always_on_top(true)"));
     }
 }

@@ -1100,6 +1100,8 @@ def _send_text_to_foreground_league_game(text: str) -> int:
 
 class LeagueLabService:
     _SNAPSHOT_CACHE_TTL_SECONDS = 0.35
+    _DODGE_CONFIRM_ATTEMPTS = 8
+    _DODGE_CONFIRM_INTERVAL_SECONDS = 0.05
 
     def __init__(self) -> None:
         self.settings = self._load_settings()
@@ -1665,6 +1667,82 @@ class LeagueLabService:
         except Exception as exc:  # pragma: no cover - concrete transport errors vary by client
             return False, f"write-failed: {type(exc).__name__}"
         return True, None
+
+    @staticmethod
+    def _is_missing_champ_select_session_error(exc: BaseException) -> bool:
+        """Return whether an LCU session read proves the session disappeared.
+
+        ``request`` deliberately exposes a small, transport-neutral
+        ``RuntimeError`` to callers, but keeps an ``HTTPStatusError`` as its
+        cause.  Prefer that status code and retain a conservative text
+        fallback for test doubles/older callers.  A timeout, connection
+        failure, or arbitrary 5xx must not be mistaken for a completed dodge.
+        """
+
+        cause = getattr(exc, "__cause__", None)
+        response = getattr(cause, "response", None)
+        if getattr(response, "status_code", None) == 404:
+            return True
+        message = str(exc).casefold()
+        return "404" in message or "not found" in message or "不存在" in message
+
+    async def _wait_for_dodge_completion(self) -> tuple[bool, str | None]:
+        """Wait briefly for fresh evidence that the dodge actually completed.
+
+        The write endpoint returning successfully only means that LCU accepted
+        the request.  Success is reported to the UI only after a fresh phase
+        leaves ``ChampSelect`` or the champion-select session is confirmed to
+        be gone.  The bounded window prevents a stuck client from holding the
+        request forever; callers can then expose the error and offer the
+        cancellable loop path.
+        """
+
+        last_error: str | None = None
+        for attempt in range(self._DODGE_CONFIRM_ATTEMPTS):
+            try:
+                phase = str(await self.request("GET", "/lol-gameflow/v1/gameflow-phase") or "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - transport-specific
+                last_error = f"phase-check-failed: {type(exc).__name__}"
+            else:
+                if phase != "ChampSelect":
+                    # Keep the public snapshot honest without invoking the
+                    # broad refresh path (which can issue unrelated reads).
+                    self.phase = phase
+                    return True, None
+                try:
+                    session = await self.request("GET", "/lol-champ-select/v1/session")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # pragma: no cover - transport-specific
+                    if self._is_missing_champ_select_session_error(exc):
+                        return True, None
+                    last_error = f"session-check-failed: {type(exc).__name__}"
+                else:
+                    # A 204/empty response is the other LCU representation of
+                    # a session that has already disappeared.  A dictionary,
+                    # including an empty one, remains an active session.
+                    if session is None:
+                        return True, None
+                    last_error = "champ-select-session-still-present"
+            if attempt + 1 < self._DODGE_CONFIRM_ATTEMPTS:
+                await asyncio.sleep(self._DODGE_CONFIRM_INTERVAL_SECONDS)
+        return False, last_error or "completion-timeout"
+
+    def _record_dodge_completion(self) -> None:
+        now = time.time()
+        self.last_action = "已执行一次英雄选择秒退"
+        self.last_action_at = now
+        self._dodge_loop_state = {
+            "active": False,
+            "attempts": 1,
+            "concurrency": 5,
+            "started_at": now,
+            "stopped_at": now,
+            "stop_reason": "phase-exited",
+            "last_error": None,
+        }
 
     async def _run_dodge_loop_worker(self, cancel_event: asyncio.Event) -> str:
         while not cancel_event.is_set():
@@ -7858,6 +7936,60 @@ _ongoing_deferred: dict[str, asyncio.Task] = {}
 _ongoing_background_full: dict[str, asyncio.Task] = {}
 
 
+def _cancel_stale_ongoing_tasks(cache_key: str) -> None:
+    """Stop detached enrichment work that belongs to an older game/phase."""
+    for tasks in (_ongoing_background_full, _ongoing_deferred):
+        for key, task in list(tasks.items()):
+            if key != cache_key and task is not None and not task.done():
+                task.cancel()
+
+
+def _publish_ongoing_player_progress(cache_key: str, player: dict) -> bool:
+    """Publish one completed player without waiting for the slowest history call.
+
+    Snapshot requests seed the cache with the live roster.  Full enrichment is
+    intentionally detached from that request, so replacing one placeholder at
+    a time lets the renderer promote cards as soon as their own LCU/SGP reads
+    finish.  The key check is the generation boundary: a late result from a
+    previous phase/game must never overwrite the current snapshot.
+    """
+    if _ongoing_cache.get("key") != cache_key or not isinstance(player, dict):
+        return False
+    payload = _ongoing_cache.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    puuid = str(player.get("puuid") or "")
+    if not puuid:
+        return False
+    current = payload.get("players") or []
+    players = [dict(row) for row in current if isinstance(row, dict)]
+    replaced = False
+    for index, row in enumerate(players):
+        if str(row.get("puuid") or "") == puuid:
+            players[index] = dict(player)
+            replaced = True
+            break
+    if not replaced:
+        players.append(dict(player))
+    team_tags = _ongoing_win_rate_team_tags(players)
+    analysis = _ongoing_analysis_payload(players, team_tags)
+    _ongoing_cache["payload"] = {
+        **payload,
+        "players": players,
+        "teams": {
+            team: list(info.get("players") or [])
+            for team, info in analysis.get("teams", {}).items()
+        },
+        "analysis": analysis,
+        "team_tags": team_tags,
+        "available": bool(players),
+        "partial": True,
+        "snapshot": False,
+    }
+    _ongoing_cache["kind"] = "partial"
+    return True
+
+
 def _consume_ongoing_task(task: asyncio.Task, label: str) -> None:
     """Consume detached task failures so asyncio never reports them unhandled."""
     try:
@@ -7976,6 +8108,8 @@ async def _league_ongoing_game_impl(*, snapshot: bool = False, force_refresh: bo
         ],
         ensure_ascii=False,
     )
+    if cache_key != _ongoing_cache.get("key"):
+        _cancel_stale_ongoing_tasks(cache_key)
     start_generation = int(_ongoing_cache.get("generation") or 0)
     if (
         not force_refresh
@@ -8214,7 +8348,28 @@ async def _league_ongoing_game_impl(*, snapshot: bool = False, force_refresh: bo
             "data_availability": data_availability,
             "load_state": "partial" if deferred_fields else "ready",
             }, history or {})
-    enriched = await asyncio.gather(*(enrich(row) for row in selections))
+    async def enrich_with_index(index: int, row: dict):
+        try:
+            return index, await enrich(row)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A malformed participant must not prevent the remaining cards
+            # from being published progressively.
+            logger.exception("ongoing player enrichment failed")
+            return index, (None, None)
+
+    enriched_by_index = [(None, None)] * len(selections)
+    tasks = [
+        asyncio.create_task(enrich_with_index(index, row))
+        for index, row in enumerate(selections)
+    ]
+    for task in asyncio.as_completed(tasks):
+        index, value = await task
+        enriched_by_index[index] = value
+        if value[0]:
+            _publish_ongoing_player_progress(cache_key, value[0])
+    enriched = enriched_by_index
     players = [result[0] for result in enriched if result[0]]
     histories = {result[0]["puuid"]: result[1] for result in enriched if result[0] and result[0].get("puuid")}
     premade_groups = _infer_premade_groups(
@@ -9972,21 +10127,21 @@ async def league_set_auto_select_temporarily_disabled(body: AutoSelectTemporaryD
 async def league_champ_select_dodge(body: ChampSelectDodgeRequest):
     _require_toolkit_account_actions()
     try:
-        phase = str(await league_lab_service.request("GET", "/lol-gameflow/v1/gameflow-phase") or "")
-        if phase != "ChampSelect":
-            raise HTTPException(status_code=409, detail="当前不在英雄选择阶段")
-        await league_lab_service.request(
-            "POST",
-            "/lol-login/v1/session/invoke",
-            params={
-                "destination": "lcdsServiceProxy",
-                "method": "call",
-                "args": '["", "teambuilder-draft", "quitV2", ""]',
-            },
-            json_body={"data": ["", "teambuilder-draft", "quitV2", ""]},
-        )
-        league_lab_service.last_action = "已执行一次英雄选择秒退"
-        league_lab_service.last_action_at = time.time()
+        ok, reason = await league_lab_service._dodge_once_with_revalidation()
+        if not ok:
+            if reason == "phase-exited":
+                raise HTTPException(status_code=409, detail="当前不在英雄选择阶段")
+            raise HTTPException(status_code=409, detail=f"秒退请求未执行：{reason or '未知错误'}")
+        confirmed, confirmation_error = await league_lab_service._wait_for_dodge_completion()
+        if not confirmed:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "秒退请求已发送，但未在限定时间内确认英雄选择会话已结束；"
+                    f"请重新检测后再试（{confirmation_error or '未知错误'}）"
+                ),
+            )
+        league_lab_service._record_dodge_completion()
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -9999,12 +10154,31 @@ async def league_champ_select_dodge_loop_start(body: ChampSelectDodgeLoopRequest
     """Start the explicitly confirmed, cancellable five-worker dodge loop."""
 
     _require_toolkit_account_actions()
+    if league_lab_service._dodge_loop_task is not None and not league_lab_service._dodge_loop_task.done():
+        raise HTTPException(status_code=409, detail="秒退循环已经在运行")
     try:
-        await _require_live_phase("ChampSelect")
-    except HTTPException:
-        raise
-    try:
+        ok, reason = await league_lab_service._dodge_once_with_revalidation()
+        if not ok:
+            if reason == "phase-exited":
+                raise HTTPException(status_code=409, detail="当前不在英雄选择阶段")
+            raise HTTPException(status_code=409, detail=f"秒退请求未执行：{reason or '未知错误'}")
+        confirmed, confirmation_error = await league_lab_service._wait_for_dodge_completion()
+        if confirmed:
+            league_lab_service._record_dodge_completion()
+            return league_lab_service.status()
+
+        # The first request was synchronous, but the client did not expose
+        # completion evidence in the short bounded window.  Continue only via
+        # the existing cancellable loop and make the uncertain state visible;
+        # this response is deliberately an error, never a success claim.
         league_lab_service.start_dodge_loop()
+        message = (
+            "秒退请求已发送，但暂未确认英雄选择会话已结束；"
+            "秒退循环仍在运行，可随时取消。"
+            f"（{confirmation_error or '未知错误'}）"
+        )
+        league_lab_service._dodge_loop_state["last_error"] = message
+        raise HTTPException(status_code=409, detail=message)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return league_lab_service.status()

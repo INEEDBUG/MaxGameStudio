@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..env_utils import resolve_config_path
@@ -52,6 +52,11 @@ class StretchRequest(BaseModel):
     confirmed: bool = False
     timeout_seconds: int = Field(default=20, ge=10, le=60)
     lock_cfg: bool = True
+    path: str | None = Field(default=None, max_length=2048)
+
+
+class CfgPathRequest(BaseModel):
+    path: str | None = Field(default=None, max_length=2048)
 
 
 class CrosshairProfilesPayload(BaseModel):
@@ -133,7 +138,7 @@ def _decode_code(code: str) -> tuple[str, dict[str, dict[str, Any]]]:
         raise HTTPException(status_code=422, detail=f"invalid VALORANT crosshair code: {exc}") from exc
 
 
-def _frontend_display_status() -> dict[str, Any]:
+def _frontend_display_status(cfg_path: str | None = None) -> dict[str, Any]:
     recovery = display_mode_session.recover_if_needed()
     snapshot = collect_display_status()
     modes = enumerate_display_modes()
@@ -150,7 +155,7 @@ def _frontend_display_status() -> dict[str, Any]:
     snapshot["display_mode_session"] = display_mode_session.status()
     snapshot["display_recovery"] = recovery
     snapshot["monitor"]["status"] = "ready" if snapshot.get("safe_to_skip_disable") else snapshot["monitor"].get("status", "unknown")
-    snapshot["cfg_status"] = _cfg_status()
+    snapshot["cfg_status"] = _cfg_status(path=cfg_path)
     return snapshot
 
 
@@ -170,9 +175,9 @@ def _current_resolution(values: dict[str, Any]) -> dict[str, int] | None:
     return None
 
 
-def _cfg_status(width: int | None = None, height: int | None = None) -> dict[str, Any]:
+def _cfg_status(width: int | None = None, height: int | None = None, path: str | None = None) -> dict[str, Any]:
     try:
-        status = _game_user_settings.status()
+        status = _game_user_settings.status(path) if path is not None else _game_user_settings.status()
     except GameUserSettingsNotFoundError:
         return {
             "found": False,
@@ -189,6 +194,11 @@ def _cfg_status(width: int | None = None, height: int | None = None) -> dict[str
             "current_resolution": None,
             "can_unlock": False,
             "can_restore": False,
+        }
+    if not status.get("found") and path is None:
+        status["discovery"] = _game_user_settings.discovery_status()
+        status["generation_hint"] = status["discovery"].get("reason") in {
+            "config_root_missing", "no_profiles", "settings_file_missing", "windows_config_missing",
         }
     if status.get("found"):
         try:
@@ -234,9 +244,9 @@ def _cfg_http_error(exc: GameUserSettingsError) -> HTTPException:
 
 
 @router.get("/display/status")
-async def display_status(request: Request):
+async def display_status(request: Request, path: str | None = Query(default=None, max_length=2048)):
     _require_session(request)
-    return _frontend_display_status()
+    return _frontend_display_status(path)
 
 
 @router.get("/presets")
@@ -283,17 +293,20 @@ async def apply_stretch(body: StretchRequest, request: Request):
     refresh = body.refresh_hz or snapshot.get("refresh_rate", {}).get("value")
     cfg_changed = False
     try:
-        _game_user_settings.set_resolution(body.width, body.height)
+        if body.path is None:
+            _game_user_settings.set_resolution(body.width, body.height)
+        else:
+            _game_user_settings.set_resolution(body.width, body.height, body.path)
         cfg_changed = True
         if body.lock_cfg:
-            _game_user_settings.lock()
+            _game_user_settings.lock(body.path) if body.path is not None else _game_user_settings.lock()
         else:
-            _game_user_settings.unlock()
+            _game_user_settings.unlock(body.path) if body.path is not None else _game_user_settings.unlock()
         result = display_mode_session.apply(body.width, body.height, refresh, body.timeout_seconds)
     except GameUserSettingsError as exc:
         if cfg_changed:
             try:
-                _game_user_settings.restore_latest_backup()
+                _game_user_settings.restore_latest_backup(body.path) if body.path is not None else _game_user_settings.restore_latest_backup()
             except GameUserSettingsError as rollback_exc:
                 raise HTTPException(
                     status_code=500,
@@ -303,7 +316,7 @@ async def apply_stretch(body: StretchRequest, request: Request):
     except RuntimeError as exc:
         if cfg_changed:
             try:
-                _game_user_settings.restore_latest_backup()
+                _game_user_settings.restore_latest_backup(body.path) if body.path is not None else _game_user_settings.restore_latest_backup()
             except GameUserSettingsError as rollback_exc:
                 raise HTTPException(
                     status_code=500,
@@ -313,11 +326,11 @@ async def apply_stretch(body: StretchRequest, request: Request):
     if not result.get("applied"):
         if cfg_changed:
             try:
-                _game_user_settings.restore_latest_backup()
+                _game_user_settings.restore_latest_backup(body.path) if body.path is not None else _game_user_settings.restore_latest_backup()
             except GameUserSettingsError as rollback_exc:
                 raise HTTPException(status_code=500, detail={"code": "cfg_rollback_failed", "message": str(rollback_exc)}) from rollback_exc
         raise HTTPException(status_code=409, detail=result)
-    result["cfg_status"] = _cfg_status(body.width, body.height)
+    result["cfg_status"] = _cfg_status(body.width, body.height, body.path)
     return result
 
 
@@ -334,23 +347,25 @@ async def restore_stretch(request: Request):
 
 
 @router.post("/stretch/cfg/unlock")
-async def unlock_stretch_cfg(request: Request):
+async def unlock_stretch_cfg(request: Request, body: CfgPathRequest | None = None):
     _require_session(request)
     try:
-        _game_user_settings.unlock()
+        path = body.path if body else None
+        _game_user_settings.unlock(path) if path is not None else _game_user_settings.unlock()
     except GameUserSettingsError as exc:
         raise _cfg_http_error(exc) from exc
-    return {"cfg_status": _cfg_status()}
+    return {"cfg_status": _cfg_status(path=path)}
 
 
 @router.post("/stretch/cfg/restore")
-async def restore_stretch_cfg(request: Request):
+async def restore_stretch_cfg(request: Request, body: CfgPathRequest | None = None):
     _require_session(request)
     try:
-        restored = _game_user_settings.restore_latest_backup()
+        path = body.path if body else None
+        restored = _game_user_settings.restore_latest_backup(path) if path is not None else _game_user_settings.restore_latest_backup()
     except GameUserSettingsError as exc:
         raise _cfg_http_error(exc) from exc
-    return {"restored": True, "backup_path": restored.get("backup_path"), "cfg_status": _cfg_status()}
+    return {"restored": True, "backup_path": restored.get("backup_path"), "cfg_status": _cfg_status(path=path)}
 
 
 @router.post("/display/open-device-manager")

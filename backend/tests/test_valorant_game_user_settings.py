@@ -530,3 +530,18 @@ def test_backup_path_outside_configured_root_is_rejected(tmp_path: Path):
     )
 
     assert service._manifests() == []
+
+
+def test_discovery_status_explains_first_run_generation(tmp_path: Path):
+    service = settings.ValorantGameUserSettingsService(tmp_path / "missing")
+    result = service.discovery_status()
+    assert result["state"] == "not_found"
+    assert result["reason"] == "config_root_missing"
+
+
+def test_status_reports_explicit_invalid_path_instead_of_silent_not_found(tmp_path: Path):
+    service, path, _flags = _service(tmp_path)
+    result = service.status(tmp_path / "outside.ini")
+    assert result["found"] is False
+    assert result["state"] == "error"
+    assert "path is outside" in result["error"]

@@ -819,6 +819,10 @@ body {
   overflow: hidden;
   padding: 8px 12px;
 }
+.mini-opacity-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 8px 7px; color: rgba(161, 161, 170, 0.9); font-size: 11px; }
+.mini-opacity-row label { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 8px; }
+.mini-opacity-row label span { color: rgba(244, 244, 245, 0.86); font-variant-numeric: tabular-nums; }
+.mini-opacity-row input { width: 116px; accent-color: #34d399; }
 
 .mini-content-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.28) transparent; }
 .mini-content-scroll::-webkit-scrollbar { width: 6px; }

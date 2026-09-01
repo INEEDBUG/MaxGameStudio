@@ -1,14 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LeagueAdvancedToolkit from "./LeagueAdvancedToolkit";
-import { createLeagueQueueLobby, fetchLeagueGamePreview, fetchLeagueMatchDetails, runLeagueProfileUtilityAction } from "../../api/leagueLabApi";
+import { fetchLeagueGamePreview, fetchLeagueMatchDetails, runLeagueProfileUtilityAction } from "../../api/leagueLabApi";
 
 vi.mock("../../api/leagueLabApi", () => ({
-  fetchLeagueLobbyOptions: vi.fn().mockResolvedValue({
-    queues: [{ id: 420, name: "单双排", eligible: true }],
-    lobby: { gameConfig: { queueId: 420 } },
-    strawberry: { active: false, maps: [], difficulties: [1,2,3], loadout_available: false },
-  }),
   fetchLeagueChampions: vi.fn().mockResolvedValue({ champions: [{ id: 22, name: "艾希" }] }),
   fetchLeagueProfileSkins: vi.fn().mockResolvedValue({ skins: [] }),
   fetchLeagueGamePreview: vi.fn().mockResolvedValue({
@@ -28,11 +23,6 @@ vi.mock("../../api/leagueLabApi", () => ({
     frames: [],
     events: [],
   }),
-  createLeagueQueueLobby: vi.fn().mockResolvedValue({ created: true }),
-  leaveLeagueLobby: vi.fn(),
-  updateLeagueStrawberryPlayer: vi.fn(),
-  updateLeagueStrawberryMap: vi.fn(),
-  updateLeagueStrawberryDifficulty: vi.fn(),
   updateLeagueProfileBackground: vi.fn(),
   runLeagueProfileUtilityAction: vi.fn().mockResolvedValue({ applied: true }),
 }));
@@ -42,26 +32,17 @@ const props={busy:false,onBusyChange:vi.fn(),onError:vi.fn()};
 describe("LeagueAdvancedToolkit",()=>{
   beforeEach(()=>{vi.clearAllMocks();window.prompt=vi.fn();});
 
-  it("keeps lobby and profile writes disabled until the account gate is enabled",async()=>{
+  it("does not expose removed room or unlimited-rush tools",async()=>{
     render(<LeagueAdvancedToolkit {...props} enabled={false}/>);
-    await screen.findByText(/单双排/);
-    fireEvent.change(screen.getByRole("combobox",{name:"房间队列"}),{target:{value:"420"}});
-    expect(screen.getByRole("button",{name:"创建房间"}).disabled).toBe(true);
+    await screen.findByText("任意 Game ID 对局预览");
+    expect(screen.queryByText("房间工具")).toBeNull();
+    expect(screen.queryByText("无尽狂潮工具")).toBeNull();
     expect(screen.getByRole("button",{name:"清空全部表情槽位"}).disabled).toBe(true);
-  });
-
-  it("creates only the selected eligible queue after the exact phrase",async()=>{
-    render(<LeagueAdvancedToolkit {...props} enabled/>);
-    await screen.findByText(/单双排/);
-    fireEvent.change(screen.getByRole("combobox",{name:"房间队列"}),{target:{value:"420"}});
-    window.prompt.mockReturnValueOnce("我确认创建");
-    fireEvent.click(screen.getByRole("button",{name:"创建房间"}));
-    await waitFor(()=>expect(createLeagueQueueLobby).toHaveBeenCalledWith(420,"我确认创建"));
   });
 
   it("requires the profile modification phrase for utility actions",async()=>{
     render(<LeagueAdvancedToolkit {...props} enabled/>);
-    await screen.findByText(/单双排/);
+    await screen.findByText("任意 Game ID 对局预览");
     window.prompt.mockReturnValueOnce("错误");
     fireEvent.click(screen.getByRole("button",{name:"清空全部表情槽位"}));
     expect(runLeagueProfileUtilityAction).not.toHaveBeenCalled();
@@ -73,7 +54,7 @@ describe("LeagueAdvancedToolkit",()=>{
   it("loads an arbitrary game and passes the exact read-only draft to the ongoing panel without preloading details",async()=>{
     const onDryRunGame=vi.fn();
     render(<LeagueAdvancedToolkit {...props} enabled={false} onDryRunGame={onDryRunGame}/>);
-    await screen.findByText(/单双排/);
+    await screen.findByText("任意 Game ID 对局预览");
     fireEvent.change(screen.getByRole("textbox",{name:"Game ID"}),{target:{value:"123"}});
     fireEvent.click(screen.getByRole("button",{name:"查看对局"}));
     await waitFor(()=>expect(fetchLeagueGamePreview).toHaveBeenCalledWith(123,"auto",true));
@@ -102,7 +83,7 @@ describe("LeagueAdvancedToolkit",()=>{
       { participant_id: 6, puuid: "enemy", team_id: 200, champion_id: 3, game_name: "对手" },
     ], frames: [], events: [], frame_count: 0, event_count: 0 });
     render(<LeagueAdvancedToolkit {...props} enabled={false} onOpenPlayer={onOpenPlayer}/>);
-    await screen.findByText(/单双排/);
+    await screen.findByText("任意 Game ID 对局预览");
     fireEvent.change(screen.getByRole("textbox",{name:"Game ID"}),{target:{value:"123"}});
     fireEvent.click(screen.getByRole("button",{name:"查看对局"}));
     await screen.findByRole("button",{name:"查看完整详情"});
@@ -120,7 +101,7 @@ describe("LeagueAdvancedToolkit",()=>{
   it("keeps an inline error when full details cannot be loaded",async()=>{
     fetchLeagueMatchDetails.mockRejectedValueOnce({ response: { data: { detail: "详情服务暂不可用" } } });
     render(<LeagueAdvancedToolkit {...props} enabled={false}/>);
-    await screen.findByText(/单双排/);
+    await screen.findByText("任意 Game ID 对局预览");
     fireEvent.change(screen.getByRole("textbox",{name:"Game ID"}),{target:{value:"123"}});
     fireEvent.click(screen.getByRole("button",{name:"查看对局"}));
     fireEvent.click(await screen.findByRole("button",{name:"查看完整详情"}));

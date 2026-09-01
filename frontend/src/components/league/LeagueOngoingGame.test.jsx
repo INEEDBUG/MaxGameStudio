@@ -53,6 +53,17 @@ describe("LeagueOngoingGame", () => {
     expect(fetchLeagueLabStatus).not.toHaveBeenCalled();
   });
 
+  it("renders the roster snapshot before the optional privacy status request resolves", async () => {
+    let resolveStatus;
+    fetchLeagueLabStatus.mockReturnValueOnce(new Promise((resolve) => { resolveStatus = resolve; }));
+
+    render(<LeagueOngoingGame />);
+
+    expect(await screen.findByText("Tester")).toBeTruthy();
+    expect(fetchLeagueLabStatus).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveStatus({ settings: { streamer_mode_enabled: false, streamer_mode_use_aliases: false } }); });
+  });
+
   it("keeps the compact player metric strip on a dark surface in light mode", async () => {
     document.documentElement.dataset.theme = "light";
     render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
@@ -118,9 +129,11 @@ describe("LeagueOngoingGame", () => {
       const { unmount } = render(<LeagueOngoingGame streamerMode={false} useAliases={false} />);
       await act(async () => { await Promise.resolve(); });
       expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      const callsBeforeUnmount = fetchLeagueOngoingGame.mock.calls.length;
       unmount();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(1);
+      expect(fetchLeagueOngoingGame).toHaveBeenCalledTimes(callsBeforeUnmount);
     } finally {
       vi.useRealTimers();
     }

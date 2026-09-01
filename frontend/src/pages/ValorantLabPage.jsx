@@ -36,6 +36,7 @@ import {
   unlockValorantStretchCfg,
 } from "../api/valorantLabApi";
 import { useT } from "../i18n/useT.js";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 import {
   CROSSHAIR_COLORS,
   DEFAULT_CROSSHAIR_PROFILES,
@@ -253,6 +254,9 @@ function readCfgStatus(value) {
     canRestore: raw.can_restore === true,
     location: [raw.profile, raw.windows_dir].filter(Boolean).join(" / "),
     warning: raw.error || "",
+    discovery: raw.discovery || null,
+    generationHint: raw.generation_hint === true,
+    path: raw.path || "",
   };
 }
 
@@ -299,7 +303,7 @@ function requestErrorDetail(error) {
   return String(detail);
 }
 
-function CfgStatusPanel({ cfgStatus, target, cfgAction, onUnlock, onRestore, t }) {
+function CfgStatusPanel({ cfgStatus, target, cfgAction, onUnlock, onRestore, onChoose, onRedetect, detecting, t }) {
   const statusLabelKey = CFG_STATUS_LABEL_KEYS[cfgStatus.status] || CFG_STATUS_LABEL_KEYS.unknown;
   const statusLabel = t(statusLabelKey);
   return (
@@ -314,7 +318,13 @@ function CfgStatusPanel({ cfgStatus, target, cfgAction, onUnlock, onRestore, t }
         <div className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-2"><dt className="text-[9px] font-bold uppercase tracking-[0.12em] text-cs2-text-muted">{t("valorant.cfg.status")}</dt><dd className="mt-1 truncate text-xs font-semibold text-cs2-text-primary">{statusLabel}</dd></div>
       </dl>
       {cfgStatus.location ? <div className="mt-2 truncate text-[10px] text-cs2-text-muted" title={cfgStatus.location}>{t("valorant.cfg.path")}: {cfgStatus.location}</div> : null}
+      {cfgStatus.path && !cfgStatus.location ? <div className="mt-2 truncate text-[10px] text-cs2-text-muted" title={cfgStatus.path}>{t("valorant.cfg.path")}: {cfgStatus.path}</div> : null}
       {cfgStatus.warning ? <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-2.5 py-2 text-[10px] leading-4 text-amber-100/80">{cfgStatus.warning}</div> : null}
+      {cfgStatus.generationHint ? <div className="mt-2 rounded-lg border border-sky-300/20 bg-sky-300/[0.05] px-2.5 py-2 text-[10px] leading-4 text-sky-100/80">{t("valorant.cfg.generationHint")}</div> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={onChoose} disabled={Boolean(cfgAction) || detecting} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-accent/30 bg-cs2-accent-soft px-2.5 py-2 text-[10px] font-semibold text-cs2-accent transition-[background-color,transform] duration-150 hover:bg-cs2-accent/20 disabled:cursor-wait disabled:opacity-60">{t("valorant.cfg.choose")}</button>
+        <button type="button" onClick={onRedetect} disabled={Boolean(cfgAction) || detecting} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[10px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover disabled:cursor-wait disabled:opacity-60"><RefreshCw className={cn("h-3 w-3", detecting && "motion-safe:animate-spin")} />{t("valorant.cfg.redetect")}</button>
+      </div>
       {cfgStatus.canUnlock || cfgStatus.canRestore ? <div className="mt-3 flex flex-wrap gap-2">
         {cfgStatus.canUnlock ? <button type="button" onClick={onUnlock} disabled={Boolean(cfgAction)} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[10px] font-semibold text-cs2-text-secondary transition-[background-color,transform] duration-150 hover:bg-cs2-bg-hover active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"><Unlock className="h-3.5 w-3.5" />{cfgAction === "unlock" ? t("valorant.cfg.unlocking") : t("valorant.cfg.unlock")}</button> : null}
         {cfgStatus.canRestore ? <button type="button" onClick={onRestore} disabled={Boolean(cfgAction)} className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[10px] font-semibold text-cs2-text-secondary transition-[background-color,transform] duration-150 hover:bg-cs2-bg-hover active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5" />{cfgAction === "restore" ? t("valorant.cfg.restoring") : t("valorant.cfg.restore")}</button> : null}
@@ -340,18 +350,20 @@ function StretchWizard({ t }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [gameRunningError, setGameRunningError] = useState(false);
+  const [cfgPath, setCfgPath] = useState("");
+  const cfgPathRef = useRef("");
   const resolution = useMemo(() => resolutionFromSelection(selection, custom), [selection, custom]);
   const statusReady = isDisplayStatusReady(displayStatus);
   const cfgStatus = readCfgStatus(displayStatus.cfg_status);
   const statusLabel = (status) => t("valorant.status." + (status || "unknown"));
 
-  const detect = useCallback(async () => {
+  const detect = useCallback(async (selectedPath = cfgPathRef.current || null) => {
     setDetecting(true);
     setNotice("");
     setError("");
     setGameRunningError(false);
     try {
-      setDisplayStatus(normalizeDisplayPayload(await fetchValorantDisplayStatus()));
+      setDisplayStatus(normalizeDisplayPayload(await fetchValorantDisplayStatus(selectedPath)));
     } catch (requestError) {
       setDisplayStatus(DEFAULT_DISPLAY_STATUS);
       const gameRunning = isGameRunning409(requestError);
@@ -396,7 +408,7 @@ function StretchWizard({ t }) {
     setError("");
     setGameRunningError(false);
     try {
-      await prepareValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched" });
+      await prepareValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched", path: cfgPath || null });
       setPrepared(true);
       setNotice(t("valorant.prepareSuccess"));
     } catch (requestError) {
@@ -419,7 +431,7 @@ function StretchWizard({ t }) {
     setError("");
     setGameRunningError(false);
     try {
-      const result = await applyValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched", confirmed: true, timeout_seconds: 20, lock_cfg: lockCfg });
+      const result = await applyValorantStretch({ width: resolution.width, height: resolution.height, preset: resolution.preset, mode: "real-stretched", confirmed: true, timeout_seconds: 20, lock_cfg: lockCfg, path: cfgPath || null });
       const nextCfgStatus = preserveCfgStatus(result);
       if (nextCfgStatus !== undefined) setDisplayStatus((current) => mergeCfgStatus(current, nextCfgStatus));
       setRollbackDeadline(result?.rollback_deadline || null);
@@ -476,7 +488,7 @@ function StretchWizard({ t }) {
     setError("");
     setGameRunningError(false);
     try {
-      const result = await request();
+      const result = await request(cfgPath || null);
       const nextCfgStatus = preserveCfgStatus(result);
       if (nextCfgStatus !== undefined) setDisplayStatus((current) => mergeCfgStatus(current, nextCfgStatus));
       setNotice(t(successKey));
@@ -495,6 +507,19 @@ function StretchWizard({ t }) {
 
   function restoreCfg() {
     return runCfgAction("restore", restoreValorantStretchCfg, "valorant.cfg.restoreSuccess");
+  }
+
+  async function chooseCfg() {
+    if (!desktopBridge?.showOpenDialog) {
+      setError(t("valorant.cfg.chooseDesktopOnly"));
+      return;
+    }
+    const result = await desktopBridge.showOpenDialog({ title: t("valorant.cfg.choose"), properties: ["openFile"], filters: [{ name: "GameUserSettings.ini", extensions: ["ini"] }] });
+    const selected = result?.canceled ? "" : result?.filePaths?.[0] || "";
+    if (!selected) return;
+    cfgPathRef.current = selected;
+    setCfgPath(selected);
+    await detect(selected);
   }
 
   async function openDeviceManager() {
@@ -531,7 +556,7 @@ function StretchWizard({ t }) {
             <button type="button" aria-pressed={selection === "custom"} onClick={() => setSelection("custom")} className={cn("flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.98]", selection === "custom" ? "border-cs2-accent/55 bg-cs2-accent-soft text-cs2-text-primary" : "border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-secondary hover:bg-cs2-bg-hover")}><span className="text-xs font-bold">{t("valorant.stretch.custom")}</span><SlidersHorizontal className="h-3.5 w-3.5" /></button>
           </div>
           {selection === "custom" ? <div className="mt-3 grid gap-3 sm:grid-cols-2"><NumberInput label={t("valorant.stretch.width")} value={custom.width} min={320} max={7680} suffix="px" onChange={(value) => setCustom((current) => ({ ...current, width: value }))} /><NumberInput label={t("valorant.stretch.height")} value={custom.height} min={240} max={4320} suffix="px" onChange={(value) => setCustom((current) => ({ ...current, height: value }))} /></div> : null}
-          <CfgStatusPanel cfgStatus={cfgStatus} target={getResolutionLabel(selection, custom)} cfgAction={cfgAction} onUnlock={() => void unlockCfg()} onRestore={() => void restoreCfg()} t={t} />
+          <CfgStatusPanel cfgStatus={cfgStatus} target={getResolutionLabel(selection, custom)} cfgAction={cfgAction} onUnlock={() => void unlockCfg()} onRestore={() => void restoreCfg()} onChoose={() => void chooseCfg()} onRedetect={() => void detect()} detecting={detecting} t={t} />
           <label className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] px-3.5 py-3 transition-colors duration-150 hover:bg-amber-300/[0.08]"><input type="checkbox" aria-label={t("valorant.cfg.lock")} checked={lockCfg} onChange={(event) => setLockCfg(event.target.checked)} className="mt-0.5 accent-amber-300" /><span className="min-w-0"><span className="block text-[11px] font-semibold text-amber-100">{t("valorant.cfg.lock")}</span><span className="mt-0.5 block text-[10px] leading-4 text-amber-100/75">{t("valorant.cfg.lockWarning")}</span></span></label>
         </div>
         <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3.5"><div className="flex items-center gap-2 text-xs font-bold text-amber-200"><ShieldAlert className="h-4 w-4" />{t("valorant.stretch.safetyTitle")}</div><p className="mt-2 text-[11px] leading-5 text-amber-100/75">{t("valorant.stretch.safetyBody")}</p><div className="mt-3 space-y-2 text-[10px] leading-4 text-cs2-text-secondary"><div className="flex gap-2"><span className="font-mono text-emerald-300">01</span><span>{t("valorant.stretch.stepDetect")}</span></div><div className="flex gap-2"><span className="font-mono text-sky-300">02</span><span>{t("valorant.stretch.stepPreview")}</span></div><div className="flex gap-2"><span className="font-mono text-amber-300">03</span><span>{t("valorant.stretch.stepApply")}</span></div></div></div>

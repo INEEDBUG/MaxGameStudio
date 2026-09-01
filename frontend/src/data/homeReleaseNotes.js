@@ -1,38 +1,40 @@
 // User-facing notes are intentionally bundled so the home page is available offline.
 // Keep these readable for non-technical users; engineering details belong in GitHub.
-export const HOME_RELEASE_VERSION = "3.0.5";
+export const HOME_RELEASE_VERSION = "3.0.6";
 
 export const HOME_RELEASE_NOTES = {
   zh: {
     fixed: [
-      "更新提示现在会先征求你的确认，不会在倒计时结束后自动安装。",
-      "修复首次打开软件时首页仍然只显示 CS2 上手指南的问题。",
+      "Mini 的置顶按钮现在可以正常取消置顶，并会记住你的选择。",
+      "秒退不再把普通请求返回误报为成功；只有客户端确实离开选人阶段才显示完成。",
+      "VALORANT 配置自动发现失败时会说明原因，不再只显示“未找到”。",
     ],
     added: [
-      "新增 MaxGameStudio 首页，集中展示版本公告和反馈入口。",
-      "新增独立首页侧栏入口，并保留 CS2、英雄联盟与无畏契约原有分区。",
-      "无畏契约真拉伸新增 CFG 分辨率同步、完整备份、只读锁定、解锁和恢复。",
+      "VALORANT 真拉伸可以手动选择当前账号的 GameUserSettings.ini，并继续使用同一文件完成同步、锁定和恢复。",
+      "Mini 新增透明度调节，最低保留 40% 可见度，避免窗口完全不可见。",
+      "进入 League 对局阶段后会自动显示独立实时对局窗口，离开对局或断线后自动隐藏。",
     ],
     optimized: [
-      "Bug 与需求反馈可以直接打开对应的 GitHub 表单。",
-      "新增 Pull Request 与项目仓库入口，方便查看开发进展和参与贡献。",
-      "CFG 只修改已有分辨率字段，游戏运行时不会强制写入。",
+      "实时对局先显示阵容，再逐名补齐战绩；较慢的玩家不会挡住其他卡片。",
+      "移除游戏内发送、房间/无尽狂潮、本地标签管理和设置迁移等不再保留的工具入口。",
+      "独立实时对局窗口提前在后台准备，减少进局时的白窗和首次打开等待。",
     ],
   },
   en: {
     fixed: [
-      "Updates now wait for your confirmation instead of installing after a countdown.",
-      "The first screen no longer opens the CS2-only getting-started guide.",
+      "Mini can now be unpinned correctly and remembers the choice.",
+      "Dodge no longer reports success until the client actually leaves champion select.",
+      "VALORANT CFG discovery now explains why no file was found.",
     ],
     added: [
-      "A new MaxGameStudio home page brings release news and feedback links together.",
-      "Home now has its own sidebar entry while the existing CS2, League, and VALORANT sections remain available.",
-      "VALORANT true stretch can now sync, back up, lock, unlock, and restore the active CFG resolution.",
+      "VALORANT true stretch can manually select the active GameUserSettings.ini and reuse it for sync, lock, and restore.",
+      "Mini now includes an opacity control with a safe 40% minimum.",
+      "The standalone League ongoing-game window automatically follows live game phases.",
     ],
     optimized: [
-      "Bug reports and feature requests open the matching GitHub forms directly.",
-      "Pull Request and repository links make development progress and contribution paths easier to find.",
-      "CFG sync only patches existing resolution fields and refuses writes while the game is running.",
+      "Ongoing-game cards show the roster first and enrich players independently.",
+      "Obsolete in-game-send, room/Swarm, tag-manager, and settings-transfer surfaces were removed.",
+      "The ongoing-game WebView is prepared while hidden to reduce white flashes and first-open latency.",
     ],
   },
 };

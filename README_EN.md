@@ -16,7 +16,7 @@
 > **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **The current stable release is `v3.0.5`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.5`. The CS2 workspace, League features, and VALORANT features ship in one installer.
+> **The current stable release is `v3.0.6`.** `v2.5.17` was withdrawn due to critical upgrade defects; users should upgrade directly to `v3.0.6`. The CS2 workspace, League features, and VALORANT features ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
@@ -43,10 +43,17 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ---
 
-## What's new in v3.0.5
+## What's new in v3.0.6
 
 > [!TIP]
-> This release improves the multi-game home experience and update confirmation. See the [v3.0.5 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.5) for the complete notes; the in-app updater uses a shorter, plain-language Fixes / New Features / Optimizations summary.
+> This release focuses on League Mini, dodge, and ongoing-game reliability, plus manual CFG selection for VALORANT true stretch. See the [v3.0.6 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.6) for complete notes.
+
+- **Mini pin and opacity** — Pinning can be toggled and persisted; a new 40%–100% opacity control keeps the window recoverable.
+- **Verified dodge outcome** — A successful HTTP response is no longer enough; the client must leave champion select or lose the active session before success is shown.
+- **Automatic ongoing-game window** — GameStart, InProgress, and Reconnect show the dedicated window; leaving the game or disconnecting hides it. The hidden WebView is prepared early to reduce white flashes.
+- **Progressive player data** — The roster appears first and individual cards are enriched as their data completes.
+- **Smaller League toolkit** — Obsolete in-game-send, room/Swarm, bulk tag-manager, and settings-transfer surfaces are removed.
+- **Manual VALORANT CFG selection** — Discovery failures now explain the cause and the existing true-stretch page can select a valid `GameUserSettings.ini` for sync, lock, unlock, and restore.
 
 - **Explicit update confirmation** — The updater shows both “Update now” and “Skip this version”; downloading, installing, and restarting begin only after “Update now” is clicked.
 - **Multi-game home** — The home route presents MaxGameStudio release notes instead of opening the CS2 guide as the default first screen.
@@ -198,7 +205,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
 | **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Released |
 | **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Released |
-| **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Current stable |
+| **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Released |
+| **v3.0.6 · Mini, ongoing-game, and CFG selection** | Fixes Mini pin/dodge, adds opacity and automatic ongoing windows, progressively enriches player data, and supports manual valid CFG selection | ✅ Current stable |
 
 ### Planned
 

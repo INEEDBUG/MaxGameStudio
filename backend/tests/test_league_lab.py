@@ -3271,6 +3271,93 @@ def test_ongoing_snapshot_returns_roster_before_slow_history(monkeypatch):
     assert "/lol-match-history/v1/products/lol/slow/matches" not in requests[:2]
 
 
+def test_ongoing_snapshot_publishes_fast_player_before_slow_player_finishes(monkeypatch):
+    async def request(method, path, *, json_body=None, params=None):
+        if path == "/lol-gameflow/v1/session":
+            return {
+                "phase": "InProgress",
+                "gameData": {
+                    "gameId": 9002,
+                    "queue": {"id": 450, "gameMode": "ARAM"},
+                    "teamOne": [
+                        {"puuid": "fast", "gameName": "Fast"},
+                        {"puuid": "slow", "gameName": "Slow"},
+                    ],
+                    "playerChampionSelections": [
+                        {"puuid": "fast", "championId": 1, "team": 100},
+                        {"puuid": "slow", "championId": 2, "team": 100},
+                    ],
+                },
+            }
+        if path.startswith("/lol-summoner/v2/summoners/puuid/"):
+            puuid = path.rsplit("/", 1)[-1]
+            return {"puuid": puuid, "gameName": puuid.title()}
+        if path.startswith("/lol-ranked/v1/ranked-stats/"):
+            return {}
+        if path.endswith("/fast/matches"):
+            return {"games": {"games": []}}
+        if path.endswith("/slow/matches"):
+            await asyncio.sleep(0.2)
+            return {"games": {"games": []}}
+        raise AssertionError(f"unexpected LCU request: {method} {path}")
+
+    async def champion_names():
+        return {1: "Annie", 2: "Ahri"}
+
+    async def run():
+        monkeypatch.setattr(
+            league_lab.league_lab_service,
+            "settings",
+            LeagueLabSettings(ongoing_show_jungle_pathing=False, ongoing_show_premade_tag=False),
+        )
+        monkeypatch.setattr(league_lab.league_lab_service, "phase", "InProgress")
+        monkeypatch.setattr(league_lab.league_lab_service, "request", request)
+        monkeypatch.setattr(league_lab, "_champion_names", champion_names)
+        monkeypatch.setattr(league_lab, "_read_player_tags", lambda: {})
+        monkeypatch.setattr(league_lab, "_ongoing_cache", {"key": "", "expires_at": 0.0, "payload": None})
+        monkeypatch.setattr(league_lab, "_ongoing_background_full", {})
+
+        await league_lab.league_ongoing_game(snapshot=True)
+        await asyncio.sleep(0.05)
+        early = await league_lab.league_ongoing_game(snapshot=True)
+        await asyncio.sleep(0.25)
+        return early
+
+    early = asyncio.run(run())
+    by_puuid = {row["puuid"]: row for row in early["players"]}
+    assert by_puuid["fast"]["load_state"] == "ready"
+    assert by_puuid["slow"]["load_state"] == "loading"
+
+
+def test_ongoing_snapshot_cancels_enrichment_for_previous_game(monkeypatch):
+    async def run():
+        old_finished = asyncio.Event()
+        current_finished = asyncio.Event()
+
+        async def wait_forever(done):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                done.set()
+                raise
+
+        old_task = asyncio.create_task(wait_forever(old_finished))
+        current_task = asyncio.create_task(wait_forever(current_finished))
+        # Let both coroutines reach their wait before the stale-task sweep;
+        # cancellation before the first suspension would bypass the handler.
+        await asyncio.sleep(0)
+        monkeypatch.setattr(league_lab, "_ongoing_background_full", {"old": old_task, "current": current_task})
+        monkeypatch.setattr(league_lab, "_ongoing_deferred", {})
+        league_lab._cancel_stale_ongoing_tasks("current")
+        await asyncio.sleep(0)
+        await asyncio.wait_for(old_finished.wait(), timeout=0.1)
+        assert not current_task.done()
+        current_task.cancel()
+        await asyncio.gather(old_task, current_task, return_exceptions=True)
+
+    asyncio.run(run())
+
+
 def test_toolkit_overview_is_read_only(monkeypatch):
     async def request(method, path, *, json_body=None, params=None):
         assert method == "GET"
@@ -3360,11 +3447,14 @@ def test_champ_select_dodge_is_gated_and_revalidates_live_phase(monkeypatch):
         league_lab.league_lab_service, "settings", LeagueLabSettings(toolkit_account_actions_enabled=True)
     )
     calls = []
+    phase_reads = 0
 
     async def request(method, path, *, json_body=None, params=None):
+        nonlocal phase_reads
         calls.append((method, path, json_body, params))
         if path == "/lol-gameflow/v1/gameflow-phase":
-            return "ChampSelect"
+            phase_reads += 1
+            return "ChampSelect" if phase_reads == 1 else "Lobby"
         return None
 
     monkeypatch.setattr(league_lab.league_lab_service, "request", request)
@@ -3372,9 +3462,102 @@ def test_champ_select_dodge_is_gated_and_revalidates_live_phase(monkeypatch):
         league_lab.ChampSelectDodgeRequest(confirmation="我确认秒退")
     ))
     assert result["last_action"] == "已执行一次英雄选择秒退"
+    assert phase_reads == 2
     assert calls[0][1] == "/lol-gameflow/v1/gameflow-phase"
     assert calls[1][1] == "/lol-login/v1/session/invoke"
     assert calls[1][3]["destination"] == "lcdsServiceProxy"
+    assert calls[2][1] == "/lol-gameflow/v1/gameflow-phase"
+
+
+def test_champ_select_dodge_accepts_missing_session_as_fresh_completion(monkeypatch):
+    service = league_lab.league_lab_service
+    monkeypatch.setattr(
+        service, "settings", LeagueLabSettings(toolkit_account_actions_enabled=True)
+    )
+    calls = []
+
+    async def request(method, path, *, json_body=None, params=None):
+        calls.append((method, path, json_body, params))
+        if path == "/lol-gameflow/v1/gameflow-phase":
+            return "ChampSelect"
+        if path == "/lol-champ-select/v1/session":
+            raise RuntimeError("LCU 请求失败: 404 Not Found")
+        if path == "/lol-login/v1/session/invoke":
+            return None
+        raise AssertionError(path)
+
+    monkeypatch.setattr(service, "request", request)
+    result = asyncio.run(league_lab.league_champ_select_dodge(
+        league_lab.ChampSelectDodgeRequest(confirmation="我确认秒退")
+    ))
+
+    assert result["last_action"] == "已执行一次英雄选择秒退"
+    assert [path for _method, path, _body, _params in calls] == [
+        "/lol-gameflow/v1/gameflow-phase",
+        "/lol-login/v1/session/invoke",
+        "/lol-gameflow/v1/gameflow-phase",
+        "/lol-champ-select/v1/session",
+    ]
+
+
+def test_champ_select_dodge_does_not_report_success_on_session_transport_failure(monkeypatch):
+    service = league_lab.league_lab_service
+    monkeypatch.setattr(
+        service, "settings", LeagueLabSettings(toolkit_account_actions_enabled=True)
+    )
+
+    async def request(method, path, *, json_body=None, params=None):
+        if path == "/lol-gameflow/v1/gameflow-phase":
+            return "ChampSelect"
+        if path == "/lol-champ-select/v1/session":
+            raise RuntimeError("LCU 请求失败: 500")
+        if path == "/lol-login/v1/session/invoke":
+            return None
+        raise AssertionError(path)
+
+    monkeypatch.setattr(service, "request", request)
+    with pytest.raises(league_lab.HTTPException) as caught:
+        asyncio.run(league_lab.league_champ_select_dodge(
+            league_lab.ChampSelectDodgeRequest(confirmation="我确认秒退")
+        ))
+
+    assert caught.value.status_code == 409
+    assert "未在限定时间内确认" in str(caught.value.detail)
+
+
+def test_dodge_loop_sends_first_request_and_waits_for_fresh_exit(monkeypatch):
+    service = league_lab.league_lab_service
+    service._terminate_dodge_loop("test-reset")
+    service.settings = LeagueLabSettings(toolkit_account_actions_enabled=True)
+    calls = []
+    phase_reads = 0
+
+    async def request(method, path, **_kwargs):
+        nonlocal phase_reads
+        calls.append((method, path))
+        if path == "/lol-gameflow/v1/gameflow-phase":
+            phase_reads += 1
+            return "ChampSelect" if phase_reads == 1 else "Lobby"
+        if path == "/lol-login/v1/session/invoke":
+            return None
+        raise AssertionError(path)
+
+    monkeypatch.setattr(service, "request", request)
+
+    async def exercise():
+        result = await league_lab.league_champ_select_dodge_loop_start(
+            league_lab.ChampSelectDodgeLoopRequest(confirmation="我确认秒退")
+        )
+        assert result["last_action"] == "已执行一次英雄选择秒退"
+        assert result["dodge_loop"]["active"] is False
+
+    asyncio.run(exercise())
+    assert calls == [
+        ("GET", "/lol-gameflow/v1/gameflow-phase"),
+        ("POST", "/lol-login/v1/session/invoke"),
+        ("GET", "/lol-gameflow/v1/gameflow-phase"),
+    ]
+    service._terminate_dodge_loop("test-reset")
 
 
 def test_charity_reroll_only_grabs_back_original_with_fresh_evidence(monkeypatch):
@@ -3553,6 +3736,8 @@ def test_dodge_loop_start_and_cancel_is_local_and_uses_five_workers(monkeypatch)
         calls.append((method, path))
         if path == "/lol-gameflow/v1/gameflow-phase":
             return "ChampSelect"
+        if path == "/lol-champ-select/v1/session":
+            return {}
         if path == "/lol-login/v1/session/invoke":
             return None
         raise AssertionError(path)
@@ -3560,11 +3745,13 @@ def test_dodge_loop_start_and_cancel_is_local_and_uses_five_workers(monkeypatch)
     monkeypatch.setattr(service, "request", request)
 
     async def exercise():
-        started = await league_lab.league_champ_select_dodge_loop_start(
-            league_lab.ChampSelectDodgeLoopRequest(confirmation="我确认秒退")
-        )
-        assert started["dodge_loop"]["active"] is True
-        assert started["dodge_loop"]["concurrency"] == 5
+        with pytest.raises(league_lab.HTTPException) as caught:
+            await league_lab.league_champ_select_dodge_loop_start(
+                league_lab.ChampSelectDodgeLoopRequest(confirmation="我确认秒退")
+            )
+        assert caught.value.status_code == 409
+        assert service.status()["dodge_loop"]["active"] is True
+        assert service.status()["dodge_loop"]["concurrency"] == 5
         cancelled = await league_lab.league_champ_select_dodge_loop_cancel()
         assert cancelled["dodge_loop"]["active"] is False
         assert cancelled["dodge_loop"]["stop_reason"] == "user-cancelled"

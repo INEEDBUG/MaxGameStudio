@@ -318,6 +318,42 @@ class ValorantGameUserSettingsService:
         value = self.discover()
         return value.to_dict() if value else None
 
+    def discovery_status(self) -> dict[str, Any]:
+        """Return actionable, non-mutating diagnostics for first-run setup."""
+        if self.config_root is None:
+            return {"state": "unavailable", "reason": "local_appdata_missing", "candidate_count": 0, "invalid_count": 0}
+        root = self.config_root.resolve()
+        if not root.is_dir():
+            return {"state": "not_found", "reason": "config_root_missing", "candidate_count": 0, "invalid_count": 0}
+        files: list[Path] = []
+        profiles = 0
+        windows_dirs = 0
+        try:
+            for profile in root.iterdir():
+                if not profile.is_dir():
+                    continue
+                profiles += 1
+                for windows_dir in profile.iterdir():
+                    if windows_dir.is_dir() and windows_dir.name.casefold().startswith("windows"):
+                        windows_dirs += 1
+                        candidate = windows_dir / GAME_USER_SETTINGS_FILENAME
+                        if candidate.is_file():
+                            files.append(candidate)
+        except OSError:
+            return {"state": "unavailable", "reason": "config_root_unreadable", "candidate_count": 0, "invalid_count": 0}
+        invalid = 0
+        for candidate in files:
+            try:
+                self._inspect(candidate)
+            except (OSError, GameUserSettingsError):
+                invalid += 1
+        if not files:
+            reason = "no_profiles" if profiles == 0 else "settings_file_missing" if windows_dirs else "windows_config_missing"
+            return {"state": "not_found", "reason": reason, "candidate_count": 0, "invalid_count": 0}
+        if invalid == len(files):
+            return {"state": "invalid", "reason": "settings_file_invalid", "candidate_count": len(files), "invalid_count": invalid}
+        return {"state": "ready", "reason": None, "candidate_count": len(files), "invalid_count": invalid}
+
     def _target(self, path: Path | str | None) -> GameUserSettingsFile:
         try:
             value = self.discover() if path is None else self._inspect(_path(path))
@@ -602,11 +638,12 @@ class ValorantGameUserSettingsService:
         with self._lock:
             explicit = _path(path).resolve() if path is not None else None
             selected = None
+            selection_error = None
             if explicit is not None:
                 try:
                     selected = self._inspect(explicit)
-                except (OSError, GameUserSettingsError):
-                    pass
+                except (OSError, GameUserSettingsError) as exc:
+                    selection_error = f"{type(exc).__name__}: {exc}"
             else:
                 selected = self.discover()
             loaded = self._latest_manifest(selected.path if selected else explicit)
@@ -631,7 +668,7 @@ class ValorantGameUserSettingsService:
             drifted = bool(info and baseline and info[1] != baseline)
             recreated = bool(info and expected_id and list(info[2]) != list(expected_id))
             missing, readonly = bool(target is not None and not exists), (info[3] if info else None)
-            state = "missing" if missing else "recreated" if recreated else "unlocked" if readonly is False else "drift" if drifted else "locked" if readonly is True else "not_found"
+            state = "error" if selection_error else ("missing" if missing else "recreated" if recreated else "unlocked" if readonly is False else "drift" if drifted else "locked" if readonly is True else "not_found")
             return {
                 "found": exists, "tracked": manifest is not None, "path": str(target) if target else None,
                 "profile": selected.profile if selected else (manifest.get("profile") if manifest else None),
@@ -647,7 +684,7 @@ class ValorantGameUserSettingsService:
                 "original_mtime": manifest.get("original_mtime") if manifest else None,
                 "original_readonly": manifest.get("original_readonly") if manifest else None,
                 "original_sha256": manifest.get("original_sha256") if manifest else None,
-                "process": self.process_status(), "error": error,
+                "process": self.process_status(), "error": selection_error or error,
             }
 
 

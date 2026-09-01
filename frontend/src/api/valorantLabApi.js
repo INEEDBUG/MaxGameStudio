@@ -24,8 +24,8 @@ export function isValorantLabApiUnavailable(error) {
   return isTransientAxiosNetworkError(error) || [404, 501, 503].includes(error?.response?.status);
 }
 
-export async function fetchValorantDisplayStatus() {
-  const { data } = await API.get(VALORANT_LAB_API_CONTRACT.displayStatus.path);
+export async function fetchValorantDisplayStatus(path = null) {
+  const { data } = await API.get(VALORANT_LAB_API_CONTRACT.displayStatus.path, path ? { params: { path } } : undefined);
   const normalized = normalizeDisplayStatus(data);
   if (data && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "cfg_status")) {
     return { ...normalized, cfg_status: data.cfg_status };
@@ -53,13 +53,17 @@ export async function restoreValorantStretch() {
   return data;
 }
 
-export async function unlockValorantStretchCfg() {
-  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.unlockStretchCfg.path);
+export async function unlockValorantStretchCfg(path = null) {
+  const { data } = path
+    ? await API.post(VALORANT_LAB_API_CONTRACT.unlockStretchCfg.path, { path })
+    : await API.post(VALORANT_LAB_API_CONTRACT.unlockStretchCfg.path);
   return data;
 }
 
-export async function restoreValorantStretchCfg() {
-  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.restoreStretchCfg.path);
+export async function restoreValorantStretchCfg(path = null) {
+  const { data } = path
+    ? await API.post(VALORANT_LAB_API_CONTRACT.restoreStretchCfg.path, { path })
+    : await API.post(VALORANT_LAB_API_CONTRACT.restoreStretchCfg.path);
   return data;
 }
 

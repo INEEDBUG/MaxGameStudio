@@ -121,7 +121,7 @@ class _FakeCfgService:
         self.resolution = {"ResolutionSizeX": "1920", "ResolutionSizeY": "1080"}
         self.set_error: Exception | None = None
 
-    def status(self):
+    def status(self, path=None):
         return {
             "found": True,
             "state": "locked" if self.readonly else "unlocked",
@@ -134,11 +134,11 @@ class _FakeCfgService:
             "windows_dir": "WindowsClient",
         }
 
-    def get(self):
+    def get(self, path=None):
         return {**self.status(), "resolution": dict(self.resolution), "path": "C:/fixture/GameUserSettings.ini"}
 
-    def set_resolution(self, width, height):
-        self.calls.append(("set", width, height))
+    def set_resolution(self, width, height, path=None):
+        self.calls.append(("set", width, height) if path is None else ("set", width, height, path))
         if self.set_error:
             raise self.set_error
         self.backup_available = True
@@ -146,18 +146,18 @@ class _FakeCfgService:
             self.resolution[key] = str(width if key.endswith("X") or key.endswith("Width") else height)
         return self.get()
 
-    def lock(self):
-        self.calls.append(("lock",))
+    def lock(self, path=None):
+        self.calls.append(("lock",) if path is None else ("lock", path))
         self.readonly = True
         return self.get()
 
-    def unlock(self):
-        self.calls.append(("unlock",))
+    def unlock(self, path=None):
+        self.calls.append(("unlock",) if path is None else ("unlock", path))
         self.readonly = False
         return self.get()
 
-    def restore_latest_backup(self):
-        self.calls.append(("restore",))
+    def restore_latest_backup(self, path=None):
+        self.calls.append(("restore",) if path is None else ("restore", path))
         self.resolution = {"ResolutionSizeX": "1920", "ResolutionSizeY": "1080"}
         self.readonly = False
         return {**self.get(), "backup_path": "C:/fixture/backup.ini"}
@@ -250,6 +250,23 @@ def test_display_apply_failure_restores_cfg_backup(monkeypatch: pytest.MonkeyPat
 
     assert response.status_code == 409
     assert service.calls == [("set", 1568, 1080), ("lock",), ("restore",)]
+
+
+def test_apply_failure_restores_the_explicit_cfg_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    service = _FakeCfgService()
+    monkeypatch.setattr(api, "_game_user_settings", service)
+    _patch_ready_display(monkeypatch)
+    monkeypatch.setattr(api.display_mode_session, "apply", lambda *args: (_ for _ in ()).throw(RuntimeError("display failed")))
+    client = _client(monkeypatch, tmp_path)
+    selected = "C:/Users/test/AppData/Local/VALORANT/Saved/Config/profile/WindowsClient/GameUserSettings.ini"
+
+    response = client.post(
+        "/api/valorant-lab/stretch/apply",
+        json={"width": 1568, "height": 1080, "confirmed": True, "path": selected},
+    )
+
+    assert response.status_code == 409
+    assert service.calls[-1] == ("restore", selected)
 
 
 def test_cfg_unlock_and_restore_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

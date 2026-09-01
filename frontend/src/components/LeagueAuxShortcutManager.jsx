@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
-import { cancelLeagueInGameSend } from "../api/leagueLabApi";
 import { subscribeLeagueLabStatus } from "../utils/leagueLabStatusSubscription";
 
 export default function LeagueAuxShortcutManager() {
@@ -19,7 +18,6 @@ export default function LeagueAuxShortcutManager() {
         if (disposed || !status) return;
         const settings = status?.settings || {};
         const candidates = [
-          [settings.in_game_send_enabled ? settings.in_game_cancel_shortcut : null, "cancel"],
           [settings.ongoing_window_shortcut, "ongoing"],
           [settings.cooldown_window_shortcut, "cooldown"],
         ];
@@ -43,8 +41,7 @@ export default function LeagueAuxShortcutManager() {
                 return;
               }
               if (event?.state !== "Pressed") return;
-              if (action === "cancel") await cancelLeagueInGameSend().catch(() => {});
-              else await invoke("toggle_league_aux_window", { kind: action, visible: null }).catch(() => {});
+              await invoke("toggle_league_aux_window", { kind: action, visible: null }).catch(() => {});
             });
             if (!disposed) registered.current.set(shortcut, action);
           } catch {

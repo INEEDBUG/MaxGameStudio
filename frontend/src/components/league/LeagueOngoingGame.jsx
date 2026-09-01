@@ -29,7 +29,11 @@ const HISTORY_QUEUE_LABELS = {
   490: "快速游戏",
 };
 
-const RAPID_POLL_MS = 1000;
+// The backend returns a roster snapshot immediately and promotes each player
+// as enrichment finishes. Poll that small local cache quickly during the short
+// progressive phase so the first completed card is visible without waiting a
+// full second; the steady-state interval remains conservative.
+const RAPID_POLL_MS = 300;
 const STEADY_POLL_MS = 5000;
 const MAX_RAPID_POLLS = 10;
 
@@ -465,12 +469,28 @@ export default function LeagueOngoingGame({ streamerMode, useAliases, previewDat
     setBusy(true);
     try {
       const privacyProvided = streamerMode != null && useAliases != null;
-      const [game, status] = privacyProvided
-        ? [await fetchLeagueOngoingGame({ snapshot: true }), null]
-        : await Promise.all([fetchLeagueOngoingGame({ snapshot: true }), fetchLeagueLabStatus()]);
+      // The roster snapshot is the critical path. Optional privacy settings
+      // must not hold back the first paint of the live-game cards (especially
+      // in the standalone window, where status can wait for backend startup).
+      const statusPromise = privacyProvided ? null : fetchLeagueLabStatus();
+      if (statusPromise) {
+        statusPromise.then((status) => {
+          if (sequence !== requestSequence.current || !status) return;
+          setPrivacy({
+            enabled: streamerMode ?? Boolean(status?.settings?.streamer_mode_enabled),
+            aliases: useAliases ?? Boolean(status?.settings?.streamer_mode_use_aliases),
+          });
+        }).catch(() => {
+          // Privacy status is optional; the snapshot remains useful with the
+          // safe default (no alias masking) when it is temporarily unavailable.
+        });
+      }
+      const game = await fetchLeagueOngoingGame({ snapshot: true });
       if (sequence !== requestSequence.current) return null;
       setData(game);
-      setPrivacy({ enabled: streamerMode ?? Boolean(status?.settings?.streamer_mode_enabled), aliases: useAliases ?? Boolean(status?.settings?.streamer_mode_use_aliases) });
+      if (privacyProvided) {
+        setPrivacy({ enabled: Boolean(streamerMode), aliases: Boolean(useAliases) });
+      }
       return game;
     } catch (error) {
       if (sequence === requestSequence.current) onError(error?.response?.data?.detail || "实时对局读取失败");

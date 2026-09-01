@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LeagueMiniPanel from "./LeagueMiniPanel";
 import { acceptLeagueChampSelectTrade, cancelLeagueAutoAccept, cancelLeagueDodgeLoop, charityRerollLeagueChampion, declineLeagueChampSelectTrade, declineLeagueReadyCheck, fetchLeagueLabStatus, rerollLeagueChampion, saveLeagueLabSettings, selectLeagueChampionFromMini, selectLeagueChampionSkin, startLeagueDodgeLoop, stopLeagueMatchmaking, swapLeagueBenchChampion } from "../api/leagueLabApi";
@@ -68,6 +68,59 @@ describe("LeagueMiniPanel", () => {
     expect(windowActions.close).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "刷新 Mini" })).toBeNull();
     expect(fetchLeagueLabStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists the Mini opacity from the panel", async () => {
+    fetchLeagueLabStatus.mockResolvedValue({
+      connected: true,
+      phase: "ChampSelect",
+      summoner_name: "Tester",
+      settings: { mini_opacity: 0.7, toolkit_account_actions_enabled: false },
+      champ_select: {},
+    });
+    saveLeagueLabSettings.mockResolvedValue({
+      connected: true,
+      phase: "ChampSelect",
+      summoner_name: "Tester",
+      settings: { mini_opacity: 0.8, toolkit_account_actions_enabled: false },
+      champ_select: {},
+    });
+    render(<LeagueMiniPanel />);
+    const slider = await screen.findByRole("slider", { name: "Mini 不透明度" });
+    expect(slider.value).toBe("0.7");
+    fireEvent.change(slider, { target: { value: "0.8" } });
+    await waitFor(() => expect(saveLeagueLabSettings).toHaveBeenCalledWith(expect.objectContaining({ mini_opacity: 0.8 })));
+  });
+
+  it("does not let a stale status poll undo a pending unpin", async () => {
+    vi.useFakeTimers();
+    try {
+      const stale = {
+        connected: true,
+        phase: "ChampSelect",
+        summoner_name: "Tester",
+        settings: { mini_opacity: 1, mini_pinned: true, toolkit_account_actions_enabled: false },
+        champ_select: {},
+      };
+      fetchLeagueLabStatus.mockResolvedValue(stale);
+      let resolveSave;
+      saveLeagueLabSettings.mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
+      render(<LeagueMiniPanel />);
+      await act(async () => { await Promise.resolve(); });
+      fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => {
+        vi.advanceTimersByTime(1600);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(windowActions.setAlwaysOnTop).not.toHaveBeenCalledWith(true);
+      resolveSave({ ...stale, settings: { ...stale.settings, mini_pinned: false } });
+      await act(async () => { await Promise.resolve(); });
+      expect(windowActions.setAlwaysOnTop).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

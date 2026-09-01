@@ -3,10 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { subscribeLeagueLabStatus } from "../utils/leagueLabStatusSubscription";
 
 const MINI_AUTO_PHASES = new Set(["Lobby", "Matchmaking", "ReadyCheck", "ChampSelect"]);
+const ONGOING_AUTO_PHASES = new Set(["GameStart", "InProgress", "Reconnect"]);
 const COOLDOWN_AUTO_PHASES = new Set(["InProgress"]);
 
 export default function LeagueMiniAutoManager() {
   const lastSync = useRef("");
+  const lastOngoingSync = useRef("");
   const lastCooldownSync = useRef("");
   const syncing = useRef(false);
   const pendingStatus = useRef(undefined);
@@ -44,6 +46,19 @@ export default function LeagueMiniAutoManager() {
             await invoke("set_league_content_protection", { enabled: contentProtected });
             await invoke("sync_league_mini", { shouldShow, context });
             lastSync.current = signature;
+          }
+          const ongoingShouldShow = Boolean(
+            current.connected
+            && ONGOING_AUTO_PHASES.has(current.phase),
+          );
+          const ongoingContext = `${current.connected ? "connected" : "offline"}:${current.phase || "None"}:${current.game_mode || "unknown"}`;
+          const ongoingSignature = `${ongoingShouldShow}:${ongoingContext}:${contentProtected}`;
+          if (ongoingSignature !== lastOngoingSync.current) {
+            await invoke("sync_league_ongoing", {
+              shouldShow: ongoingShouldShow,
+              context: ongoingContext,
+            });
+            lastOngoingSync.current = ongoingSignature;
           }
           const cooldownShouldShow = Boolean(
             settings.cooldown_timer_enabled

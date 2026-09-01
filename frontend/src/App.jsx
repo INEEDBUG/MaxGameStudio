@@ -60,7 +60,6 @@ import DesktopCloseDialog from "./components/DesktopCloseDialog";
 import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter";
 import LeagueMiniAutoManager from "./components/LeagueMiniAutoManager";
 import LeagueGlobalShortcutManager from "./components/LeagueGlobalShortcutManager";
-import LeaguePresetShortcutManager from "./components/LeaguePresetShortcutManager";
 import LeagueAuxShortcutManager from "./components/LeagueAuxShortcutManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
@@ -3419,7 +3418,6 @@ export default function App() {
       <div className="app-shell relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
         <LeagueMiniAutoManager />
         <LeagueGlobalShortcutManager />
-        <LeaguePresetShortcutManager />
         <LeagueAuxShortcutManager />
         <CustomTitleBar />
         <DemoDownloadActivityCenter />

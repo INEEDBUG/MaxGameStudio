@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Minus, Pin, PinOff, RefreshCw, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -110,13 +110,11 @@ function MiniMapIconFallback() {
 }
 
 function MiniMapIcon({ src }) {
-  const [failed, setFailed] = useState(false);
+  // Associate failure with the exact URL. A mount effect that blindly resets
+  // a boolean can race a very fast image error and restore the broken image.
+  const [failedSrc, setFailedSrc] = useState("");
 
-  useEffect(() => {
-    setFailed(false);
-  }, [src]);
-
-  if (!src || failed) {
+  if (!src || failedSrc === src) {
     return <span data-testid="mini-map-icon"><MiniMapIconFallback /></span>;
   }
 
@@ -130,13 +128,13 @@ function MiniMapIcon({ src }) {
       // naturalWidth keeps that case on the same local fallback path.
       if (event.currentTarget.naturalWidth === 0) {
         event.currentTarget.style.display = "none";
-        setFailed(true);
+        setFailedSrc(src);
       }
     }}
     onError={(event) => {
       // Hide the native broken-image glyph before React replaces the node.
       event.currentTarget.style.display = "none";
-      setFailed(true);
+      setFailedSrc(src);
     }}
   />;
 }
@@ -521,6 +519,8 @@ function LeagueMiniView({
       ? [...subsetChampions, ...benchChampions]
       : benchChampions,
   )).filter((id) => id !== currentChampionId).slice(0, 10);
+  const miniOpacityValue = Number(status?.settings?.mini_opacity);
+  const miniOpacity = Number.isFinite(miniOpacityValue) ? Math.min(1, Math.max(0.4, miniOpacityValue)) : 1;
 
   const operationCard = <section data-testid="mini-lounge-operations" className="mini-card w-full">
     <MiniSwitch label={`自动接受${Number.isFinite(autoAcceptDelay) ? `（${autoAcceptDelay <= 0.05 ? "立即" : `${autoAcceptDelay.toFixed(1)} 秒`}）` : ""}`} checked={Boolean(status?.settings?.auto_accept_enabled)} onChange={(value) => update({ auto_accept_enabled: value })} />
@@ -553,6 +553,10 @@ function LeagueMiniView({
       <button type="button" aria-label="关闭 Mini" onClick={closeWindow} className="mini-titlebar-button mini-titlebar-close"><X className="h-3.5 w-3.5" /></button>
     </span></div>
     <div className={`mini-content ${phase === "ChampSelect" ? "mini-content-scroll" : ""}`}>
+      <div className="mini-opacity-row">
+        <label htmlFor="mini-opacity-slider">Mini 透明度 <span>{Math.round(miniOpacity * 100)}%</span></label>
+        <input id="mini-opacity-slider" aria-label="Mini 不透明度" type="range" min="0.4" max="1" step="0.05" value={miniOpacity} onChange={(event) => update({ mini_opacity: Number(event.target.value) })} />
+      </div>
       {loungePhase && <section data-testid="mini-lounge-view" className="mini-lounge-view">
         <div className="mini-lounge-center">
           <MiniMapIcon src={mapIconUrl} />
@@ -588,6 +592,8 @@ export default function LeagueMiniPanel() {
   const [now, setNow] = useState(Date.now());
   const [dodgeConfirmOpen, setDodgeConfirmOpen] = useState(false);
   const [dodgeSubmitting, setDodgeSubmitting] = useState(false);
+  const pinMutationRef = useRef(0);
+  const pendingPinnedRef = useRef(null);
   const load = useCallback(async () => {
     try {
       const next = await fetchLeagueLabStatus();
@@ -608,6 +614,8 @@ export default function LeagueMiniPanel() {
   useEffect(() => {
     if (typeof status?.settings?.mini_pinned !== "boolean") return;
     const next = status.settings.mini_pinned;
+    if (pendingPinnedRef.current !== null && pendingPinnedRef.current !== next) return;
+    if (pendingPinnedRef.current === next) pendingPinnedRef.current = null;
     setPinned(next);
     invoke("set_league_window_pinned", { kind: "mini", pinned: next }).catch(() => {});
   }, [status?.settings?.mini_pinned]);
@@ -664,12 +672,30 @@ export default function LeagueMiniPanel() {
   const visibleSummonerName = streamerMode ? maskLeagueName(status?.summoner_name, 0, status?.settings?.streamer_mode_use_aliases, status?.current_summoner?.puuid) : status?.summoner_name;
   const setWindowPinned = async () => {
     const next = !pinned;
+    const mutation = pinMutationRef.current + 1;
+    pinMutationRef.current = mutation;
+    pendingPinnedRef.current = next;
+    setPinned(next);
     try {
-      await getCurrentWindow().setAlwaysOnTop(next);
       const result = await saveLeagueLabSettings({ ...(status?.settings || {}), mini_pinned: next });
-      if (result && typeof result === "object") setStatus(result);
-      setPinned(next);
+      if (mutation !== pinMutationRef.current) return;
+      if (result && typeof result === "object" && typeof result.settings?.mini_pinned === "boolean") {
+        const persisted = result.settings.mini_pinned;
+        pendingPinnedRef.current = persisted;
+        setPinned(persisted);
+        await getCurrentWindow().setAlwaysOnTop(persisted);
+        pendingPinnedRef.current = null;
+        setStatus(result);
+        return;
+      }
+      pendingPinnedRef.current = null;
+      await getCurrentWindow().setAlwaysOnTop(next);
     } catch (error) {
+      if (mutation === pinMutationRef.current) {
+        pendingPinnedRef.current = null;
+        setPinned(!next);
+        await getCurrentWindow().setAlwaysOnTop(!next).catch(() => {});
+      }
       setMessage(error?.message || "窗口置顶设置失败");
     }
   };

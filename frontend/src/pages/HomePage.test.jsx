@@ -14,7 +14,7 @@ describe("HomePage", () => {
   test("presents cross-game release notes and feedback actions", () => {
     render(<MemoryRouter><HomePage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "home.title" })).toBeTruthy();
-    expect(screen.getByText("更新提示现在会先征求你的确认，不会在倒计时结束后自动安装。")).toBeTruthy();
+    expect(screen.getByText("Mini 的置顶按钮现在可以正常取消置顶，并会记住你的选择。")).toBeTruthy();
     expect(screen.getByRole("button", { name: /home.reportBug/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /home.requestFeature/ })).toBeTruthy();
   });
