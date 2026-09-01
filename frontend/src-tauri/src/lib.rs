@@ -1368,25 +1368,34 @@ mod tests {
     #[test]
     fn league_html_aux_windows_are_created_hidden_before_react_ready() {
         let source = include_str!("lib.rs");
-        for marker in [
-            "async fn show_league_mini",
-            "async fn show_league_ongoing",
-            "async fn show_league_cd_timer",
-        ] {
-            let start = source
-                .find(marker)
-                .expect("auxiliary window builder should exist");
-            let command = &source[start..];
-            let next = command.find("#[tauri::command]").unwrap_or(command.len());
-            let command = &command[..next];
-            assert!(command.contains(".visible(false)"));
-            assert!(
-                command.contains("!lifecycle.ready.load") || command.contains("!mini.ready.load")
-            );
-        }
-        assert!(source.contains("WebviewUrl::App(\"mini.html\".into())"));
-        assert!(source.contains("WebviewUrl::App(\"ongoing.html\".into())"));
-        assert!(source.contains("WebviewUrl::App(\"cd-timer.html\".into())"));
+        let section = |marker: &str, next_marker: &str| {
+            let start = source.find(marker).expect("auxiliary window helper should exist");
+            let helper = &source[start..];
+            let end = helper.find(next_marker).unwrap_or(helper.len());
+            &helper[..end]
+        };
+
+        let mini = section("async fn show_league_mini", "#[tauri::command]");
+        assert!(mini.contains(".visible(false)"));
+        assert!(mini.contains("!mini.ready.load"));
+        assert!(mini.contains("WebviewUrl::App(\"mini.html\".into())"));
+
+        let ongoing = section("async fn show_league_ongoing", "#[tauri::command]");
+        assert!(ongoing.contains("build_league_ongoing_window"));
+        assert!(ongoing.contains("!lifecycle.ready.load"));
+
+        let ongoing_builder = section(
+            "fn build_league_ongoing_window",
+            "fn prime_league_ongoing_window",
+        );
+        assert!(ongoing_builder.contains(".visible(false)"));
+        assert!(ongoing_builder.contains(".transparent(true)"));
+        assert!(ongoing_builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
+
+        let cd_timer = section("async fn show_league_cd_timer", "#[tauri::command]");
+        assert!(cd_timer.contains(".visible(false)"));
+        assert!(cd_timer.contains("!lifecycle.ready.load"));
+        assert!(cd_timer.contains("WebviewUrl::App(\"cd-timer.html\".into())"));
     }
 
     #[test]
@@ -1447,9 +1456,25 @@ mod tests {
             .find("fn prime_league_ongoing_window")
             .expect("ongoing priming helper should exist");
         let helper = &source[start..];
-        assert!(helper.contains("WebviewUrl::App(\"ongoing.html\".into())"));
-        assert!(helper.contains(".visible(false)"));
-        assert!(helper.contains(".transparent(true)"));
+        let end = helper
+            .find("async fn show_league_ongoing")
+            .expect("ongoing show helper should follow priming helper");
+        let helper = &helper[..end];
+        assert!(helper.contains("build_league_ongoing_window"));
+        assert!(helper.contains("lifecycle.bootstrapping.store(true"));
+        assert!(helper.contains("lifecycle.ready.store(false"));
+
+        let builder_start = source
+            .find("fn build_league_ongoing_window")
+            .expect("ongoing window builder should exist");
+        let builder = &source[builder_start..];
+        let builder_end = builder
+            .find("fn prime_league_ongoing_window")
+            .expect("ongoing priming helper should follow builder");
+        let builder = &builder[..builder_end];
+        assert!(builder.contains("WebviewUrl::App(\"ongoing.html\".into())"));
+        assert!(builder.contains(".visible(false)"));
+        assert!(builder.contains(".transparent(true)"));
     }
 
     #[test]
