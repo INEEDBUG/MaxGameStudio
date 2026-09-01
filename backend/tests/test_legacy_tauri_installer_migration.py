@@ -77,7 +77,7 @@ def test_same_directory_is_preinstall_only_and_other_directories_are_postinstall
     assert preinstall.index(same_scope) < preinstall.index("Call CS2_RemoveLegacyTauri")
     assert preinstall.index("Call CS2_RemoveLegacyTauri") < preinstall.index("SetOutPath $INSTDIR")
 
-    runtime_check = postinstall.index("demoparser_runtime.py")
+    runtime_check = postinstall.index("Call CS2_ValidateBundledRuntime")
     data_migration = postinstall.index("desktop_data_migration.py")
     post_cleanup = postinstall.index(different_scope)
     assert runtime_check < data_migration < post_cleanup
@@ -94,14 +94,17 @@ def test_same_directory_is_preinstall_only_and_other_directories_are_postinstall
 
 def test_runtime_and_data_failure_abort_before_legacy_tauri_retirement(hook: str):
     postinstall = _macro_body(hook, "NSIS_HOOK_POSTINSTALL")
-    assert "Call CS2_AbortMigrationInstall" in postinstall
-    assert postinstall.index("demoparser_runtime.py") < postinstall.index(
+    validator = _function_body(hook, "CS2_ValidateBundledRuntime")
+    assert "demoparser_runtime.py" in validator
+    assert "ExecWait" in validator
+    assert "Call CS2_AbortMigrationInstall" in validator
+    assert postinstall.index("Call CS2_ValidateBundledRuntime") < postinstall.index(
         "Call CS2_RemoveLegacyTauri"
     )
     assert postinstall.index("desktop_data_migration.py") < postinstall.index(
         "Call CS2_RemoveLegacyTauri"
     )
-    assert "ExecWait" in postinstall
+    assert "Call CS2_AbortMigrationInstall" in postinstall
 
 
 def test_legacy_shortcut_cleanup_is_exact_and_non_recursive(hook: str):
