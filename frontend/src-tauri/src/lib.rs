@@ -1369,7 +1369,9 @@ mod tests {
     fn league_html_aux_windows_are_created_hidden_before_react_ready() {
         let source = include_str!("lib.rs");
         let section = |marker: &str, next_marker: &str| {
-            let start = source.find(marker).expect("auxiliary window helper should exist");
+            let start = source
+                .find(marker)
+                .expect("auxiliary window helper should exist");
             let helper = &source[start..];
             let end = helper.find(next_marker).unwrap_or(helper.len());
             &helper[..end]
