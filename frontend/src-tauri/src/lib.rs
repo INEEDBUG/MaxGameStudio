@@ -22,6 +22,8 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
+mod league_runtime;
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -703,48 +705,24 @@ fn quit_app(handle: AppHandle) {
     request_app_exit(&handle);
 }
 
-#[tauri::command]
-fn restart_as_administrator(handle: AppHandle) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                "Start-Sleep -Milliseconds 900; Start-Process -FilePath $args[0] -Verb RunAs",
-            ])
-            .arg(executable)
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| error.to_string())?;
-        request_app_exit(&handle);
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = handle;
-        Err("管理员重启仅支持 Windows".to_string())
-    }
-}
-
 fn request_app_exit(handle: &AppHandle) {
     let lifecycle = handle.state::<AppLifecycle>();
     if lifecycle.quitting.swap(true, Ordering::SeqCst) {
         return;
     }
+    // Stop the League monitor from recreating the main WebView while the
+    // backend is winding down. Parallel mode can otherwise race a user closing
+    // the embedded workspace against this 18-second graceful-shutdown window.
+    league_runtime::suppress_runtime_restore(handle);
     if let Some(window) = handle.get_webview_window("main") {
         let _ = window.destroy();
     }
     let handle = handle.clone();
     thread::spawn(move || {
+        if let Err(error) = league_runtime::shutdown_league_runtime(&handle) {
+            eprintln!("关闭英雄联盟工作台失败，保留进程状态等待最终清理：{error}");
+        }
+        league_runtime::wait_for_restore_idle(&handle);
         stop_backend(&handle);
         handle.exit(0);
     });
@@ -917,7 +895,23 @@ fn append_desktop_log(logs_dir: &Path, message: &str) {
     }
 }
 
-fn start_backend(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
+    if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
+        return Err("MaxGameStudio 正在退出，已取消后端启动".to_string());
+    }
+    {
+        let state = app.state::<BackendProcess>();
+        let mut guard = state
+            .child
+            .lock()
+            .map_err(|_| "后端进程状态锁已损坏".to_string())?;
+        if let Some(backend) = guard.as_mut() {
+            if backend.child.try_wait().ok().flatten().is_none() {
+                return Ok(());
+            }
+        }
+        *guard = None;
+    }
     let root = runtime_root(app)?;
     let python = python_executable(&root).ok_or_else(|| {
         format!(
@@ -954,6 +948,9 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
 
     let instance_id = new_instance_id();
     let session_token = app.state::<BackendProcess>().session_token.clone();
+    if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
+        return Err("MaxGameStudio 正在退出，已取消后端启动".to_string());
+    }
     let mut command = Command::new(&python);
     command
         .arg(&run_server)
@@ -999,8 +996,18 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         });
     }
 
+    if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
+        // Leave the registered child for request_app_exit's single final
+        // reaper. This lets the restore flag unwind before shutdown waits on
+        // the backend, rather than running two competing stop paths.
+        return Err("MaxGameStudio 正在退出，后端将由退出流程回收".to_string());
+    }
+
     let mut verified = false;
     for _ in 0..120 {
+        if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
+            return Err("MaxGameStudio 正在退出，已取消后端就绪等待".to_string());
+        }
         {
             let state = app.state::<BackendProcess>();
             let mut guard = state
@@ -1043,7 +1050,7 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn stop_backend(app: &AppHandle) {
+pub(crate) fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
     let session_token = state.session_token.clone();
     let Ok(mut guard) = state.child.lock() else {
@@ -1111,6 +1118,7 @@ pub fn run() {
         )
         .manage(BackendProcess::new().expect("failed to create desktop session token"))
         .manage(AppLifecycle::default())
+        .manage(league_runtime::LeagueRuntimeProcess::default())
         .manage(LeagueMiniLifecycle::default())
         .manage(LeagueOngoingLifecycle::default())
         .manage(LeagueCdTimerLifecycle::default())
@@ -1124,7 +1132,6 @@ pub fn run() {
             get_close_action,
             hide_to_tray,
             quit_app,
-            restart_as_administrator,
             open_league_mini,
             open_league_ongoing,
             open_league_cd_timer,
@@ -1136,7 +1143,10 @@ pub fn run() {
             sync_league_mini,
             sync_league_ongoing,
             sync_league_cd_timer,
-            set_league_content_protection
+            set_league_content_protection,
+            league_runtime::get_league_runtime_status,
+            league_runtime::launch_league_runtime,
+            league_runtime::stop_league_runtime
         ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
@@ -1285,7 +1295,18 @@ pub fn run() {
                 api.prevent_exit();
             }
         }
-        RunEvent::Exit => stop_backend(handle),
+        RunEvent::Exit => {
+            handle
+                .state::<AppLifecycle>()
+                .quitting
+                .store(true, Ordering::SeqCst);
+            league_runtime::suppress_runtime_restore(handle);
+            if let Err(error) = league_runtime::shutdown_league_runtime(handle) {
+                eprintln!("应用退出时关闭英雄联盟工作台失败：{error}");
+            }
+            league_runtime::wait_for_restore_idle(handle);
+            stop_backend(handle);
+        }
         _ => {}
     });
 }
@@ -1512,5 +1533,81 @@ mod tests {
             .find("#[tauri::command]")
             .expect("next command should delimit mini builder");
         assert!(!command[..end].contains(".always_on_top(true)"));
+    }
+
+    #[test]
+    fn explicit_exit_suppresses_league_restore_before_background_shutdown() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn request_app_exit")
+            .expect("exit helper should exist");
+        let command = &source[start..];
+        let end = command
+            .find("impl BackendProcess")
+            .expect("backend implementation should delimit exit helper");
+        let command = &command[..end];
+        let suppress = command
+            .find("league_runtime::suppress_runtime_restore(handle)")
+            .expect("exit should suppress League host restoration");
+        let destroy = command
+            .find("window.destroy()")
+            .expect("exit should destroy the main window");
+        let shutdown = command
+            .find("league_runtime::shutdown_league_runtime(&handle)")
+            .expect("exit worker should reap the embedded runtime");
+        let wait = command
+            .find("league_runtime::wait_for_restore_idle(&handle)")
+            .expect("exit worker should wait for an in-flight restore");
+        let backend = command
+            .find("stop_backend(&handle)")
+            .expect("exit worker should stop the backend");
+        assert!(suppress < destroy);
+        assert!(destroy < shutdown);
+        assert!(shutdown < wait);
+        assert!(wait < backend);
+    }
+
+    #[test]
+    fn tauri_exit_suppresses_restore_and_waits_before_backend_stop() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("RunEvent::Exit =>")
+            .expect("Tauri Exit event should exist");
+        let tail = &source[start..];
+        let end = tail
+            .find("\n        _ => {}")
+            .expect("Tauri event handler should have a final branch");
+        let event = &tail[..end];
+        let quitting = event
+            .find(".quitting\n                .store(true")
+            .expect("Exit should mark the app as quitting");
+        let suppress = event
+            .find("league_runtime::suppress_runtime_restore(handle)")
+            .expect("Exit should suppress League host restoration");
+        let shutdown = event
+            .find("league_runtime::shutdown_league_runtime(handle)")
+            .expect("Exit should reap the embedded runtime");
+        let wait = event
+            .find("league_runtime::wait_for_restore_idle(handle)")
+            .expect("Exit should wait for restore to finish");
+        let backend = event
+            .find("stop_backend(handle)")
+            .expect("Exit should stop the backend last");
+        assert!(quitting < shutdown);
+        assert!(suppress < shutdown);
+        assert!(shutdown < wait);
+        assert!(wait < backend);
+    }
+
+    #[test]
+    fn administrator_launch_is_not_exposed_for_the_whole_host() {
+        let source = include_str!("lib.rs");
+        let handler = source
+            .split_once(".invoke_handler(tauri::generate_handler![")
+            .and_then(|(_, body)| body.split_once(".setup(|app|"))
+            .map(|(handler, _)| handler)
+            .expect("Tauri command handler should exist");
+        assert!(!handler.contains("restart_as_administrator"));
+        assert!(handler.contains("league_runtime::launch_league_runtime"));
     }
 }

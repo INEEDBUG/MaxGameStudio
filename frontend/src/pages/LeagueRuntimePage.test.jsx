@@ -1,0 +1,102 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import LeagueRuntimePage from "./LeagueRuntimePage";
+import { clearLeagueStartupPreference, readLeagueStartupPreference, writeLeagueStartupPreference } from "../utils/leagueStartupPreference.js";
+
+const { getStatus, launch } = vi.hoisted(() => ({ getStatus: vi.fn(), launch: vi.fn() }));
+vi.mock("../desktop/desktopBridge.js", () => ({
+  isDesktopApp: true,
+  desktopBridge: { getLeagueRuntimeStatus: getStatus, launchLeagueRuntime: launch },
+}));
+vi.mock("../i18n/useT.js", () => ({ useT: () => (key) => ({
+  "leagueRuntime.title": "英雄联盟工作台", "leagueRuntime.subtitle": "选择启动方式", "leagueRuntime.chooseMode": "选择启动方式", "leagueRuntime.explicitLaunch": "需要点击", "leagueRuntime.modeAsk": "每次询问", "leagueRuntime.modeAskDesc": "每次询问", "leagueRuntime.modeMemory": "节省内存", "leagueRuntime.modeMemoryDesc": "节省内存", "leagueRuntime.modeParallel": "后台并行", "leagueRuntime.modeParallelDesc": "后台并行", "leagueRuntime.remember": "记住这些选择", "leagueRuntime.administrator": "以管理员权限启动", "leagueRuntime.administratorHint": "每次仍显示 UAC", "leagueRuntime.administratorUnavailable": "需要重新安装完整安装包", "leagueRuntime.adminCancelled": "已取消管理员启动", "leagueRuntime.launchInFlight": "另一项启动选择正在处理中，请等待它完成后再试。", "leagueRuntime.clear": "清除选择", "leagueRuntime.launch": "启动工作台", "leagueRuntime.launching": "正在启动", "leagueRuntime.refresh": "刷新状态", "leagueRuntime.loading": "加载中", "leagueRuntime.error": "失败", "leagueRuntime.unavailable": "不可用", "leagueRuntime.desktopOnly": "仅桌面", "leagueRuntime.statusTitle": "运行状态", "leagueRuntime.runtimeStatus": "工作台", "leagueRuntime.activePrivilege": "当前权限", "leagueRuntime.privilegeAdministrator": "管理员", "leagueRuntime.privilegeStandard": "普通用户", "leagueRuntime.active": "运行中", "leagueRuntime.stopped": "未启动", "leagueRuntime.hostMemory": "宿主工作集", "leagueRuntime.expectedMemory": "预计内存", "leagueRuntime.safety": "安全说明",
+}[key] || key) }));
+
+describe("LeagueRuntimePage", () => {
+  beforeEach(() => { window.localStorage.clear(); getStatus.mockReset(); launch.mockReset(); getStatus.mockResolvedValue({ available: true, administrator_available: true, active: false, host_working_set_bytes: 1048576 }); });
+
+  test("loads status without automatically launching and requires a mode click", async () => {
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    expect(getStatus).toHaveBeenCalledTimes(1);
+    expect(launch).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "启动工作台" }).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("radio")[1]);
+    expect(screen.getByRole("button", { name: "启动工作台" }).disabled).toBe(false);
+  });
+
+  test("shares the settings preference and clears it through the shared utility", async () => {
+    writeLeagueStartupPreference("ask");
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    expect(screen.getAllByRole("radio")[0].getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "清除选择" }));
+    expect(readLeagueStartupPreference()).toBeNull();
+    expect(screen.getAllByRole("radio")[0].getAttribute("aria-checked")).toBe("true");
+  });
+
+  test("uses a remembered mode as the default without launching on route entry", async () => {
+    writeLeagueStartupPreference("parallel");
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    expect(screen.getAllByRole("radio")[2].getAttribute("aria-checked")).toBe("true");
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  test("restores the remembered administrator hint and forwards it on explicit launch", async () => {
+    writeLeagueStartupPreference("parallel", true, localStorage, { administrator: true });
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    expect(screen.getByRole("checkbox", { name: "以管理员权限启动" }).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "启动工作台" }));
+    await waitFor(() => expect(launch).toHaveBeenCalledWith("parallel", { administrator: true }));
+  });
+
+  test("does not remember an administrator launch when UAC is cancelled", async () => {
+    launch.mockRejectedValueOnce(new Error("UAC_CANCELLED: cancelled"));
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    fireEvent.click(screen.getAllByRole("radio")[2]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "以管理员权限启动" }));
+    fireEvent.click(screen.getByRole("button", { name: "启动工作台" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("已取消管理员启动"));
+    expect(readLeagueStartupPreference()).toBeNull();
+  });
+
+  test("surfaces a protected administrator preparation failure after the host is restored", async () => {
+    getStatus.mockResolvedValueOnce({
+      available: true,
+      administrator_available: true,
+      active: false,
+      last_error: "管理员工作台的受保护运行时准备失败",
+    });
+    render(<LeagueRuntimePage />);
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("受保护运行时准备失败");
+    });
+  });
+
+  test("blocks administrator launch without the protected chain but lets a remembered choice be cleared", async () => {
+    writeLeagueStartupPreference("parallel", true, localStorage, { administrator: true });
+    getStatus.mockResolvedValueOnce({ available: true, administrator_available: false, active: false });
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    const checkbox = screen.getByRole("checkbox", { name: "以管理员权限启动" });
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "启动工作台" }).disabled).toBe(true);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    expect(screen.getByRole("button", { name: "启动工作台" }).disabled).toBe(false);
+    expect(screen.getByText("需要重新安装完整安装包")).toBeTruthy();
+  });
+
+  test.each(["memory", "parallel"])("passes %s to the desktop launch command", async (selectedMode) => {
+    render(<LeagueRuntimePage />);
+    await waitFor(() => expect(screen.getByText("运行状态")).toBeTruthy());
+    fireEvent.click(screen.getAllByRole("radio")[selectedMode === "memory" ? 1 : 2]);
+    fireEvent.click(screen.getByRole("button", { name: "启动工作台" }));
+    await waitFor(() => expect(launch).toHaveBeenCalledWith(selectedMode));
+    clearLeagueStartupPreference();
+  });
+});

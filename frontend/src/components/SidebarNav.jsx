@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   BarChart3,
-  Boxes,
   BookOpen,
   Check,
   ChevronDown,
@@ -12,7 +11,6 @@ import {
   Crosshair,
   Download,
   Gamepad2,
-  History,
   Home,
   Keyboard,
   Laptop,
@@ -22,8 +20,6 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
-  UserRoundSearch,
-  Users,
   Video,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
@@ -154,7 +150,7 @@ function NavItem({ to, icon: Icon, children, end = false, disabled = false, badg
 }
 
 const SIDEBAR_GROUP_STORAGE_KEY = "maxgamestudio.sidebar.groups.v1";
-const SIDEBAR_GROUP_DEFAULTS = { cs2: true, valorant: false, league: false, peripherals: false };
+const SIDEBAR_GROUP_DEFAULTS = { cs2: true, valorant: false, peripherals: false };
 
 function readSidebarGroups() {
   try {
@@ -177,7 +173,6 @@ function groupMatchesPath(groupId, pathname) {
     ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
   }
   if (groupId === "valorant") return path === "/valorant-lab" || path === "/valorant" || path.startsWith("/valorant/");
-  if (groupId === "league") return path === "/league-lab" || path === "/league" || path.startsWith("/league/");
   if (groupId === "peripherals") return path === "/sensitivity-lab" || path === "/input-lab" || path === "/peripherals" || path.startsWith("/peripherals/");
   return false;
 }
@@ -206,7 +201,7 @@ function SidebarGroup({ id, label, icon: Icon, active, expanded, onToggle, child
 export default function SidebarNav({ queueLength = 0, disabled = false }) {
   const t = useT();
   const location = useLocation();
-  const activeGroup = ["cs2", "valorant", "league", "peripherals"].find((groupId) => groupMatchesPath(groupId, location.pathname));
+  const activeGroup = ["cs2", "valorant", "peripherals"].find((groupId) => groupMatchesPath(groupId, location.pathname));
   const [expandedGroups, setExpandedGroups] = useState(readSidebarGroups);
   const previousActiveGroup = useRef();
 
@@ -264,13 +259,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           <NavItem to="/valorant/stretch" icon={Crosshair}>{t("nav.valorantStretch")}</NavItem>
           <NavItem to="/valorant/crosshair" icon={Crosshair}>{t("nav.valorantCrosshair")}</NavItem>
         </SidebarGroup>
-        <SidebarGroup id="league" label={t("nav.sectionLeague")} icon={Gamepad2} active={activeGroup === "league"} expanded={Boolean(expandedGroups.league)} onToggle={() => toggleGroup("league")}>
-          <NavItem to="/league/automation" icon={SlidersHorizontal}>{t("nav.leagueAutomation")}</NavItem>
-          <NavItem to="/league/history" icon={History}>{t("nav.leagueHistory")}</NavItem>
-          <NavItem to="/league/players" icon={UserRoundSearch}>{t("nav.leaguePlayers")}</NavItem>
-          <NavItem to="/league/ongoing" icon={Users}>{t("nav.leagueOngoing")}</NavItem>
-          <NavItem to="/league/toolkit" icon={Boxes}>{t("nav.leagueToolkit")}</NavItem>
-        </SidebarGroup>
+        <NavItem to="/league" icon={Gamepad2}>{t("nav.sectionLeague")}</NavItem>
         <SidebarGroup id="peripherals" label={t("nav.sectionPeripherals")} icon={Crosshair} active={activeGroup === "peripherals"} expanded={Boolean(expandedGroups.peripherals)} onToggle={() => toggleGroup("peripherals")}>
           <NavItem to="/peripherals/sensitivity" icon={Crosshair}>{t("nav.sensitivityLab")}</NavItem>
           <NavItem to="/peripherals/input" icon={Keyboard}>{t("nav.inputLab")}</NavItem>

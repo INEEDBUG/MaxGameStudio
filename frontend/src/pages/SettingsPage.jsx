@@ -6,6 +6,14 @@ import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
 import { desktopBridge } from "../desktop/desktopBridge.js";
+import { desktopCloseActionPayload, normalizeDesktopCloseAction } from "../utils/desktopCloseAction.js";
+import {
+  clearLeagueStartupPreference,
+  LEAGUE_STARTUP_MODES,
+  readLeagueStartupPreference,
+  writeLeagueStartupPreference,
+} from "../utils/leagueStartupPreference.js";
+import { clearHandledLeagueSession } from "../utils/leagueRuntimeLaunchCoordinator.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
@@ -371,6 +379,8 @@ export default function SettingsPage() {
   const t = useT();
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
+  const [leagueStartupMode, setLeagueStartupMode] = useState(() => readLeagueStartupPreference()?.mode || "ask");
+  const [leagueStartupAdministrator, setLeagueStartupAdministrator] = useState(() => readLeagueStartupPreference()?.administrator === true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
@@ -427,7 +437,7 @@ export default function SettingsPage() {
         const { data } = await API.get("config");
         if (!cancelled) {
           setConfig(data);
-          void desktopBridge?.setCloseAction(data.close_action ?? (data.close_to_tray === false ? "exit" : "ask"));
+          void desktopBridge?.setCloseAction(normalizeDesktopCloseAction(data.close_action, data.close_to_tray));
         }
       } catch (e) {
         if (!cancelled) console.error("Failed to load config:", e);
@@ -616,8 +626,7 @@ export default function SettingsPage() {
       payload.ai_mode = !!config.ai_mode;
       payload.obs_agent_auto_prepare = !!config.obs_agent_auto_prepare;
       payload.locale = config.locale ?? "auto";
-      payload.close_action = config.close_action ?? (config.close_to_tray === false ? "exit" : "ask");
-      payload.close_to_tray = payload.close_action !== "exit";
+      Object.assign(payload, desktopCloseActionPayload(normalizeDesktopCloseAction(config.close_action, config.close_to_tray)));
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
@@ -650,6 +659,39 @@ export default function SettingsPage() {
       setSaving(false);
     }
   }, [config, saving, t]);
+
+  const clearRememberedCloseAction = useCallback(async () => {
+    if (!config || saving) return;
+    try {
+      const payload = desktopCloseActionPayload("ask");
+      await API.put("config", payload);
+      await desktopBridge?.setCloseAction("ask");
+      setConfig((current) => current ? { ...current, ...payload } : current);
+      setSaveMsg({ text: t("settings.closeActionCleared"), tone: "ok" });
+    } catch (e) {
+      setSaveMsg({ text: e.response?.data?.detail || e.message || t("settings.closeActionClearFailed"), tone: "error" });
+    }
+  }, [config, saving, t]);
+
+  const restoreLeagueStartupPrompt = useCallback(() => {
+    clearLeagueStartupPreference();
+    clearHandledLeagueSession();
+    setLeagueStartupMode("ask");
+    setLeagueStartupAdministrator(false);
+  }, []);
+
+  const changeLeagueStartupMode = useCallback((mode) => {
+    if (!writeLeagueStartupPreference(mode, true, globalThis.localStorage, { administrator: mode !== "ask" && leagueStartupAdministrator })) return;
+    clearHandledLeagueSession();
+    setLeagueStartupMode(mode);
+    if (mode === "ask") setLeagueStartupAdministrator(false);
+  }, [leagueStartupAdministrator]);
+
+  const changeLeagueStartupAdministrator = useCallback((administrator) => {
+    if (!writeLeagueStartupPreference(leagueStartupMode, true, globalThis.localStorage, { administrator })) return;
+    clearHandledLeagueSession();
+    setLeagueStartupAdministrator(administrator);
+  }, [leagueStartupMode]);
 
   // ─── OBS Config Check / Calibrate ──────────────────────────────
 
@@ -880,7 +922,7 @@ export default function SettingsPage() {
                   search={search && !matches(t("settings.labelCloseAction") + " tray background close exit ask")}
                 >
                   <select
-                    value={config.close_action ?? (config.close_to_tray === false ? "exit" : "ask")}
+                    value={normalizeDesktopCloseAction(config.close_action, config.close_to_tray)}
                     onChange={(event) => set("close_action", event.target.value)}
                     className="min-w-40 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-primary outline-none transition focus:border-cs2-accent/60"
                   >
@@ -888,6 +930,49 @@ export default function SettingsPage() {
                     <option value="tray">{t("settings.closeActionTray")}</option>
                     <option value="exit">{t("settings.closeActionExit")}</option>
                   </select>
+                  <button
+                    type="button"
+                    disabled={saving || normalizeDesktopCloseAction(config.close_action, config.close_to_tray) === "ask"}
+                    onClick={() => void clearRememberedCloseAction()}
+                    className="rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {t("settings.clearCloseAction")}
+                  </button>
+                </FieldRow>
+
+                <FieldRow
+                  label={t("settings.labelLeagueStartupMode")}
+                  hint={t("settings.hintLeagueStartupMode")}
+                  search={search && !matches(t("settings.labelLeagueStartupMode") + " " + t("settings.hintLeagueStartupMode"))}
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select
+                      aria-label={t("settings.labelLeagueStartupMode")}
+                      value={leagueStartupMode}
+                      onChange={(event) => changeLeagueStartupMode(event.target.value)}
+                      className="min-w-44 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-primary outline-none transition focus:border-cs2-accent/60"
+                    >
+                      {LEAGUE_STARTUP_MODES.map((item) => <option key={item.id} value={item.id}>{t(item.titleKey)}</option>)}
+                    </select>
+                    <label className="inline-flex items-center gap-2 text-xs text-cs2-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={leagueStartupAdministrator}
+                        disabled={leagueStartupMode === "ask"}
+                        onChange={(event) => changeLeagueStartupAdministrator(event.target.checked)}
+                        className="accent-cs2-accent"
+                      />
+                      {t("settings.leagueStartupAdministrator")}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={leagueStartupMode === "ask"}
+                      onClick={restoreLeagueStartupPrompt}
+                      className="rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {t("settings.restoreLeagueStartupPrompt")}
+                    </button>
+                  </div>
                 </FieldRow>
 
                 {/* GitHub 地址 */}
@@ -991,7 +1076,7 @@ export default function SettingsPage() {
                           setLiteCutStorageDraft(event.target.value);
                           setLiteCutStorageMsg(null);
                         }}
-                        placeholder="D:\\CS2 Insight\\LiteCut"
+                        placeholder="D:\\MaxGameStudio\\LiteCut"
                         className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none"
                       />
                       <span className="shrink-0 text-xs text-cs2-text-muted">

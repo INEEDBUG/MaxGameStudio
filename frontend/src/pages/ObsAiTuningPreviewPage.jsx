@@ -548,7 +548,7 @@ function PlanScreen({ goal, recommendation, onBack, onNext }) {
   const resolution = RESOLUTIONS.find((item) => item.value === goal.resolution)?.detail ?? "2560 × 1440";
   const codecLabel = CODECS.find((item) => item.value === goal.codec)?.label ?? "Agent 自动选择";
   const changes = [
-    ["OBS Profile", "Streaming", "CS2 Insight Recording", "隔离创建"],
+    ["OBS Profile", "Streaming", "MaxGameStudio Recording", "隔离创建"],
     ["整数 FPS", "60 / 1", `${goal.fps} / 1`, "WebSocket"],
     ["画布分辨率", "2560 × 1440", resolution, goal.resolution === "current" ? "保持" : "WebSocket"],
     ["输出分辨率", "2560 × 1440", resolution, goal.resolution === "current" ? "保持" : "WebSocket"],
@@ -819,8 +819,8 @@ function ReportScreen({ goal, recommendation, onBack, onReset }) {
             <h3 className="text-[11px] font-bold text-cs2-text-primary">交付信息</h3>
             <dl className="mt-3 space-y-3 text-[10px]">
               <div><dt className="text-cs2-text-muted">备份位置</dt><dd className="mt-1 break-all font-mono text-cs2-text-secondary">data/.obs_config_backups/20260722_094218_ai_tune</dd></div>
-              <div><dt className="text-cs2-text-muted">测试文件</dt><dd className="mt-1 break-all font-mono text-cs2-text-secondary">D:\OBS\CS2IA-test-{goal.fps}fps.mp4</dd></div>
-              <div><dt className="text-cs2-text-muted">当前 Profile</dt><dd className="mt-1 font-mono text-cs2-text-secondary">CS2 Insight Recording</dd></div>
+              <div><dt className="text-cs2-text-muted">测试文件</dt><dd className="mt-1 break-all font-mono text-cs2-text-secondary">D:\OBS\MaxGameStudio-test-{goal.fps}fps.mp4</dd></div>
+              <div><dt className="text-cs2-text-muted">当前 Profile</dt><dd className="mt-1 font-mono text-cs2-text-secondary">MaxGameStudio Recording</dd></div>
             </dl>
           </div>
           <button type="button" className="flex w-full items-center justify-center gap-2 rounded-xl border border-cs2-border bg-cs2-bg-input px-3 py-2.5 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35">

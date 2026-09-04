@@ -95,6 +95,7 @@ frontend/build/
 # Tauri build output and staged runtime resources
 frontend/src-tauri/target/
 frontend/src-tauri/gen/schemas/
+frontend/.runtime-cache/
 frontend/src-tauri/bundle-resources/*
 !frontend/src-tauri/bundle-resources/.gitkeep
 

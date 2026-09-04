@@ -23,6 +23,7 @@ const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "pa
 const buildEnv = {
   ...process.env,
   CS2_INSIGHT_APP_VERSION: version,
+  MAXGAMESTUDIO_REQUIRE_LEAGUE_RUNTIME_MANIFEST: "1",
   [pathKey]: [dirname(process.execPath), process.env[pathKey] || ""]
     .filter(Boolean)
     .join(delimiter),

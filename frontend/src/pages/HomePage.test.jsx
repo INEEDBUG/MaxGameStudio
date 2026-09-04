@@ -14,7 +14,8 @@ describe("HomePage", () => {
   test("presents cross-game release notes and feedback actions", () => {
     render(<MemoryRouter><HomePage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "home.title" })).toBeTruthy();
-    expect(screen.getByText("Mini 的置顶按钮现在可以正常取消置顶，并会记住你的选择。")).toBeTruthy();
+    expect(screen.getByText("修复后台并行模式错误关闭 MaxGameStudio 主窗口的问题；现在只有节省内存模式会收起主程序。")).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toContain("home.stableReleaseNotice");
     expect(screen.getByRole("button", { name: /home.reportBug/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /home.requestFeature/ })).toBeTruthy();
   });

@@ -6,6 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TAURI_ROOT = REPO_ROOT / "frontend" / "src-tauri"
 TAURI_BUILD_SCRIPT = REPO_ROOT / "frontend" / "scripts" / "tauri-build-version.mjs"
 TAURI_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
+LEAGUE_ADMIN_LAUNCHER = TAURI_ROOT / "src" / "league_admin_launcher.ps1"
 
 
 def test_tauri_identifier_and_installer_hook_are_stable():
@@ -25,6 +26,12 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'tasklist.exe" /FI "IMAGENAME eq $R9"' in hook
     assert 'StrCpy $R9 "CS2 Insight Agent.exe"' in hook
     assert 'StrCpy $R9 "cs2-insight-agent-desktop.exe"' in hook
+    assert 'StrCpy $R9 "MaxGameStudioLeague.exe"' in hook
+    league_guard = hook.index('StrCpy $R9 "MaxGameStudioLeague.exe"')
+    shell_guard = hook.index('StrCpy $R9 "cs2-insight-agent-desktop.exe"')
+    assert league_guard < shell_guard
+    assert "请先正常关闭英雄联盟工作台" in hook[league_guard:shell_guard]
+    assert "Call CS2_AbortMigrationInstall" in hook[league_guard:shell_guard]
     # A running Tauri shell is waited for and force-killed with its backend
     # child tree instead of aborting the install.
     assert 'taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T' in hook
@@ -48,6 +55,8 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'FindFirst $0 $1 "$INSTDIR\\python\\Lib\\site-packages\\demoparser2-*.dist-info"' in hook
     assert 'RMDir /r "$INSTDIR\\python\\Lib\\site-packages\\demoparser2"' in hook
     assert "Call CS2_RemoveBundledDemoparser" in hook
+    assert 'Delete "$INSTDIR\\league-runtime\\.maxgamestudio-acl-hardened"' in hook
+    assert "cs2_stale_league_acl_marker" in hook
     assert 'Delete "$DESKTOP\\CS2 Ultimate Insight Studio.lnk"' in hook
     assert 'Delete "$SMPROGRAMS\\CS2 Ultimate Insight Studio.lnk"' in hook
     assert "Call CS2_RemoveLegacyBrandShortcuts" in hook
@@ -81,6 +90,19 @@ def test_versioned_build_rejects_missing_webview2_loader_bundle():
     assert "rmSync(updaterSignature)" in script
     assert '!define PRODUCTNAME "MaxGameStudio"' in script
     assert "does not create the branded desktop shortcut" in script
+
+
+def test_league_administrator_launcher_uses_a_protected_same_drive_copy():
+    script = LEAGUE_ADMIN_LAUNCHER.read_text(encoding="utf-8")
+    hook = (TAURI_ROOT / "windows" / "upgrade-hooks.nsh").read_text(encoding="utf-8")
+
+    assert "MaxGameStudioAdminRuntime" in script
+    assert "New-ProtectedDirectory $sessionRoot" in script
+    assert "The runtime manifest does not match the signed host" in script
+    assert "[IO.FileShare]::Read" in script
+    assert "NODE|ELECTRON" in script
+    assert "Invoke-Expression" not in script
+    assert "HardenLeagueRuntimeAcl" not in hook
 
 
 def test_close_destroys_webview_before_waiting_for_backend():

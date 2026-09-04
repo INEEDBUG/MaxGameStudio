@@ -34,6 +34,14 @@ export const desktopBridge = isDesktopApp
       hideToTray: () => invoke("hide_to_tray"),
       quitApp: () => invoke("quit_app"),
       onCloseChoiceRequested: (callback) => listen("desktop-close-choice-requested", callback),
+      getLeagueRuntimeStatus: () => invoke("get_league_runtime_status"),
+      // Keep the frontend call site optional while always satisfying the
+      // native command's required boolean argument.
+      launchLeagueRuntime: (mode, options = {}) => invoke("launch_league_runtime", {
+        mode,
+        administrator: Boolean(options?.administrator),
+      }),
+      stopLeagueRuntime: () => invoke("stop_league_runtime"),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];
         const selected = await open({

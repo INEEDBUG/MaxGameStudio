@@ -54,13 +54,12 @@ import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
 import { Loader2 } from "lucide-react";
 import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
 import { desktopBridge } from "./desktop/desktopBridge";
+import { desktopCloseActionPayload, normalizeDesktopCloseAction } from "./utils/desktopCloseAction.js";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 import DesktopCloseDialog from "./components/DesktopCloseDialog";
 import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter";
-import LeagueMiniAutoManager from "./components/LeagueMiniAutoManager";
-import LeagueGlobalShortcutManager from "./components/LeagueGlobalShortcutManager";
-import LeagueAuxShortcutManager from "./components/LeagueAuxShortcutManager";
+import LeagueRuntimeAutoManager from "./components/LeagueRuntimeAutoManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
@@ -78,14 +77,12 @@ const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const SensitivityLabPage = lazy(() => import("./pages/SensitivityLabPage"));
 const MagneticInputLabPage = lazy(() => import("./pages/MagneticInputLabPage"));
 const ValorantLabPage = lazy(() => import("./pages/ValorantLabPage"));
-const LeagueAutomationLabPage = lazy(() => import("./pages/LeagueAutomationLabPage"));
-const LeagueOngoingPage = lazy(() => import("./pages/LeagueOngoingPage"));
+const LeagueRuntimePage = lazy(() => import("./pages/LeagueRuntimePage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 const UPDATE_SKIP_STORAGE_KEY = "maxgamestudio.update.skip_version";
-const LEAGUE_ROUTE_TABS = new Set(["automation", "history", "players", "ongoing", "toolkit"]);
 
 function PreserveSearchRedirect({ to }) {
   const location = useLocation();
@@ -95,11 +92,9 @@ function PreserveSearchRedirect({ to }) {
 function LegacyLeagueRedirect() {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
-  const requested = params.get("league_tab");
-  const tab = LEAGUE_ROUTE_TABS.has(requested) ? requested : "automation";
   params.delete("league_tab");
   const search = params.toString();
-  return <Navigate to={{ pathname: `/league/${tab}`, search: search ? `?${search}` : "", hash: location.hash }} replace />;
+  return <Navigate to={{ pathname: "/league", search: search ? `?${search}` : "", hash: location.hash }} replace />;
 }
 
 function LegacyValorantRedirect() {
@@ -112,21 +107,6 @@ function LegacyValorantRedirect() {
   return <Navigate to={{ pathname: requested === "crosshair" ? "/valorant/crosshair" : "/valorant/stretch", search: search ? `?${search}` : "", hash: location.hash }} replace />;
 }
 
-function LeagueRoutePage({ routeTab }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const params = new URLSearchParams(location.search);
-  const navigateTab = useCallback((nextTab, extra = {}) => {
-    const nextParams = new URLSearchParams(location.search);
-    nextParams.delete("league_tab");
-    if (nextTab !== "players") nextParams.delete("player");
-    if (nextTab !== "toolkit") nextParams.delete("toolkit");
-    if (nextTab === "players" && extra.player) nextParams.set("player", extra.player);
-    const search = nextParams.toString();
-    navigate({ pathname: `/league/${nextTab}`, search: search ? `?${search}` : "" });
-  }, [location.search, navigate]);
-  return <LeagueAutomationLabPage routeTab={routeTab} routeToolkit={routeTab === "toolkit" ? params.get("toolkit") || "" : ""} onNavigateTab={navigateTab} />;
-}
 
 function readSkippedUpdateVersion() {
   try {
@@ -1072,9 +1052,7 @@ export default function App() {
           const { data } = await API.get("config");
           if (cancelled) return;
           useLocaleStore.getState().hydrate(data.locale);
-          const closeAction = ["ask", "tray", "exit"].includes(data.close_action)
-            ? data.close_action
-            : data.close_to_tray === false ? "exit" : "ask";
+          const closeAction = normalizeDesktopCloseAction(data.close_action, data.close_to_tray);
           await desktopBridge?.setCloseAction(closeAction);
           if (data.obs) {
             const rawPw = data.obs.password ?? "";
@@ -1167,10 +1145,7 @@ export default function App() {
       if (closeDialogRemember) {
         await desktopBridge.setCloseAction(action);
         try {
-          await API.put("config", {
-            close_action: action,
-            close_to_tray: action !== "exit",
-          });
+          await API.put("config", desktopCloseActionPayload(action));
         } catch (error) {
           // Closing the app must still work if persistence briefly fails.
           console.error("Failed to remember desktop close choice", error);
@@ -3416,9 +3391,7 @@ export default function App() {
   return (
     <AppShellProvider value={shell}>
       <div className="app-shell relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
-        <LeagueMiniAutoManager />
-        <LeagueGlobalShortcutManager />
-        <LeagueAuxShortcutManager />
+        <LeagueRuntimeAutoManager />
         <CustomTitleBar />
         <DemoDownloadActivityCenter />
         <DesktopCloseDialog
@@ -3517,12 +3490,8 @@ export default function App() {
                 <Route path="/valorant" element={<Navigate to="/valorant/stretch" replace />} />
                 <Route path="/valorant/stretch" element={<ValorantLabPage section="stretch" />} />
                 <Route path="/valorant/crosshair" element={<ValorantLabPage section="crosshair" />} />
-                <Route path="/league" element={<Navigate to="/league/automation" replace />} />
-                <Route path="/league/automation" element={<LeagueRoutePage routeTab="automation" />} />
-                <Route path="/league/history" element={<LeagueRoutePage routeTab="history" />} />
-                <Route path="/league/players" element={<LeagueRoutePage routeTab="players" />} />
-                <Route path="/league/ongoing" element={<LeagueOngoingPage />} />
-                <Route path="/league/toolkit" element={<LeagueRoutePage routeTab="toolkit" />} />
+                <Route path="/league" element={<LeagueRuntimePage />} />
+                <Route path="/league/:legacyTab" element={<LegacyLeagueRedirect />} />
                 <Route path="/peripherals" element={<Navigate to="/peripherals/sensitivity" replace />} />
                 <Route path="/peripherals/sensitivity" element={<SensitivityLabPage />} />
                 <Route path="/peripherals/input" element={<MagneticInputLabPage />} />

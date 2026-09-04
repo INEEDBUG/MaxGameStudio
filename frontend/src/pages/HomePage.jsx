@@ -2,7 +2,11 @@ import { Bug, CheckCircle2, CircleDot, ExternalLink, Github, Lightbulb, Sparkles
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { useT } from "../i18n/useT.js";
 import { desktopBridge } from "../desktop/desktopBridge.js";
-import { HOME_RELEASE_NOTES, HOME_RELEASE_VERSION } from "../data/homeReleaseNotes.js";
+import {
+  HOME_RELEASE_NOTES,
+  HOME_RELEASE_VERSION,
+  SUPERSEDED_LOCAL_CANDIDATE_VERSION,
+} from "../data/homeReleaseNotes.js";
 
 const REPO = "https://github.com/INEEDBUG/MaxGameStudio";
 const ISSUE_URLS = {
@@ -65,6 +69,7 @@ export default function HomePage() {
 
       <section className="mt-5 rounded-2xl border border-cs2-border/70 bg-cs2-bg-card p-5 sm:p-6" aria-labelledby="home-release-title">
         <div className="flex items-center gap-2"><Github className="h-4 w-4 text-cs2-accent" aria-hidden="true" /><h2 id="home-release-title" className="text-base font-bold text-cs2-text-primary">{t("home.releaseTitle", { version: HOME_RELEASE_VERSION })}</h2></div>
+        <div role="note" className="mt-4 rounded-xl border border-cs2-accent/35 bg-cs2-accent/10 px-4 py-3 text-xs leading-5 text-cs2-text-primary">{t("home.stableReleaseNotice", { stableVersion: HOME_RELEASE_VERSION, supersededVersion: SUPERSEDED_LOCAL_CANDIDATE_VERSION })}</div>
         <div className="mt-5 grid gap-5 md:grid-cols-3">
           {sections.map(([key, Icon, titleKey]) => <div key={key}><div className="flex items-center gap-2 text-xs font-semibold text-cs2-text-primary"><Icon className="h-4 w-4 text-cs2-accent" aria-hidden="true" />{t(titleKey)}</div><ul className="mt-3 space-y-2">{releaseNotes[key].map((note) => <li key={note} className="text-xs leading-5 text-cs2-text-secondary">{note}</li>)}</ul></div>)}
         </div>

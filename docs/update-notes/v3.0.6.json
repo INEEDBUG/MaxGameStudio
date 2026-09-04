@@ -1,5 +1,6 @@
 {
   "version": "3.0.6",
+  "releaseStatus": "unreleased; superseded by stable 3.1.0",
   "fixed": [
     "修复 Mini 置顶按钮无法取消置顶、状态又被旧轮询覆盖的问题。",
     "修复秒退请求只要返回 HTTP 成功就被误报为已完成的问题；现在会等待客户端确实离开选人阶段。",

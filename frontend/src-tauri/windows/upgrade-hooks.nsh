@@ -80,6 +80,22 @@ Function CS2_WaitProcessGone
 FunctionEnd
 
 Function CS2_PrepareRunningApps
+  ; The embedded League workbench can run elevated and independently of the
+  ; lightweight Tauri guardian. Never copy over its runtime while it is still
+  ; active: a medium-integrity installer cannot reliably terminate it and a
+  ; partial in-place update would leave the workbench unusable.
+  StrCpy $R9 "MaxGameStudioLeague.exe"
+  Call CS2_IsProcessRunning
+  ${If} $R0 = 1
+    DetailPrint "等待英雄联盟工作台退出…"
+    StrCpy $R8 40
+    Call CS2_WaitProcessGone
+    ${If} $R0 = 1
+      StrCpy $R7 "检测到英雄联盟工作台仍在运行。$\r$\n$\r$\n请先正常关闭英雄联盟工作台，再重新运行安装程序。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+  ${EndIf}
+
   ; The Tauri shell closes its window instantly but the process can keep
   ; running for several seconds while the Python backend shuts down. Wait for
   ; that instead of aborting; force-kill the whole child tree only if it never
@@ -750,6 +766,29 @@ FunctionEnd
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow.libs"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow-25.0.0.dist-info"
 
+  ; Runtime smoke tests and earlier installations may leave local diagnostic
+  ; logs outside the signed/hashed payload. Never carry those machine-specific
+  ; files into a repaired install or future release candidate.
+  ; The old installer also wrote an ACL marker beside the runtime. The current
+  ; administrator path no longer trusts or uses that user-writable directory,
+  ; so remove the obsolete marker instead of suggesting that it is protected.
+  Delete "$INSTDIR\league-runtime\.maxgamestudio-acl-hardened"
+  IfFileExists "$INSTDIR\league-runtime\.maxgamestudio-acl-hardened" cs2_stale_league_acl_marker cs2_stale_league_acl_marker_done
+  cs2_stale_league_acl_marker:
+    StrCpy $R7 "无法清理旧版英雄联盟工作台权限标记。安装已停止，避免继续显示已失效的安全状态。"
+    Call CS2_AbortMigrationInstall
+  cs2_stale_league_acl_marker_done:
+
+  Delete "$INSTDIR\league-runtime\debug.log"
+  RMDir /r "$INSTDIR\league-runtime\logs"
+  IfFileExists "$INSTDIR\league-runtime\debug.log" cs2_stale_league_logs cs2_stale_league_logs_check_dir
+  cs2_stale_league_logs_check_dir:
+  IfFileExists "$INSTDIR\league-runtime\logs\*.*" cs2_stale_league_logs cs2_stale_league_logs_done
+  cs2_stale_league_logs:
+    StrCpy $R7 "无法清理旧版英雄联盟工作台诊断日志。安装已停止，避免把本机路径或对局信息继续留在程序目录。"
+    Call CS2_AbortMigrationInstall
+  cs2_stale_league_logs_done:
+
   ; Validate the exact installed runtime before the finish page can launch
   ; Tauri. This catches stale metadata, a missing extension, or an incomplete
   ; file copy at install time instead of surfacing as a backend startup dialog.
@@ -784,6 +823,7 @@ FunctionEnd
   ; asynchronously on some upgrade paths.  Never show the success page until
   ; the final on-disk runtime has passed the same import/version contract.
   Call CS2_ValidateBundledRuntime
+
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

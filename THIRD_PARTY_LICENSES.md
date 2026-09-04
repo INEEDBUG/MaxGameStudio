@@ -2,7 +2,7 @@
 
 MaxGameStudio 在编译与运行时依赖以下开源组件。常规编译依赖主要使用 MIT / BSD / Apache-2.0 / ISC 等宽松型许可证；另有下文单独列出的可选 GPL 工具。项目主体仍使用 **PolyForm Noncommercial 1.0.0**。
 
-League 实验室与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面应用分发，不是独立的桌面产品；下列条目记录它们实际涉及的依赖与许可证边界。
+League 工作台与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面应用分发，不是独立的桌面产品；下列条目记录它们实际涉及的依赖与许可证边界。`v3.1.0` 当前仍是本地候选，本文不表示已有公开 Release 或正式更新包。
 
 分发本项目编译产物（便携包 / 安装包 / Docker 镜像等）时，请保留各自的版权声明与许可证全文。具体许可证文本可在每个依赖包源码中的 `LICENSE` 文件查阅。
 
@@ -47,10 +47,11 @@ League 实验室与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面
 ## Bundled / optional Windows runtime pieces
 
 - **CPython Windows runtime** (installer and portable zip): sourced from the Astral `python-build-standalone` project (`install_only` tarball), Python Software Foundation license. See `packaging/windows/python-runtime.json` for the pinned URL.
+- **Embedded League workspace runtime**: built from the pinned `v1.5.1` source at commit `14557723706ccc0e0a9d62c470141d4cb7190fcd` and embedded as a MaxGameStudio Tauri resource. The MaxGameStudio host owns launch, stop, and update boundaries; the embedded runtime's independent updater is disabled. The source project is [LeagueAkari](https://github.com/LeagueAkari/LeagueAkari), distributed under MIT; the original copyright and full license are retained in `third_party/licenses/LeagueAkari-LICENSE.txt`. This is an attribution and license record, not a separate product installation or endorsement.
 - **Optional FFmpeg** (GPL): when the user selects the matching Inno task, the installer downloads `ffmpeg-8.1.1-essentials_build.zip` from the GyanD `codexffmpeg` GitHub release (see `packaging/windows/ffmpeg-redist.json`). FFmpeg is a trademark of the FFmpeg project.
 - **Optional @akiver/boiler-writter 1.7.0** (GPL-3.0): downloaded from the npm registry only after the user explicitly accepts the first-use notice. It remains an unmodified, separately executed Windows helper used to ask the locally signed-in Steam Game Coordinator for the latest eight match summaries or a real demo URL. Its package integrity is pinned by SHA-512, and its complete license is installed next to the executable. Source: https://github.com/akiver/boiler-writter
 
 ## Adapted source
 
 - The match share-code decoder in `backend/app/valve_demo_resolver.py` is a Python adaptation of `akiver/csgo-sharecode` (MIT). Source: https://github.com/akiver/csgo-sharecode. The required notice is retained in `third_party/licenses/csgo-sharecode-LICENSE.txt`.
-- The integrated League automation lab adapts the local LCU discovery and game-flow concepts from `LeagueAkari` (MIT) into this project's Python/Tauri architecture. Source: https://github.com/LeagueAkari/LeagueAkari. The required notice is retained in `third_party/licenses/LeagueAkari-LICENSE.txt`; LeagueAkari's Electron/Vue application is not bundled.
+- The integrated League automation lab and embedded workspace use the pinned `LeagueAkari` (MIT) source for the local LCU discovery and game-flow surface, adapted to MaxGameStudio's Python/Tauri host and branding. Source: https://github.com/LeagueAkari/LeagueAkari. The required notice is retained in `third_party/licenses/LeagueAkari-LICENSE.txt`; the source-built runtime is hosted as part of MaxGameStudio rather than presented as an independently installed upstream product.

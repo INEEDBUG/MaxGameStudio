@@ -594,11 +594,13 @@ dependencies = [
 
 [[package]]
 name = "cs2-insight-agent-desktop"
-version = "3.0.6"
+version = "3.1.0"
 dependencies = [
+ "base64 0.22.1",
  "embed-resource",
  "getrandom 0.3.4",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -608,6 +610,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,40 +1,46 @@
 // User-facing notes are intentionally bundled so the home page is available offline.
 // Keep these readable for non-technical users; engineering details belong in GitHub.
-export const HOME_RELEASE_VERSION = "3.0.6";
+export const HOME_RELEASE_VERSION = "3.1.0";
+
+export const SUPERSEDED_LOCAL_CANDIDATE_VERSION = "3.0.6";
 
 export const HOME_RELEASE_NOTES = {
   zh: {
     fixed: [
-      "Mini 的置顶按钮现在可以正常取消置顶，并会记住你的选择。",
-      "秒退不再把普通请求返回误报为成功；只有客户端确实离开选人阶段才显示完成。",
-      "VALORANT 配置自动发现失败时会说明原因，不再只显示“未找到”。",
+      "修复后台并行模式错误关闭 MaxGameStudio 主窗口的问题；现在只有节省内存模式会收起主程序。",
+      "修复记住英雄联盟启动方式后无法再次选择的问题，手动进入页面始终可以修改或清除选择。",
+      "修复英雄联盟工作台浅色/深色主题下按钮不可见与侧栏异常红线，并移除不再保留的游戏内发送入口。",
+      "修复内嵌工作台运行时升级覆盖风险；工作台未退出时安装程序会安全中止。",
     ],
     added: [
-      "VALORANT 真拉伸可以手动选择当前账号的 GameUserSettings.ini，并继续使用同一文件完成同步、锁定和恢复。",
-      "Mini 新增透明度调节，最低保留 40% 可见度，避免窗口完全不可见。",
-      "进入 League 对局阶段后会自动显示独立实时对局窗口，离开对局或断线后自动隐藏。",
+      "英雄联盟入口升级为由 MaxGameStudio 管理的单一内嵌工作台，无需同时维护两套重复界面。",
+      "新增每次询问、节省内存和后台并行三种启动方式，并支持可逆的记住与清除选择。",
+      "新增仅提升英雄联盟工作台权限的管理员启动选项，MaxGameStudio 主程序仍保持普通权限。",
+      "新增独立英雄联盟工作台图标，便于在任务栏和窗口中识别。",
     ],
     optimized: [
-      "实时对局先显示阵容，再逐名补齐战绩；较慢的玩家不会挡住其他卡片。",
-      "移除游戏内发送、房间/无尽狂潮、本地标签管理和设置迁移等不再保留的工具入口。",
-      "独立实时对局窗口在进入对局时直接显示深色启动页，避免隐藏 WebView 在 Windows 上恢复为白窗。",
+      "节省内存模式会暂停 MaxGameStudio 后端以及 CS2/无畏契约后台任务，退出工作台后自动恢复。",
+      "后台并行模式会保留主窗口、WebView、后端及其他游戏任务，并在启动前提示额外内存开销。",
+      "管理员工作台从经过清单和 SHA-256 双重验证的受保护临时会话启动，并使用独立受保护配置。",
     ],
   },
   en: {
     fixed: [
-      "Mini can now be unpinned correctly and remembers the choice.",
-      "Dodge no longer reports success until the client actually leaves champion select.",
-      "VALORANT CFG discovery now explains why no file was found.",
+      "Fixes Run in parallel incorrectly closing the MaxGameStudio main window; only Save memory now suspends the host UI.",
+      "Fixes remembered League launch choices hiding the chooser permanently; manual entry can always change or clear the choice.",
+      "Fixes invisible controls in both themes and the stray sidebar line, and removes the retired in-game-send entry.",
+      "Prevents an installer from overwriting the embedded workspace while it is still running.",
     ],
     added: [
-      "VALORANT true stretch can manually select the active GameUserSettings.ini and reuse it for sync, lock, and restore.",
-      "Mini now includes an opacity control with a safe 40% minimum.",
-      "The standalone League ongoing-game window automatically follows live game phases.",
+      "Replaces duplicated League surfaces with one embedded workspace managed by MaxGameStudio.",
+      "Adds Ask every time, Save memory, and Run in parallel startup modes with reversible remembered choices.",
+      "Adds optional elevation for the League workspace only while keeping the MaxGameStudio host at standard privileges.",
+      "Adds a dedicated League workspace icon for clearer taskbar and window identification.",
     ],
     optimized: [
-      "Ongoing-game cards show the roster first and enrich players independently.",
-      "Obsolete in-game-send, room/Swarm, tag-manager, and settings-transfer surfaces were removed.",
-      "The ongoing-game window now opens on a dark boot surface instead of restoring a hidden WebView as a white window.",
+      "Save memory pauses the MaxGameStudio backend and CS2/VALORANT background tasks, then restores them after the workspace exits.",
+      "Run in parallel keeps the host window, WebView, backend, and other game tasks alive and shows the expected memory cost first.",
+      "Administrator launches use a protected temporary session verified against the embedded manifest and SHA-256 hashes, plus a separate protected profile.",
     ],
   },
 };

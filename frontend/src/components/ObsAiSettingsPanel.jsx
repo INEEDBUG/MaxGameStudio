@@ -787,7 +787,7 @@ export default function ObsAiSettingsPanel({
             { step: "record", label: "进行短录制测试", status: "ok", detail: "已完成 10 秒测试录制。" },
             { step: "probe", label: "检查测试视频和掉帧", status: "ok", detail: "ffprobe、OBS Stats 与日志检查完成。" },
           ],
-          backup: { id: "obs_preview", path: "C:\\Users\\Demo\\AppData\\Local\\CS2 Insight\\backups\\obs_preview" },
+          backup: { id: "obs_preview", path: "C:\\Users\\Demo\\AppData\\Local\\MaxGameStudio\\backups\\obs_preview" },
           test_file: "C:\\Users\\Demo\\Videos\\OBS_OUTPUT\\obs-test.mp4",
           validation: { passed: true, verdict: "stable", media_resolution_ok: true, r_frame_rate_ok: true, avg_frame_rate_ok: true, stats_ok: true, logs_ok: true, encoder_ok: true, reasons: [] },
           actual: {

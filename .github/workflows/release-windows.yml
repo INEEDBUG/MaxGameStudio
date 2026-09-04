@@ -6,7 +6,7 @@ on:
       version:
         description: "Private release-candidate version"
         required: true
-        default: "0.1.0-rc.1"
+        default: "3.1.0"
   push:
     branches:
       - "main"
@@ -85,6 +85,21 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Build pinned MaxGameStudio League runtime
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP "maxgamestudio-league-v1.5.1"
+          git init --quiet $source
+          git -C $source remote add origin https://github.com/LeagueAkari/LeagueAkari.git
+          git -C $source fetch --depth 1 origin 14557723706ccc0e0a9d62c470141d4cb7190fcd
+          git -C $source checkout --detach 14557723706ccc0e0a9d62c470141d4cb7190fcd
+          Push-Location $source
+          try {
+            corepack.cmd yarn install --immutable
+            if ($LASTEXITCODE -ne 0) { throw "Pinned League runtime dependency install failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
+          ./packaging/windows/stage-league-runtime.ps1 -SourceDir $source -Build
+
       - name: Install backend test dependencies
         run: uv sync --frozen
 
@@ -134,7 +149,7 @@ jobs:
           WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
         run: |
           if (-not $env:WINDOWS_PFX_BASE64) {
-            Write-Host "WINDOWS_PFX_BASE64 is not configured; producing an unsigned installer"
+            Write-Warning "WINDOWS_PFX_BASE64 is not configured; producing an installer without Authenticode. The mandatory Tauri updater signature and SHA-256 checks remain enabled."
             exit 0
           }
           if (-not $env:WINDOWS_PFX_PASSWORD) { throw "WINDOWS_PFX_PASSWORD is required when WINDOWS_PFX_BASE64 is configured" }
@@ -148,6 +163,32 @@ jobs:
               Select-Object -First 1
             if (-not $certificate) { throw "The imported PFX did not contain a code-signing certificate with a private key" }
             "CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            # The League workspace can be launched through UAC independently
+            # from the Tauri host. Sign that executable too, then refresh the
+            # payload manifest that is embedded into the host at compile time.
+            $runtimeRoot = (Resolve-Path "frontend/.runtime-cache/league-runtime").Path
+            $runtimeExe = Join-Path $runtimeRoot "MaxGameStudioLeague.exe"
+            $runtimeSignature = Set-AuthenticodeSignature `
+              -FilePath $runtimeExe `
+              -Certificate $certificate `
+              -HashAlgorithm SHA256 `
+              -TimestampServer "http://timestamp.comodoca.com"
+            if ($runtimeSignature.Status -ne 'Valid') {
+              throw "Embedded League runtime signing failed: $($runtimeSignature.Status)"
+            }
+            $runtimeHashes = [ordered]@{}
+            Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File | Where-Object {
+              $_.Name -ne "maxgamestudio-runtime-hashes.json"
+            } | Sort-Object FullName | ForEach-Object {
+              $relative = [IO.Path]::GetRelativePath($runtimeRoot, $_.FullName).Replace('\', '/')
+              $runtimeHashes[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            [IO.File]::WriteAllText(
+              (Join-Path $runtimeRoot "maxgamestudio-runtime-hashes.json"),
+              ($runtimeHashes | ConvertTo-Json -Depth 10),
+              [Text.UTF8Encoding]::new($false)
+            )
           } finally {
             Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
           }
@@ -190,7 +231,10 @@ jobs:
 
       - name: Report bundled runtime size
         shell: pwsh
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 100
+        # The pinned Electron League workbench includes Chromium license and
+        # graphics fallback files. Keep the resource gate below the 500 MiB
+        # installed-footprint gate without stripping required runtime files.
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 450
 
       - name: Write SHA256SUMS
         shell: pwsh
@@ -200,11 +244,12 @@ jobs:
           if (-not $installer) { throw "Tauri NSIS installer not found" }
           $installerMiB = $installer.Length / 1MB
           Write-Host ("Installer size: {0:N2} MiB" -f $installerMiB)
-          if ($installerMiB -gt 45) { throw ("Installer exceeds 45 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          if ($installerMiB -gt 400) { throw ("Installer exceeds 400 MiB budget: {0:N2} MiB" -f $installerMiB) }
           $appExe = Get-Item "frontend/src-tauri/target/release/cs2-insight-agent-desktop.exe"
           if ($env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT) {
             $expectedThumbprint = $env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', ''
-            foreach ($artifact in @($appExe, $installer)) {
+            $leagueRuntimeExe = Get-Item "frontend/src-tauri/bundle-resources/league-runtime/MaxGameStudioLeague.exe"
+            foreach ($artifact in @($appExe, $installer, $leagueRuntimeExe)) {
               $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
               if ($signature.Status -ne 'Valid') { throw "Authenticode validation failed for $($artifact.Name): $($signature.Status)" }
               if ($signature.SignerCertificate.Thumbprint -ne $expectedThumbprint) {
@@ -215,7 +260,7 @@ jobs:
           $resourceBytes = (Get-ChildItem "frontend/src-tauri/bundle-resources" -Recurse -File | Measure-Object Length -Sum).Sum
           $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
           Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
-          if ($installedMiB -gt 120) { throw ("Installed footprint exceeds 120 MiB budget: {0:N2} MiB" -f $installedMiB) }
+          if ($installedMiB -gt 500) { throw ("Installed footprint exceeds 500 MiB budget: {0:N2} MiB" -f $installedMiB) }
           $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }
@@ -233,6 +278,13 @@ jobs:
           }
           if (-not (Test-Path -LiteralPath $userNotesPath)) {
             throw "Plain-language update notes are required: $userNotesPath"
+          }
+          $userNotes = Get-Content -LiteralPath $userNotesPath -Raw | ConvertFrom-Json
+          if ([string]$userNotes.version -ne $env:BUILD_VERSION) {
+            throw "Plain-language update notes version must match $env:BUILD_VERSION"
+          }
+          if ([string]$userNotes.releaseStatus -ne "stable") {
+            throw "Stable tags require releaseStatus=stable in $userNotesPath"
           }
           "path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "user_path=$userNotesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

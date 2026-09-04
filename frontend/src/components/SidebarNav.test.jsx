@@ -44,29 +44,30 @@ describe("SidebarNav", () => {
     expect(screen.getByRole("button", { name: "nav.sectionCs2" }).getAttribute("aria-current")).toBeNull();
   });
 
-  test("groups game features and automatically opens the active section", () => {
+  test("exposes the single League workspace as a direct route", () => {
     render(
       <MemoryRouter initialEntries={["/league/history"]}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    const leagueGroup = screen.getByRole("button", { name: "nav.sectionLeague" });
-    expect(leagueGroup.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("link", { name: "nav.leagueHistory" }).getAttribute("href")).toBe("/league/history");
+    const leagueLink = screen.getByRole("link", { name: "nav.sectionLeague" });
+    expect(leagueLink.getAttribute("href")).toBe("/league");
+    expect(leagueLink.getAttribute("aria-current")).toBe("page");
     expect(screen.queryByRole("link", { name: "nav.sensitivityLab" })).toBeNull();
   });
 
-  test("allows the active section to stay collapsed until navigation changes", () => {
+  test("allows an active multi-page game section to stay collapsed until navigation changes", () => {
     render(
-      <MemoryRouter initialEntries={["/league/history"]}>
+      <MemoryRouter initialEntries={["/valorant/stretch"]}>
         <SidebarNav />
       </MemoryRouter>,
     );
-    const leagueGroup = screen.getByRole("button", { name: "nav.sectionLeague" });
-    fireEvent.click(leagueGroup);
-    expect(leagueGroup.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("link", { name: "nav.leagueHistory" })).toBeNull();
+    const valorantGroup = screen.getByRole("button", { name: "nav.sectionValorant" });
+    expect(valorantGroup.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(valorantGroup);
+    expect(valorantGroup.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("link", { name: "nav.valorantStretch" })).toBeNull();
   });
 
   test("persists collapsible group state and exposes keyboard-friendly aria state", () => {

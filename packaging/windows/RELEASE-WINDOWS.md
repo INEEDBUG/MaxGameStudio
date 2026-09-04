@@ -6,7 +6,7 @@
 
 Python 后端与 demoparser2 等既有运行时依赖按锁定清单打入 resources。发布链继续使用仓库原有的 lean demoparser wheel，避免重新引入 NumPy、pandas、Polars 或 PyArrow。应用内自动更新使用 `tauri-plugin-updater`：安装包来自本仓库 GitHub Release，签名清单发布到本仓库 `updater` 分支（见下文「在线更新」）。
 
-如果仓库配置了 `WINDOWS_PFX_BASE64` 与 `WINDOWS_PFX_PASSWORD`，GitHub Actions 会把 PFX 导入临时证书库，并让 Tauri 对主程序和 NSIS 安装包执行 Authenticode 签名；未配置时仍允许产出 unsigned 开发包。
+如果仓库配置了 `WINDOWS_PFX_BASE64` 与 `WINDOWS_PFX_PASSWORD`，GitHub Actions 会把 PFX 导入临时证书库，并对主程序、内嵌 `MaxGameStudioLeague.exe` 和 NSIS 安装包执行 Authenticode 签名；内嵌运行时签名后会重新生成哈希清单，再由 Tauri 宿主把该清单编译进自身。未配置时仍允许按项目此前的发布方式产出不带 Authenticode 的安装包，但必须明确说明 Windows 可能显示“未知发布者”；Tauri 更新签名与 SHA-256 校验仍为发布必需条件。
 
 ## Cut a release
 
@@ -75,7 +75,7 @@ try {
 }
 ```
 
-正式交付前至少确认：安装包版本、内置 `release_version.txt`、lean `demoparser2` 可导入、Polars/PyArrow 未打入，以及 resources / 安装包 / 预计安装占用分别不超过 `100 / 45 / 120 MiB`。本地未配置证书时产物是 unsigned；CI 配置 `WINDOWS_PFX_BASE64` 和 `WINDOWS_PFX_PASSWORD` 后会自动签名。
+正式交付前至少确认：安装包版本、内置 `release_version.txt`、lean `demoparser2` 可导入、Polars/PyArrow 未打入，以及包含 MaxGameStudio League 运行时后的 resources / 安装包 / 预计安装占用分别不超过 `450 / 400 / 500 MiB`。resources 预算包含 Electron 必需的 Chromium 许可证和图形兼容文件，不得为压缩体积删除这些文件。本地未配置证书时产物是 unsigned；CI 配置 `WINDOWS_PFX_BASE64` 和 `WINDOWS_PFX_PASSWORD` 后会自动签名。
 
 Windows GNU 构建的主程序会动态加载同目录的 `WebView2Loader.dll`。`tauri-build` 只会把它放到 `target/release`，项目 NSIS hook 负责把它写入 `$INSTDIR`；`desktop:build:ver` 会在构建结束后同时检查 DLL、hook、生成的 NSIS 脚本和安装包，缺失时直接让构建失败。验收安装目录时必须确认 `cs2-insight-agent-desktop.exe` 与 `WebView2Loader.dll` 同级。
 
@@ -128,6 +128,6 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ./packaging/windows/report-runtime-size.ps1 -Root $resources -OutputPath dist/runtime-size-report.json
 ```
 
-CI 预算：嵌入 resources 不超过 `100 MiB`，NSIS 安装包不超过 `45 MiB`，预计安装占用不超过 `120 MiB`。超过上限会中止 release。
+CI 预算：嵌入 resources 不超过 `450 MiB`，NSIS 安装包不超过 `400 MiB`，预计安装占用不超过 `500 MiB`。该预算包含 MaxGameStudio League 的 Electron 运行时及其必须保留的 Chromium 许可证、DirectX/Vulkan/SwiftShader 兼容文件；超过上限会中止 release。
 
 `bootstrap-staging.ps1`、`package_portable.ps1` 与 `CS2InsightAgent.iss` 仍保留为 legacy/manual 工具；Tauri 正式发布仅复用 `package_portable.ps1` 的 Python staging 能力。

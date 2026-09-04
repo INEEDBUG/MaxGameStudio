@@ -7,297 +7,263 @@
 </h1>
 
 <p align="center">
-  <img src="./asset/icon-cn.svg" alt="" width="20" height="20" style="vertical-align: middle;"> 简体中文 | <a href="./README_EN.md"><img src="./asset/icon-en.svg" alt="" width="20" height="20" style="vertical-align: middle;"> English</a>
+  <img src="./asset/icon-en.svg" alt="" width="20" height="20" style="vertical-align: middle;"> English | <a href="./README.zh-CN.md"><img src="./asset/icon-cn.svg" alt="" width="20" height="20" style="vertical-align: middle;"> 简体中文</a>
 </p>
 
-<h3 align="center"><b>面向个人训练、比赛复盘与多游戏辅助的本地桌面工作台</b> </h3>
-<h4 align="center">CS2 · 英雄联盟 · VALORANT · 外设调优</h4>
+<h3 align="center"><b>A local desktop workspace for personal training, match review, and multi-game tools</b> </h3>
+<h4 align="center">CS2 · League of Legends · VALORANT · Peripheral Tuning</h4>
 
-> **一个 MaxGameStudio 桌面应用：** CS2、英雄联盟、VALORANT 与外设调优共用同一个 Tauri 客户端；进入游戏分区后即可展开该游戏的全部功能，不需要安装多个桌面程序。
+> **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **当前稳定版为 `v3.0.6`。** `v2.5.17` 已因重大升级缺陷撤回；用户应直接升级到 `v3.0.6`。CS2 工作台、英雄联盟与无畏契约功能已经合并在同一个安装包中。
+> **The latest stable release is `v3.1.0`.** `v2.5.17` was withdrawn due to critical upgrade defects, and internal candidate `v3.0.6` was never published. Existing users can upgrade directly to `v3.1.0`. The CS2 workspace, embedded League workspace, VALORANT tools, and peripheral tuning ship in one installer.
 
-> 本仓库不是从零编写的软件，而是明确基于开源/源码可用项目继续开发的非商业衍生版本。请在使用或分发前阅读下面的代码来源与许可证说明。
+> This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
 <p align="center">
-  <a href="./PLAYER_GUIDE.md">使用指南</a> •
-  <a href="./CONTRIBUTING.md">贡献指南</a> •
-  <a href="#v306-更新重点">v3.0.6 更新重点</a> •
-  <a href="#核心功能">核心功能</a> •
-  <a href="#安装">快速安装</a> •
-  <a href="#参考项目与致谢">参考项目</a> •
-  <a href="#声明">声明</a> •
-  <a href="#License">License</a>
+  <a href="./PLAYER_GUIDE_EN.md">User Guide</a> •
+  <a href="./CONTRIBUTING_EN.md">Contributing</a> •
+  <a href="./docs/releases/v3.1.0.zh-CN.md">v3.1.0 Release Notes</a> •
+  <a href="#key-features">Key Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#reference-project-and-attribution">Reference Project</a> •
+  <a href="#disclaimer">Disclaimer</a> •
+  <a href="#license">License</a>
 </p>
 
-## 参考项目与致谢
+## Reference Project and Attribution
 
-- **参考项目**：[DrEAmSs59 原始项目](https://github.com/DrEAmSs59/CS2-insight-agent)。该链接仅用于记录参考来源；MaxGameStudio 的当前桌面架构、功能实现与品牌由本项目独立维护，不在此宣称主体代码或架构源于该项目。相关许可证与作者归属信息按仓库内许可证文件保留。
-- **官匹 Demo 工作流参考**：[akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager)。本项目没有采用它的 PostgreSQL 数据层，也没有把整个项目代码直接合并进来。
-- **Steam Game Coordinator 辅助程序**：[akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0（GPL-3.0）。它在用户首次明确同意后按需下载，并以未修改的独立进程运行。
-- **Share Code 解码代码**：[akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode)（MIT）的 Python 适配，许可证原文保存在 `third_party/licenses/csgo-sharecode-LICENSE.txt`。
-- **英雄联盟自动化参考**：[LeagueAkari](https://github.com/LeagueAkari/LeagueAkari)（MIT）提供了 LCU 与游戏流程等参考思路；本项目按 React/Tauri/FastAPI 架构独立实现，保留 MIT 许可证与致谢于 `third_party/licenses/LeagueAkari-LICENSE.txt`，不打包其 Electron/Vue 应用。
-- 完整第三方依赖与许可证边界见 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md)。
+- **Reference project:** See the [reference-project section in the Chinese README](./README.zh-CN.md#参考项目与致谢). It records the single reference-project entry requested for this product without presenting it as the source of MaxGameStudio's current desktop architecture or implementation.
+- **Official Demo workflow reference:** [akiver/cs-demo-manager](https://github.com/akiver/cs-demo-manager). Its PostgreSQL data layer is not used, and the full project was not merged into this repository.
+- **Steam Game Coordinator helper:** [akiver/boiler-writter](https://github.com/akiver/boiler-writter) 1.7.0 (GPL-3.0), downloaded only after first-use consent and executed unmodified as a separate process.
+- **Share Code decoding:** a Python adaptation of [akiver/csgo-sharecode](https://github.com/akiver/csgo-sharecode) (MIT); its notice is retained at `third_party/licenses/csgo-sharecode-LICENSE.txt`.
+- **Embedded League workspace source and attribution (license tracking only):** The embedded workspace is built from pinned `v1.5.1` source at commit `14557723706ccc0e0a9d62c470141d4cb7190fcd`, hosted by MaxGameStudio's Tauri shell for lifecycle and update boundaries; the embedded runtime's independent updater is disabled. The source project is [LeagueAkari](https://github.com/LeagueAkari/LeagueAkari), distributed under MIT, with its copyright and full license retained at `third_party/licenses/LeagueAkari-LICENSE.txt`. This link records attribution and licensing; it is not a product entry point or endorsement.
+- See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) for the complete dependency and license boundaries.
 
-本仓库不展示任何上游作者的收款码，也不代表上游作者募集赞助。新的橙色准星/数据脉冲图标为本项目原创资产，不使用 Valve 官方 CS2 标志。
+This repository does not display upstream donation QR codes or solicit money on behalf of upstream authors. The new orange crosshair/data-pulse emblem is an original project asset and does not use Valve's official CS2 mark.
 
 ---
 
-## v3.0.6 更新重点
+## What's new in v3.1.0
 
-> [!TIP]
-> 本版本重点修复英雄联盟 Mini、秒退和实时对局，并为 VALORANT 真拉伸补充手动 CFG 选择。完整技术说明与安装包见 [v3.0.6 Release](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.6)；客户端更新弹窗会使用面向普通用户的“修复 / 新功能 / 优化”摘要。
+- **One embedded League workspace** — The League entry is consolidated into one MaxGameStudio-managed workspace. Its runtime is built from pinned `v1.5.1` source and embedded with the desktop resources, while the original MIT copyright and license attribution remain available.
+- **Save memory** — Starting the workspace pauses the MaxGameStudio backend and CS2/VALORANT background tasks, destroys the main WebView, and leaves only the lightweight Tauri supervisor plus the embedded workspace; the main window and backend recover when the workspace exits.
+- **Run in parallel** — Keeps the MaxGameStudio main window, main WebView, backend, and background tasks running alongside the workspace. This can use more memory, so the launcher shows a local measured reference while actual usage still varies by page and system.
+- **Reversible automatic entry** — Choose Ask every time, Save memory, or Run in parallel. A remembered choice is used for automatic entry only when a League client is detected. Opening `/league` always shows the chooser, with the remembered mode merely preselected; the workspace entry and Settings → System & Updates can clear the choice and restore the prompt.
+- **Optional administrator launch** — Request elevation for the embedded League workspace only; MaxGameStudio itself is never elevated. The administrator choice can be remembered with Save memory or Run in parallel. Windows may show a UAC prompt according to its policy; cancelling it leaves the main window and backend running and does not save the cancelled launch. The host first verifies the installed payload, then trusted Windows PowerShell copies only manifest-listed files into a random protected session on the same drive. The elevated side binds the embedded manifest digest, rechecks every SHA-256 value, rejects links and extra files, keeps the verified payload locked for the full session, and uses a separate protected Chromium profile instead of loading privileged code or profile state from the user-writable install tree.
+- **UI and tool boundaries** — Fixes visibility of the paired theme buttons in both light and dark themes, removes the stray red sidebar line, adds a dedicated League workspace icon, and removes the obsolete League in-game-send entry so Game Send is no longer presented as an available feature.
+- **Release integrity** — The Tauri updater signature remains mandatory, and bundled payloads are verified against embedded SHA-256 manifests. Authenticode is applied when repository certificate secrets are configured; otherwise Windows may show “Unknown publisher” during installation or elevation.
+- **Version succession** — Historical internal candidate `v3.0.6` was never released. Existing `v3.0.5` users upgrade directly to stable `v3.1.0`; the old candidate notes remain available for traceability only.
 
-- **Mini 置顶与透明度** — 置顶按钮可正常开关并保存；新增 40%～100% 透明度调节，避免窗口完全不可见。
-- **秒退结果验证** — 不再把普通请求返回当作成功；必须看到客户端离开英雄选择或选人会话消失，失败原因会直接显示。
-- **实时对局自动窗口** — 进入 GameStart / InProgress / Reconnect 自动显示独立窗口，离开对局或断线自动隐藏；启动阶段使用深色占位，避免 Windows 隐藏 WebView 恢复时出现白窗。
-- **玩家渐进加载** — 先展示阵容，再逐名补齐战绩与评价，单名慢玩家不会阻塞全队卡片。
-- **工具箱精简** — 移除游戏内发送、房间/无尽狂潮、本地标签批量管理和设置迁移等不再保留的入口。
-- **VALORANT CFG 手选** — 自动发现失败时解释原因，并允许在现有真拉伸页手动选择 `GameUserSettings.ini` 后继续同步、锁定、解锁与恢复。
+See [`docs/releases/v3.1.0.zh-CN.md`](./docs/releases/v3.1.0.zh-CN.md) for the complete release notes.
 
-- **更新需明确确认** — 发现新版本后同时显示“立即更新”和“暂不更新此版本”；只有点击“立即更新”才会开始下载、校验、安装和重启。
-- **多游戏首页** — 首页集中展示 MaxGameStudio 版本公告，不再把 CS2 上手指南作为默认首屏。
-- **反馈入口** — 首页提供 Bug、需求 Issue 表单，以及 PR 和项目仓库入口；公告离线内置，无需额外启动请求。
-- **导航更清晰** — 左侧新增独立首页入口，CS2 上手指南仍保留在 CS2 分区内。
-- **VALORANT CFG 同步** — 真拉伸应用时同步已有分辨率字段、创建完整备份并默认锁定 `GameUserSettings.ini`；支持解锁、恢复与失效检测，游戏运行时拒绝强改。
+---
 
-| 分区 | 现在可以直接进入的功能 |
+## v3.0.6 historical local candidate (unreleased; superseded by v3.1.0)
+
+> [!WARNING]
+> `v3.0.6` was never released and has no GitHub Release or formal updater entry. The notes below are retained as a historical candidate record; it was superseded by stable `v3.1.0`, and the client must not treat `v3.0.6` as an upgrade.
+
+- **Mini pin and opacity** — Pinning can be toggled and persisted; a new 40%–100% opacity control keeps the window recoverable.
+- **Verified dodge outcome** — A successful HTTP response is no longer enough; the client must leave champion select or lose the active session before success is shown.
+- **Automatic ongoing-game window** — GameStart, InProgress, and Reconnect show the dedicated window; leaving the game or disconnecting hides it. The hidden WebView is prepared early to reduce white flashes.
+- **Progressive player data** — The roster appears first and individual cards are enriched as their data completes.
+- **Smaller League toolkit** — Obsolete in-game-send, room/Swarm, bulk tag-manager, and settings-transfer surfaces are removed.
+- **Manual VALORANT CFG selection** — Discovery failures now explain the cause and the existing true-stretch page can select a valid `GameUserSettings.ini` for sync, lock, unlock, and restore.
+
+- **Explicit update confirmation** — The updater shows both “Update now” and “Skip this version”; downloading, installing, and restarting begin only after “Update now” is clicked.
+- **Multi-game home** — The home route presents MaxGameStudio release notes instead of opening the CS2 guide as the default first screen.
+- **Feedback links** — The home page provides Bug and Feature Issue forms, plus Pull Requests and repository links. Notes are bundled for offline startup.
+- **Clearer navigation** — Home is a standalone sidebar entry, while the CS2 guide remains available inside the CS2 section.
+- **VALORANT CFG sync** — True stretch patches existing resolution fields, creates a full backup, and locks `GameUserSettings.ini` by default, with unlock, restore, and drift detection; writes are refused while the game is running.
+
+| Section | Directly accessible features |
 | --- | --- |
-| **CS2** | Demo 库、官匹下载、解析分析、录制队列、视频库、合辑工作台与 LiteCut |
-| **英雄联盟** | 自动化、Mini 面板、战绩、玩家中心、实时对局与客户端工具箱 |
-| **VALORANT** | 真实拉伸安全向导与准心编辑/分享码工具 |
-| **外设调优** | 灵敏度实验室与磁轴输入实验室，不再错误归类到 CS2 |
+| **CS2** | Demo library, official-match downloads, analysis, recording queue, video library, montage workbench, and LiteCut |
+| **League of Legends** | Automation, Mini panel, match history, player center, ongoing-game analysis, and client toolkit |
+| **VALORANT** | Safe true-stretch guide and crosshair/share-code tools |
+| **Peripheral Tuning** | Sensitivity and magnetic-key input labs, no longer grouped under CS2 |
 
-本版本主要改进：
+Highlights:
 
-- **新增语言选项** — 可选择繁体中文（香港）、繁体中文（台湾）、马来语和俄语；马来语与俄语目前标记为 Beta，部分较深页面仍可能回退到英文或简体中文。
-- **侧栏可以按需收起** — 当前游戏分区在进入时自动展开，但用户手动收起后不会被路由状态强制重新打开。
-- **移除重复导航** — 英雄联盟页面内部不再重复显示侧栏已有的自动化、战绩、玩家中心、实时对局和客户端工具入口。
-- **实时对局独立入口** — `/league/ongoing` 现在使用单独页面，包含实时设置、刷新和独立窗口入口，不再依赖巨型实验室页面外壳。
-- **渐进加载玩家数据** — 首屏先显示队伍与玩家卡片，战绩仍在加载的玩家显示明确骨架；完整结果到达后逐卡更新，单名慢玩家不会阻塞其他卡片。
-- **更严格的开黑识别** — 组排推断要求候选组内玩家两两共同对局达到阈值，减少链式关系造成的误判；胜率队标签同时保留样本与判断证据。
-- **有界刷新** — 部分结果短时间快速刷新，完整后恢复到常规 5 秒刷新；卸载与历史预览会停止实时请求，避免旧响应覆盖当前页面。
-- **Mini 自动接受更及时** — ReadyCheck 事件直接启动 0/0.1 秒计时，重复事件不再重置截止时间；事件连接短暂失败后会自动重连并补读当前状态。
-- **浅色模式可读性修复** — 实时对局玩家卡的胜率、KDA 与 Akari 指标保持稳定对比度，不再出现白底白字。
+- **Regional language choices** — Traditional Chinese (Hong Kong), Traditional Chinese (Taiwan), Malay, and Russian are selectable. Malay and Russian are marked Beta because deeper screens can still fall back to English or Simplified Chinese.
+- **Collapsible active sections** — Entering a game section still opens it automatically, while an explicit user collapse now remains respected.
+- **No duplicate League navigation** — The five canonical League entries are no longer repeated inside the page body.
+- **Dedicated ongoing-game page** — `/league/ongoing` now has its own page with settings, refresh, and standalone-window actions instead of reusing the large automation shell.
+- **Progressive player loading** — The roster and player cards appear first; cards awaiting history show an explicit skeleton and update independently when richer data arrives.
+- **Stricter premade inference** — Every player pair in a candidate group must meet the shared-match threshold, reducing chained false positives. Win-rate-team labels retain their sample evidence.
+- **Bounded polling** — Partial snapshots refresh briefly at a faster interval, then return to the normal five-second cadence when ready. Unmounts and historical previews stop live requests.
+- **Faster Mini auto-accept** — ReadyCheck events start the 0/0.1-second timer directly, duplicate events no longer reset the deadline, and transient event-stream failures reconnect and prime the current state.
+- **Readable light theme** — Win rate, KDA, and Akari metrics retain sufficient contrast inside the dark ongoing-game player cards.
 
-上述行为由定向自动化测试验证，不代表所有电脑上的绝对延迟。发布准备阶段没有自动执行英雄联盟账号动作，也未宣称完成 Lobby → ReadyCheck → ChampSelect → InProgress 的真实客户端全阶段验收。
+These behaviors are covered by targeted automated tests, but they are not promises of absolute latency on every PC. Release preparation did not execute League account actions and does not claim a complete live-client Lobby → ReadyCheck → ChampSelect → InProgress validation chain.
 
 ---
 
-## 核心功能
+## Key Features
 
-### 功能截图
+### Screenshots
 
-以下截图来自 `v2.5.16` 桌面端 UI 基线和本地演示环境，不应视为 `v3.0.4` 的专属截图。演示账号、断开连接与空数据状态仅用于展示界面，不包含真实 SteamID、Riot ID、比赛记录或本机路径。点击图片可查看原图。
+These screenshots come from the `v2.5.16` desktop UI baseline and local demo fixtures; they are not presented as `v3.0.4`-specific screenshots. Disconnected and empty states are used where needed; the images contain no real SteamID, Riot ID, match history, or local installation path.
 
 <table>
   <tr>
-    <td width="50%" align="center"><b>英雄联盟实验室：游戏流程自动化与 Mini 面板</b><br><a href="./docs/screenshots/league-lab.png"><img src="./docs/screenshots/league-lab.png" alt="英雄联盟实验室：游戏流程自动化与 Mini 面板" width="100%"></a></td>
-    <td width="50%" align="center"><b>无畏契约实验室：真实拉伸向导与准心工具</b><br><a href="./docs/screenshots/valorant-lab.png"><img src="./docs/screenshots/valorant-lab.png" alt="无畏契约实验室：真实拉伸向导与准心工具" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>近期战绩面板、真实比赛时间与双方记分板</b><br><a href="./docs/screenshots/demo-performance-board.png"><img src="./docs/screenshots/demo-performance-board.png" alt="近期战绩面板、真实比赛时间与双方记分板" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>上手指南</b><br><a href="./docs/screenshots/getting-started.png"><img src="./docs/screenshots/getting-started.png" alt="上手指南" width="100%"></a></td>
-    <td width="50%" align="center"><b>本地 Demo 库</b><br><a href="./docs/screenshots/demo-library.png"><img src="./docs/screenshots/demo-library.png" alt="本地 Demo 库" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>官匹 Demo 下载</b><br><a href="./docs/screenshots/official-demo-download.png"><img src="./docs/screenshots/official-demo-download.png" alt="官匹 Demo 下载" width="100%"></a></td>
-    <td width="50%" align="center"><b>解析后默认计分板与全场评级</b><br><a href="./docs/screenshots/demo-analysis.png"><img src="./docs/screenshots/demo-analysis.png" alt="解析后默认计分板与全场评级" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>可重新打开的历史分析</b><br><a href="./docs/screenshots/analysis-history.png"><img src="./docs/screenshots/analysis-history.png" alt="可重新打开的历史分析" width="100%"></a></td>
-    <td width="50%" align="center"><b>单局玩家表现与优化方向</b><br><a href="./docs/screenshots/player-assessment.png"><img src="./docs/screenshots/player-assessment.png" alt="单局玩家表现与优化方向" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>逐回合玩家评价与事件时间线</b><br><a href="./docs/screenshots/round-assessment.png"><img src="./docs/screenshots/round-assessment.png" alt="逐回合玩家评价与事件时间线" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>OBS 录制队列</b><br><a href="./docs/screenshots/recording-queue.png"><img src="./docs/screenshots/recording-queue.png" alt="OBS 录制队列" width="100%"></a></td>
-    <td width="50%" align="center"><b>合辑工作台</b><br><a href="./docs/screenshots/montage-workbench.png"><img src="./docs/screenshots/montage-workbench.png" alt="合辑工作台" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>LiteCut 剪辑器</b><br><a href="./docs/screenshots/litecut.png"><img src="./docs/screenshots/litecut.png" alt="LiteCut 剪辑器" width="100%"></a></td>
-    <td width="50%" align="center"><b>灵敏度实验室与本地 Steam CFG 预填</b><br><a href="./docs/screenshots/sensitivity-lab.png"><img src="./docs/screenshots/sensitivity-lab.png" alt="灵敏度实验室与本地 Steam CFG 预填" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>磁轴输入实验室</b><br><a href="./docs/screenshots/magnetic-input-lab.png"><img src="./docs/screenshots/magnetic-input-lab.png" alt="磁轴输入实验室" width="100%"></a></td>
-    <td width="50%" align="center"><b>设置中心与昼夜模式</b><br><a href="./docs/screenshots/settings.png"><img src="./docs/screenshots/settings.png" alt="设置中心与昼夜模式" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>2D 雷达回放、玩家选中与单队视角</b><br><a href="./docs/screenshots/2d-replay-preview.png"><img src="./docs/screenshots/2d-replay-preview.png" alt="2D 雷达回放、玩家选中与单队视角" width="100%"></a></td>
+    <td width="50%" align="center"><b>League Lab: game-flow automation and Mini panel</b><br><a href="./docs/screenshots/league-lab.png"><img src="./docs/screenshots/league-lab.png" alt="League Lab game-flow automation and Mini panel" width="100%"></a></td>
+    <td width="50%" align="center"><b>VALORANT Lab: true-stretch guide and crosshair tools</b><br><a href="./docs/screenshots/valorant-lab.png"><img src="./docs/screenshots/valorant-lab.png" alt="VALORANT Lab true-stretch guide and crosshair tools" width="100%"></a></td>
   </tr>
 </table>
 
-### Demo 库维护
+### Demo Library Management
 
-- **本地库记录展示** — 列表、缩略图展示 Demo 的比赛来源、记分板、关注玩家、展示名、备注等关键信息。
-- **近期战绩面板** — 默认采用“左侧近期比赛、右侧所选比赛详情”的战绩工具布局；直接复用已解析 Demo，展示回合胜负条、双方 K/D/A、ADR、KAST、Estimated HLTV Rating 2.0 / Rating Pro 3.0，以及双方各自的队内英雄和队内战犯。玩家头像来自 Steam 公共资料，点击名字可打开对应 Steam 主页；原网格与列表视图仍可随时切换。
-- **真实比赛时间与来源标记** — 官匹分享码下载时读取 Steam Game Coordinator 返回的 `matchtime`，单独保存为真实比赛时间；排序在 SQLite 查询阶段覆盖全部分页。缺少服务器时间的旧 Demo 明确显示“比赛时间未知”，仅把入库时间作为辅助信息，不再冒充比赛日期；已缓存分享码的旧官匹可在战绩面板中补全。
-- **目录自动监听** — 支持 5E / 完美 / 官匹 demo / faceit 等 Demo 下载目录的监听，一键自动入库。
-- **本机 Steam 最近战绩** — 不再要求个人 Steam Web API Key、游戏认证码或浏览器 Cookie。软件直接连接当前已登录的本机 Steam Game Coordinator，自动显示最近 8 场官匹的真实比赛时间、地图、比分、K/D/A、爆头和 MVP；点击某场后才按需下载 Demo。Steam 最近战绩摘要不包含伤害、ADR、KAST 或 Rating，这些指标明确显示为 `—`，下载并解析 Demo 后才在本地计算，不会编造数值。
-- **后台下载与全局进度** — 分享码和直接回放地址都交给桌面后端持续下载；切换功能页面、最小化窗口或驻留托盘不会中断。任意页面都会显示当前文件、阶段、百分比、实时下载速度和累计流量，Windows 任务栏同步显示进度；官匹下载页还能查看完整来源 URL、保存路径并直接打开文件位置。Demo 使用 HTTP GET 下载，因此任务上传量通常为 `0 B`；这里展示的是该 Demo 任务自身流量，不冒充整机网卡统计。彻底退出软件会停止尚未完成的任务。
+- **Local Library Records** — List and thumbnail view showing match source, scoreboard, tracked players, display names, notes, and other key info.
+- **Recent-Match Performance Board** — The default library view now follows a left-side recent-match rail plus selected-match detail layout. Existing analysis caches directly populate round results, both team scoreboards, K/D/A, ADR, KAST, Rating Pro 2.0/3.0, and the match hero/culprit. Grid and list views remain available.
+- **Verified Match Time and Provenance** — Official share-code downloads persist Steam Game Coordinator `matchtime` separately from import time. SQLite sorting covers the complete paginated library. Older rows without server time explicitly show “match time unknown”; import time is only secondary context and is never relabeled as the match date. Cached official share codes can backfill older records.
+- **Auto Directory Monitoring** — Supports monitoring demo download directories from 5E, Perfect World, Official Matchmaking, FACEIT, etc., with one-click import.
+- **Local Steam Recent Matches** — Requires no personal Steam Web API key, game authentication code, or browser cookie. The app connects to the currently signed-in local Steam Game Coordinator and shows the latest eight official matches with verified match time, map, score, K/D/A, headshots, and MVPs. A demo is downloaded only when requested. Damage, ADR, KAST, and Rating are shown as unavailable until the demo is parsed locally.
 
-### 高光解析与片段挖掘
+### Highlight Parsing & Clip Discovery
 
-- **批量 Demo 解析** — 支持同时解析大量 Demo 的高光时刻，同一玩家在多场 Demo 中的高光会按场次组织展示。
-- **历史分析记录** — 已完成的分析会保存在本地 SQLite 数据库；分析页可直接打开最近记录并复用缓存，不会因为重启软件丢失，也不会为了查看历史重复慢解析。
-- **解析时仍可浏览历史** — 后台解析期间保留历史分析面板，并显示整批任务持续运行时间；即使解析页因批次状态切换而重新载入，计时也不会回到 0。当前任务完成前历史卡片保持只读，避免切换记录覆盖正在处理的 Demo。
-- **解析后先看计分板** — Demo 基础分析完成后默认打开全场计分板，集中显示比分、K/D/A、ADR、KAST、爆头率、首杀、AWP 与道具伤害，并给每位玩家生成 S–D 评级、优势和优化方向。
-- **Estimated HLTV Rating 2.0 / Rating Pro 3.0** — Est. R2 采用公开社区逆向估算式，并用 csstats.gg 十人记分板样本做 ±0.01 回归校验，修复旧模型把高输出局过度压向 1.00 的问题；RP3 再加入逐回合经济、多杀、补枪/闪光助攻和 Round Swing。界面可展开六项分数、置信度、纯保枪和经济修正，并为双方分别标出队内英雄与队内战犯；评分明确不是 HLTV 官方值，算法边界见 [方法说明](./docs/rating-pro-methodology.md)。
-- **逐回合玩家评价** — 回合页和 2D 回放结束状态都会展示该回合全部玩家评价，综合击杀、死亡、首杀、爆头和下包/拆包事件。
-- **交互式 2D 回放** — 可按回合查看双方站位、移动轨迹、击杀以及烟雾/燃烧范围；点击左右阵容 ID 或地图标记即可选中玩家，选中反馈会在阵容、地图和回合评价之间同步。
-- **单队战术视角** — 可切换全局、仅 A 队或仅 B 队，过滤另一队的位置、轨迹、弹道和投掷物。该功能用于战术复盘，不声称模拟游戏内真实视线遮挡。
-- **目标玩家锁定** — 自动识别对局内全部玩家，按 Steam ID、平台 ID 或昵称定位目标，兼容 5E、完美世界、官匹等不同 Demo 导出习惯。
-- **细粒度高光分析** — 自动分出 **高光**（多杀、颗秒、残局、刀杀、跳杀、拆包等）、**下饭**（电击枪、沙鹰、队友误伤及「人肉吸铁石」「人体描边」「肩并肩」等名场面）、**跨回合合集**（亲儿子喂饭、本命苦主、全场击杀/死亡串烧、按回合连续录制），以及 **梗局**（211 / o / i / z 系列研发标签，可配 AI 整局总评）。标签说明见 [片段类型与标签](./docs/highlight_tags.md)。
-- **回合时间线** — 除自动挖出的片段卡片外，可按回合浏览击杀/死亡时间线，把某一枪、某一死或整回合画面直接加入录制队列。
-- **回合连续录制** — 支持从回合开局录到死亡或回合结束，可勾选若干回合拼成一条长片。
+- **Batch Demo Parsing** — Parse highlights from multiple demos simultaneously; highlights from the same player across different matches are organized by match.
+- **Persistent Analysis History** — Completed analysis is stored in the local SQLite database. Recent results can be reopened from the analysis page without reparsing the Demo.
+- **History While Parsing** — The history panel remains visible while background analysis runs, together with an elapsed timer. History cards stay read-only until the active job finishes so a running session cannot be replaced accidentally.
+- **Scoreboard First** — Base analysis now opens on the full-match scoreboard with K/D/A, ADR, KAST, headshot rate, openings, AWP and utility damage, plus an S–D grade and improvement notes for every player.
+- **Rating Pro 2.0 / 3.0** — Estimates kills, survival, adjusted KAST, damage and impact with separate T/CT baselines. RP3 adds per-round economy, multi-kills, trades/flash assists and Round Swing, following HLTV's public October 2025 direction of raising kill weight and reducing Swing. The UI exposes all six subratings, confidence, pure saves and the economy modifier before identifying the winning side's hero and losing side's culprit. These are explicitly not official HLTV values; see the [methodology](./docs/rating-pro-methodology.md).
+- **Per-round Player Assessment** — The round explorer and completed 2D replay state grade every player from kills, deaths, openings, headshots and objective events.
+- **Interactive 2D Replay** — Review round-by-round positions, paths, kills, smokes and fire areas. Click either side roster or a radar marker to select a player, with selection shared across the replay and assessment cards.
+- **Single-team Tactical View** — Switch between global, Team A only and Team B only to filter opponent positions, paths, shots and utility. This is a review filter, not simulated geometric line-of-sight.
+- **Target Player Lock** — Automatically identify all players in a match and locate targets by Steam ID, platform ID, or nickname; compatible with different demo export conventions from 5E, Perfect World, and Official Matchmaking.
+- **Fine-grained Highlight Analysis** — Automatically categorizes **Highlights** (multi-kills, one-taps, clutches, knife kills, jump shots, defuses), **Fails** (taser, Deagle, team kills, "human magnet", "human tracing", "shoulder-to-shoulder" moments), **Cross-round Compilations** (favorite victim, nemesis, kill/death montage, continuous round recording), and **Meme Rounds** (211/o/i/z series with AI round commentary). See [Clip Types & Tags](./docs/highlight_tags.md) for tag descriptions.
+- **Round Timeline** — Beyond auto-extracted clip cards, browse kill/death timelines by round to add specific shots, deaths, or entire rounds to the recording queue.
+- **Continuous Round Recording** — Record from round start to death or round end; select multiple rounds to combine into a longer clip.
 
-> **关于首次解析耗时：** “Demo 基础分析”和“2D 回放缓存生成”是两个阶段。首次进入某场 Demo 的 2D 回放时，程序还需要生成整场 Parquet、当前回合二进制轨迹及烟雾/燃烧效果缓存，因此第一次会比再次打开更慢；缓存命中后会直接读取本地结果。升级版本不会删除应用数据目录中已有的回放缓存。
+> **First-run performance:** base Demo analysis and 2D replay cache generation are separate stages. The first visit to a match's 2D replay also creates the whole-match Parquet cache, round binary trajectories, and smoke/fire effect cache, so it can take longer than reopening the same match. Cache hits read the local result directly. Upgrades do not delete existing replay caches from the application data directory.
 
-> **Steam 凭据安全：** 最近战绩功能只使用 Steam 客户端当前登录会话，不读取 Steam 密码、浏览器 Cookie 或个人 Web API Key。首次使用可选的独立 Game Coordinator 组件前会明确征求同意；组件版本与 SHA-512 固定，并与主程序隔离运行。
+> **Steam credential safety:** recent-match discovery uses only the active local Steam client session. It does not read a Steam password, browser cookies, or a personal Web API key. The optional isolated Game Coordinator helper requires explicit first-use consent and is version- and SHA-512-pinned.
 
-> **Steam 登录与 csstats.gg 边界：** Steam OpenID 只验证身份并返回 SteamID，本身不提供 CS2 逐局战绩；csstats.gg 的持续云端跟踪还要求用户另行添加游戏认证码与已知比赛。其条款禁止自动脚本与数据抓取，因此本项目不会爬取或嵌入其登录会话，而是使用本机 Steam GC 提供免 Key 的最近 8 场，并用本地 Demo 完成深度分析。
+### Product Video
 
-### 视频介绍
+- The product video is being remade. The previous cut is no longer distributed in the current Release.
 
-- 产品介绍视频正在重新制作，当前 Release 暂不提供旧版视频。
+### Training & Input Labs
 
-### 训练与输入实验室
-
-- **个性化灵敏度诊断** — 进入碰到即命中的小球甩枪靶场与连续追踪测试，按当前 `sensitivity`、`m_yaw` 和 DPI 展示每轮候选参数；完成后自动定位到偏快/偏慢诊断、调整百分比、CS2 可直接使用的命令和建议复测区间。
-- **本机 CS2 CFG 预填** — 以只读方式扫描本地 Steam 账号的 CS2 配置，预填当前灵敏度、`m_yaw`、分辨率和画面比例；DPI 与显卡拉伸模式仍由用户确认。
-- **磁轴参数优化** — 根据异常重复边沿、保持抖动、A/D 重叠和方向切换延迟，分别给出触发行程、RT 按下及 RT 抬起的建议起点，并要求每次仅调整 `0.05–0.10 mm` 后复测。
-- **官匹输入安全提醒** — 普通 Rapid Trigger 可用于缩短按键复位；在 CS2 官匹中应关闭 Snap Tap、Rapid Tap、Snappy Tappy、SOCD/LKP 等自动反向输入功能。
+- **Personal Sensitivity Diagnosis** — Opens a touch-to-hit target arena plus continuous tracking rounds, showing each candidate from the configured `sensitivity`, `m_yaw`, and DPI. Completion automatically reveals the too-fast/too-slow diagnosis, exact adjustment percentage, CS2-ready command, and retest range.
+- **Local CS2 CFG Prefill** — Read-only discovery of local Steam CS2 settings can prefill sensitivity, resolution, and aspect ratio. DPI and GPU scaling still require user confirmation.
+- **Magnetic-key Optimization** — Uses duplicate edges, hold jitter, A/D overlap, and direction-transition latency to recommend starting values for actuation, RT press, and RT release, followed by controlled `0.05–0.10 mm` retests.
+- **Official Matchmaking Input Safety** — Regular Rapid Trigger can shorten key reset, while Snap Tap, Rapid Tap, Snappy Tappy, SOCD/LKP, and similar automated counter-direction features should be disabled for CS2 official matchmaking.
 
 ### VALORANT
 
-- **真实拉伸安全向导** — 读取本机 GPU、主监视器和刷新率，为社区常用的 `1568×1080`、其他预设或自定义分辨率生成检测与预览结果。应用真实显示模式前必须明确确认，倒计时内可选择保留或恢复；软件会检测监视器状态，但不会擅自禁用监视器。
-- **准心编辑与分享** — 按 VALORANT 的 P/A/S 配置结构编辑主准心、ADS 与狙击镜准心，提供实时预览、严格编解码、官方格式代码导入/导出和本机预设历史。后端不可用时只保存本机配置，不把降级结果冒充为原生分享码。
-- **风险边界可见** — 页面按“检测 → 预览 → 明确确认 → 应用”分层展示系统级操作；硬件能力或显示状态证据不足时保持只读，不伪造成功。
+- **Safe true-stretch guide** — Reads the local GPU, primary monitor, and refresh rate, then prepares detection and preview results for the community-popular `1568×1080` preset, other presets, or a custom resolution. Applying a real display mode requires explicit confirmation and offers keep/restore during a countdown; monitor state is detected, but monitors are never disabled automatically.
+- **Crosshair editor and sharing** — Edits primary, ADS, and sniper crosshairs using VALORANT's P/A/S profile structure, with live preview, strict encode/decode, native-format code import/export, and local preset history. A backend fallback is never presented as an equivalent native share code.
+- **Visible risk boundaries** — System-level actions follow a detect → preview → confirm → apply flow. Missing hardware or display evidence leaves the page read-only instead of claiming success.
 
-### 英雄联盟
+### League of Legends
 
-- **自动游戏流程** — 与 CS2 功能共用同一个 Tauri 客户端和托盘，通过本机 LCU/SGP 兼容 Riot 与 WeGame/Tencent 客户端。覆盖自动接受、自动匹配、返回房间、掉线重连、自动点赞、房间邀请策略，以及按阶段自动显示的 Mini 面板。
-- **选人、配置与对局操作** — 可按模式和位置配置英雄选择/禁用优先级、符文、召唤师技能与出装，处理备战席、换位、皮肤与交易等选人阶段状态；每项自动化仍由独立开关控制。符文、技能和出装均由本地配置管理，不依赖 OP.GG 独立窗口。
-- **战绩与实时分析** — 提供 Riot ID 跨区检索、SGP 分页战绩、最近遇见、本地标签、SQLite 战绩收集、组合筛选、玩家中心、十人实时对局、组排推断与打野路线画像，并提供独立实时对局窗口和可选召唤师技能计时器。
-- **账号与隐私边界** — 账号写入总开关在界面显著显示；手动高风险操作要求确认并在执行前重新核对 LCU 状态。LCU、Riot Client 与 SGP 令牌只保存在运行内存，不写入磁盘、不上传；设置导出不包含客户端凭据。
+- **One embedded workspace** — League features now enter through the MaxGameStudio-managed workspace; its pinned `v1.5.1` source build, MIT attribution, and update boundary are documented above, without promoting the source project's brand in product UI.
+- **Workspace startup modes** — Choose Ask every time, Save memory, or Run in parallel before launch. Save memory pauses host background tasks and destroys the main WebView; parallel keeps the main window, main WebView, backend, and background tasks running. Remembered choices are used only for automatic client detection; opening `/league` always lets you choose again, and the choice can be cleared later.
+- **Workspace administrator option** — Optionally elevate only an isolated, revalidated League workspace copy; MaxGameStudio itself remains at standard privilege. The administrator choice can be remembered with the startup mode. Windows requests UAC according to its policy, and cancelling it leaves the main window and backend running.
+- **Automated game flow** — Uses local LCU/SGP integration for Riot and WeGame/Tencent clients to cover ready-check acceptance, matchmaking, play again, reconnect, honor, room invitation policies, and the phase-aware Mini panel.
+- **Champion select and loadouts** — Configures champion pick/ban priorities, runes, summoner spells, and builds by mode and position, while exposing bench, swap, skin, and trade state. Local profiles replace the former dependency on a separate OP.GG window.
+- **Match history and live analysis** — Provides cross-region Riot ID lookup, paginated SGP history, encounters, local labels, SQLite collection, combined filters, player center, ten-player ongoing-game analysis, premade inference, jungle-route profiles, a dedicated live window, and an optional summoner-spell timer.
+- **Account and privacy boundaries** — The account-write master switch is prominent, high-risk manual actions require confirmation, and current LCU state is checked immediately before execution. LCU, Riot Client, and SGP credentials remain in memory and are never exported or uploaded.
 
-- **League 客户端高级工具** — 可输入任意 Game ID，自动在 LCU 与当前区服 SGP 间选择数据源，预览双方完整结算数据和时间线摘要，并把历史阵容只读载入实时对局面板；本地玩家标签按当前登录账号隔离，支持搜索、分页、编辑、删除及 JSON 导入导出，直播隐私模式下默认遮挡；玩家中心还会按英雄聚合胜率、KDA、伤害/补刀效率、团队资源占比和分路分布，实时对局可调并发与组排阈值并显示连胜、近况、补刀、视野、单杀等标签；另可选配桌面全局终止快捷键，默认关闭，触发时仍强制验证前台进程必须是 `League of Legends.exe`。
-- **League 游戏内预设** — 支持固定多行文字与可选全局快捷键，并按己方、敌方或双方生成近期表现、组排关系和打野画像；三类分析预设的三个目标也可分别绑定快捷键。房间与选人阶段使用 LCU 对话；游戏中仅在 `League of Legends.exe` 仍处于前台时逐行发送。可配置全局取消键立即停止尚未发送的后续行，并可为实时对局和技能计时器窗口配置全局显示键。账号写入总开关默认开启；预设发送开关和所有快捷键默认关闭，手动发送还需输入确认短语。
+### Auto Recording
 
-### 自动录制
-
-- **已录制视频库** — 在软件内浏览并播放 OBS 成片、查看文件路径并在资源管理器中定位；可读取和修改当前 OBS Profile 的录制目录，新路径只影响后续录制，不会擅自移动旧视频。
-- **批量录制队列** — 多场比赛、多个片段排队，程序依次启动 CS2 回放并驱动 OBS 成片；录制前可预览整批计划，队列里也可微调每段的节奏。
-- **录制前观战设置** — 一键配置观战 HUD（仅死亡通知、隐藏 ID/聊天/Demo 条）、视野与持枪角度、闪光亮度、语音、分辨率与画幅、片段之间的 OBS 转场等；本场也可临时打开实验性 POV 第一人称 HUD。
-- **多样化成片风格**：
-  - 裁判视角或 POV 第一人称 HUD（可隐藏/显示雷达、调整正上方人数条）
-  - 纯净观战画面、自定义 FOV、隐藏投掷物轨迹
-  - **受害者视角** — 高光或多杀合集可在你的主视角之后，自动追加被击杀者视角片段
-  - **按键显示叠加** — 在 OBS 里叠加 WASD、蹲跳等按键提示，与画面不同步时可手动微调
-  - **击杀特效叠加** — 在颗秒、复仇、穿墙、盲狙、一石二鸟及多杀/残局发生时，由 OBS 自动叠加带透明通道和声音的特效视频
-  - 片段之间淡入淡出等转场
-- **安全录制方案**：
-  - 通过 OBS 与游戏状态联动控制录制，不注入、不 Hook 游戏进程
-  - 自动备份并在录制结束后恢复你的键位与画面设置
+- **Batch Recording Queue** — Queue multiple matches and clips; the program sequentially launches CS2 replay and drives OBS to produce videos; preview the entire plan before recording, with per-clip timing adjustments in the queue.
+- **Pre-recording Spectator Settings** — One-click spectator HUD configuration (death notices only, hide IDs/chat/demo bars), FOV and viewmodel, flash brightness, voice, resolution and aspect ratio, OBS transitions between clips; experimental POV first-person HUD can be enabled per-match.
+- **Diverse Output Styles**:
+  - Observer view or POV first-person HUD (toggle radar, adjust top player count display)
+  - Clean spectator view, custom FOV, hide grenade trajectories
+  - **Victim POV** — After highlight or multi-kill compilations, automatically append victim perspective clips
+  - **Keyboard Overlay** — Display WASD, crouch/jump keys in OBS, with manual sync adjustment if needed
+  - Fade in/out transitions between clips
+- **Safe Recording Solution**:
+  - Controls recording via OBS and game state coordination, no injection or game hooking
+  - Automatically backs up and restores your keybinds and graphics settings after recording
 
 
-### 合辑工作台
+### Compilation Workbench
 
-- 录制成功的片段自动入库，可在合辑工作台拖拽排序、配 BGM / 转场主题，导出 MP4；支持按高光/下饭/合集/时间线等类型筛选，以及片头片尾编排。
-- **玩家信息卡** — 导出时可开启左下角名牌：每段画面开头短暂显示该片段对应玩家昵称、高光/下饭/合集类型、回合与情景标签（如多杀、颗秒等）；可为时间线里出现的每位玩家单独上传头像，不上传则显示昵称首字。适合 B 站式集锦片头标注，无需后期在 PR 里逐条加字。
-- **使用前需配置 FFmpeg**：前往 [FFmpeg 官网](https://ffmpeg.org/download.html) 或 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载 Windows 构建包，解压后在程序设置页面的「FFmpeg 路径」中填入 `ffmpeg.exe` 的完整路径。导出时会优先使用显卡硬件编码（NVENC / QSV / AMF），没有则使用软件编码。
+- Successfully recorded clips are automatically stored in the library; use the Compilation Workbench to drag-and-drop reorder, add BGM/transition themes, and export MP4; filter by highlight/fail/compilation/timeline types, with intro/outro arrangement.
+- **Player Info Card** — Enable bottom-left corner watermark when exporting: briefly displays player nickname, clip type (highlight/fail/compilation), round and scenario tags (e.g., multi-kill, one-tap) at the start of each clip; upload custom avatars for each player appearing in the timeline, or display first letter of nickname if no avatar. Perfect for polished highlight intros without manual PR editing.
+- **FFmpeg Configuration Required**: Download Windows builds from [FFmpeg Official](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), extract and set the full path to `ffmpeg.exe` in the settings page. Export prioritizes GPU hardware encoding (NVENC/QSV/AMF), falling back to software encoding if unavailable.
 
 
-### AI 锐评（可选）
+### AI Commentary (Optional)
 
-- **OpenAI 兼容多家厂商** — 内置 DeepSeek、通义 Qwen、智谱 GLM、MiniMax、OpenAI、OpenRouter；本地模型支持 Ollama、LM Studio。
-- **毒舌人设 Prompt** — 高光吹爆、下饭嘲讽、梗死亡当段子；硬约束 100 字以内、单行 JSON 输出，不输出场外废话。
-- **整局梗合集总评** — 211/o/i/z 系研发局会触发「整局综合评价」，独立于片段级评分。
+- **OpenAI-Compatible Multi-Provider** — Built-in support for DeepSeek, Tongyi Qwen, Zhipu GLM, MiniMax, OpenAI, OpenRouter; local models via Ollama, LM Studio.
+- **Sarcastic Persona Prompt** — Hype for highlights, roast for fails, meme deaths as jokes; hard constraint under 100 characters, single-line JSON output, no off-topic chatter.
+- **Round Meme Compilation Review** — 211/o/i/z meme rounds trigger "Round Comprehensive Review", independent from clip-level scoring.
 
 ---
 
-## 安装
+## Installation
 
-前往本仓库的 [Releases 页面](https://github.com/INEEDBUG/MaxGameStudio/releases) 下载最新的 `MaxGameStudio_x.x.x_x64-setup.exe`，双击运行安装包，按提示完成安装。
+> **Current stable version: `v3.1.0`.** The signed installer and updater metadata are published through the repository's stable Release workflow.
 
-安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**。轻量 Tauri 桌面壳会自动启动内嵌 Python 后端，并使用 Windows 系统 WebView2 显示界面。
-默认点击右上角 `×` 会询问“驻留后台”还是“彻底退出”，并可记住选择。驻留后台时 Demo 解析和下载任务会继续运行；左键单击托盘图标可恢复窗口，托盘菜单也可彻底退出。可在“设置 → 系统与更新”中随时切换为每次询问、直接驻留或直接退出。
+Download the latest `MaxGameStudio_x.x.x_x64-setup.exe` from this repository's [Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases), run the installer and follow the prompts.
 
-源码开发需先安装 `uv 0.11.x`，然后运行
-`.\packaging\demoparser-lean\setup-backend-dev.ps1`。脚本会依据仓库根目录的
-`uv.lock` 创建 Python 3.12 环境并安装经过哈希锁定的依赖。项目的高速 2D
-回放使用 PyO3 编译的定制 `demoparser2` Rust 扩展；后端会在启动阶段验证
-所需 Rust 接口，不会使用 PyPI 原版解析器静默降级。
+By default, the window `×` button asks whether to keep the app running in the Windows system tray or exit completely, with an option to remember the choice. Parsing and downloads continue while the app is in the tray. The behavior can be changed at any time under Settings → System & Updates.
 
-依赖边界保持独立：Python 后端使用 `uv`/`uv.lock`，前端与 Tauri JS
-工具链使用 `pnpm`/`pnpm-lock.yaml`，Rust 桌面壳使用 `cargo`/`Cargo.lock`；
-OBS 与 FFmpeg 仍由各自的运行时集成管理。
+After installation, launch from desktop or start menu. **No browser or manual backend start is required.** The lightweight Tauri shell starts the bundled Python backend and renders the UI with the Windows system WebView2 runtime.
 
-从 `v2.5.9` 起，客户端通过签名更新通道检查新版本；从 `v2.5.11` 起，正式版会由 GitHub Actions 构建并发布。客户端启动时会检查一次，运行或驻留后台期间每 15 分钟继续检查；发现**正式版本**后会先按“修复 / 新功能 / 优化”展示普通用户可以直接理解的更新说明，只有用户点击“立即更新”后才会下载、签名校验、覆盖安装并重启。点击“暂不更新此版本”会跳过该版本，手动检查更新仍可重新打开提示。配置、Demo 数据库和工作区数据保存在独立的用户数据目录中，覆盖安装不会删除它们。Release 页面仍只保留一个面向普通用户的 Windows EXE。
+The desktop app checks the signed GitHub updater channel at launch and every 15 minutes while running or resident in the tray. Stable releases show a plain-language Fixes / New Features / Optimizations summary first; downloading, verifying, installing in place, and relaunching begin only after the user clicks “Update now”. “Skip this version” suppresses that release during automatic checks, while a manual check can show it again. User settings, demo data and projects remain in the separate application-data directory. The formal publication channel accepts only strict `x.y.z` stable versions: GitHub Releases, `updater/latest.json`, and the `updater` branch never receive versions with any prerelease suffix such as `-rc`, `-beta`, or `-alpha`. Test builds are available only as GitHub prereleases for manual download; `workflow_dispatch` uploads a private Actions artifact and does not create a public Release. Older online installers may still use `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`; the client recognizes that exact legacy name while preferring the current `MaxGameStudio_<version>_x64-setup.exe` asset. Manual installers remain available on [this project's Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases).
 
-正式发布通道只接受严格的 `x.y.z` 稳定版本：GitHub Release、`updater/latest.json` 和 `updater` 分支不会接收任何带预发布后缀（例如 `-rc`、`-beta` 或 `-alpha`）的版本。测试版只能从 GitHub Prerelease 手动下载；`workflow_dispatch` 也只上传私有 Actions artifact，不会公开 Release。旧版线上安装包可能仍使用 `CS2.Ultimate.Insight.Studio_<version>_x64-setup.exe`，客户端会继续识别该精确旧名，同时优先使用新命名的 `MaxGameStudio_<version>_x64-setup.exe`。
-
-> **建议安装路径不含中文字符。** 例如 `D:\MaxGameStudio\` ✅，`D:\游戏工具\MaxGameStudio\` ❌
+> **Recommended: Installation path without Chinese characters.** e.g., `D:\MaxGameStudio\` ✅, `D:\游戏工具\MaxGameStudio\` ❌
 
 ---
 
-## 版本更新与后续计划
+## Version History and Next Steps
 
-| 阶段 | 已完成内容 | 状态 |
+| Stage | Delivered | Status |
 | --- | --- | --- |
-| **V1 · 解析与导播** | 高光解析、AI 锐评、自动导播 | ✅ 已完成 |
-| **V2 · 桌面工作流** | Tauri 轻量桌面端、FFmpeg 合辑工作台、实验性 POV HUD、回合时间线与入队录制、观战预热、受害者 POV、虚拟键盘 OBS 叠加 | ✅ 已完成 |
-| **V3 · 深度复盘** | Demo 图分析与历史记录、玩家/回合评价、2D 玩家选择、单队战术视角；基础战术指标已覆盖道具伤害与每回合道具伤害、投掷物轨迹、走位轨迹和热力图路线复盘 | ✅ 已完成 |
-| **v2.5.16 · 多游戏实验室** | 将英雄联盟实验室与无畏契约实验室合并进 MaxGameStudio 正式安装包，并保留旧版客户端的覆盖更新兼容 | ✅ 已发布 |
-| **v2.5.17 · 撤回版本** | 存在升级安装中止与自动更新边界竞态等重大缺陷 | ⛔ 已撤回 |
-| **v3.0.1 · 升级修复** | 修复安全清理、版本跳过/强制更新和 Release 标题版本识别问题 | ✅ 已发布 |
-| **v3.0.2 · 性能与训练优化** | 降低大型 Demo 解析内存与耗时，新增普通用户更新摘要，并以真实点击分析欠甩、过甩和偏轴误差 | ✅ 已发布 |
-| **v3.0.3 · 游戏分区与 League 稳定性** | 按游戏重组导航；英雄联盟自动化、战绩、玩家中心、实时对局和工具箱改为直达入口；合并重复状态请求并修复 Mini、页面切换与异步竞态 | ✅ 已发布 |
-| **v3.0.4 · 区域语言与实时对局** | 新增四种区域语言选项；修复侧栏收起；移除 League 重复导航；实时对局独立成页并采用快照渐进加载、全对组排识别和胜率队证据 | ✅ 已发布 |
-| **v3.0.5 · 首页、更新确认与 VALORANT CFG** | 新增独立首页、离线公告和反馈入口；更新必须明确确认；真拉伸增加 CFG 分辨率同步、备份、只读、解锁与恢复 | ✅ 已发布 |
-| **v3.0.6 · Mini、实时对局与 CFG 手选** | 修复 Mini 置顶/秒退；新增透明度与实时对局自动窗口；玩家数据渐进加载；真拉伸支持手选有效 CFG | ✅ 当前稳定版 |
+| **V1 · Parsing and direction** | Highlight parsing, AI commentary, and automatic directing | ✅ Complete |
+| **V2 · Desktop workflow** | Lightweight Tauri desktop, FFmpeg compilation workbench, experimental POV HUD, round timeline and recording queue, spectator warm-up, victim POV, and virtual-keyboard OBS overlay | ✅ Complete |
+| **V3 · Deep review** | Demo analysis and history, player/round assessments, 2D player selection, single-team tactical view, utility damage and per-round utility metrics, grenade trajectories, movement paths, and heatmap-based route review | ✅ Complete |
+| **v2.5.16 · Multi-game labs** | League Lab and VALORANT Lab merged into the stable MaxGameStudio installer with legacy in-place updater compatibility | ✅ Released |
+| **v2.5.17 · Withdrawn** | Critical upgrade-installation and automatic-update boundary defects | ⛔ Withdrawn |
+| **v3.0.1 · Upgrade fixes** | Fixes safe cleanup, version skipping/forced updates, and Release title version parsing | ✅ Released |
+| **v3.0.2 · Performance and training** | Reduces large-Demo parsing time and memory, adds plain-language updater summaries, and uses real clicks to classify underflicks, overflicks, and off-axis misses | ✅ Released |
+| **v3.0.3 · Game sections and League stability** | Reorganizes navigation by game; gives automation, match history, player center, ongoing-game analysis, and toolkit direct League entries; merges duplicate status requests and fixes Mini/navigation/async races | ✅ Released |
+| **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Released |
+| **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Released |
+| **v3.0.6 · Mini, ongoing-game, and CFG selection** | Fixes Mini pin/dodge, adds opacity and automatic ongoing windows, progressively enriches player data, and supports manual valid CFG selection | ⚠️ Internal candidate; never released |
+| **v3.1.0 · Embedded League workspace** | Builds one embedded workspace from pinned v1.5.1 source; offers save-memory or background-parallel startup, reversible remembered choices, and protected workspace-only administrator launch | ✅ Latest stable |
 
-### 待做
+### Planned
 
-- [ ] **高级战术教练** — 在现有投掷物统计、轨迹与路线复盘之上，补充路线对比、投掷物质量评分和可解释的自动战术建议。
-- [ ] **复盘展示增强** — 为基础战术指标增加更清晰的分局对比、筛选和可导出报告。
-- [ ] **发布可信度** — 为 Windows 安装包补齐公开可验证的 Authenticode 代码签名；现有 Tauri 更新包签名与安装包系统信任是两条不同的验证链。
+- [ ] **Advanced tactical coach** — Add route comparison, utility-quality scoring, and explainable automated tactical suggestions on top of the existing metrics, trajectories, and route review.
+- [ ] **Review presentation** — Add clearer per-match comparisons, filtering, and exportable reports for the existing tactical indicators.
+- [ ] **Release trust documentation** — Publish the stable Authenticode publisher identity and user-facing verification steps alongside the existing checksum and Tauri updater-signature workflow.
 
 
 ---
 
-## 贡献者
+## Ownership
 
-- **Codex** — 开发协作、代码实现与交付审计。
+- **INEEDBUG** — product owner; responsible for requirements, key decisions, acceptance, and releases.
+- **Codex** — development collaboration, implementation, and delivery auditing.
+
+See [`AUTHORS.md`](AUTHORS.md) for detailed project attribution.
 
 ---
 
 ## License
 
-本项目采用 [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) 协议发布。
+This project is released under the [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) license.
 
-- 允许个人学习、研究、爱好、评测及其他非商业用途使用。在遵守本协议的前提下，你可以阅读、修改、构建和分发本项目源码及其衍生版本。
-- 未经书面授权，禁止将本项目或其衍生版本用于任何商业用途，包括但不限于：商业软件、付费服务、商业代剪/代录服务、商业平台集成、对外销售、出租、转售或作为商业产品的一部分分发。
-- 📦 如果你分发本项目的编译产物、安装包或修改版本，请同时保留本项目的许可证声明，并遵守 `THIRD_PARTY_LICENSES.md` 中列出的所有第三方开源组件许可证。
+- Personal learning, research, hobby, review, and other non-commercial uses are permitted. Under this license, you may read, modify, build, and distribute this project's source code and derivatives.
+- Without written authorization, commercial use is prohibited, including but not limited to: commercial software, paid services, commercial editing/recording services, commercial platform integration, sales, rental, resale, or distribution as part of commercial products.
+- 📦 If you distribute compiled products, installers, or modified versions of this project, please retain this project's license statement and comply with all third-party open source component licenses listed in `THIRD_PARTY_LICENSES.md`.
 
-## 声明
+## Disclaimer
 
-Counter-Strike 2、CS2、Counter-Strike、Steam、Valve 等名称、商标和标识归其各自权利人所有。
+Counter-Strike 2, CS2, Counter-Strike, Steam, Valve and related names, trademarks, and logos belong to their respective owners.
 
-本项目与 Valve Corporation、完美世界竞技平台、5E 对战平台、OBS Studio 及其他相关平台或软件的所有者不存在从属、合作、赞助、授权或背书关系。
+This project is not affiliated with, partnered with, sponsored by, authorized by, or endorsed by Valve Corporation, Perfect World Arena, 5E Arena, OBS Studio, or other related platforms or software owners.
 
-### 安全使用提示
+### Safe Usage Tips
 
-- **默认录制流程**调用 CS2 时使用 `-insecure` 仅用于本地 Demo 回放，不存在 DLL 注入或 Hook；不会对磁盘上的 `.dem` 做修改，不连接、不修改、不干预任何官方游戏服务器、匹配服务或反作弊系统，也不提供任何作弊、绕过检测或破坏公平竞技的功能，**不要在已登录匹配服务器的 CS2 客户端中并行使用**，以免触发反作弊系统的不必要警示。
-- 若你在「常用参数管理 → 实验性功能」中**主动开启 POV**，程序会临时向 CS2 的 `game/csgo` 目录写入 `pov.vpk`，并**增量修改** `gameinfo.gi` 的 `SearchPaths` 以加载 POV HUD 资源；录制结束或异常收尾时会自动恢复。该模式同样**强制**使用 `-insecure` 启动 CS2，**不要用于连接 VAC 安全服务器**。
-- 录制期间会临时修改若干 CS2 archive cvar 与按键绑定。本项目会在启动录制时在程序数据目录的 `.cs2_config_backup` 中**自动备份**玩家原始的 `config.cfg` / `video.txt` / `user_convars_*.vcfg`，录制结束后会回滚；如遇异常退出导致设置被覆盖，可在该目录手动取回原始文件。
-## 项目归属
-
-- **INEEDBUG** — 产品负责人；负责需求、关键决策、验收和发布。
-- **Codex** — 开发协作、代码实现与交付审计。
-
-详细项目归属见 [`AUTHORS.md`](AUTHORS.md)。
+- **Default Recording Process** launches CS2 with `-insecure` for local demo playback only; no DLL injection or hooking; does not modify `.dem` files on disk, does not connect to, modify, or interfere with any official game servers, matchmaking services, or anti-cheat systems, nor does it provide any cheating, detection bypass, or fair-play disruption features. **Do not use in parallel with a CS2 client logged into matchmaking servers** to avoid triggering unnecessary anti-cheat warnings.
+- If you **actively enable POV** in "Common Parameters → Experimental Features", the program temporarily writes `pov.vpk` to CS2's `game/csgo` directory and **incrementally modifies** `gameinfo.gi`'s `SearchPaths` to load POV HUD resources; automatically restored after recording or abnormal termination. This mode also **forces** `-insecure` when launching CS2. **Do not use to connect to VAC-secured servers**.
+- Recording temporarily modifies several CS2 archive cvars and keybinds. This project automatically backs up your original `config.cfg` / `video.txt` / `user_convars_*.vcfg` to the program data directory's `.cs2_config_backup` when starting recording, and restores them afterward; if settings were overwritten due to abnormal exit, manually retrieve original files from that directory.
