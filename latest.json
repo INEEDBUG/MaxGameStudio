@@ -1,29 +1,35 @@
 {
-  "version": "3.0.5",
+  "version": "3.1.0",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-09-01T11:33:39.907Z",
+  "pub_date": "2026-09-04T08:22:14.248Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2hrTjB0VzhURjI2NVZVVHdDNDNjZmg1a1RXWVdiWE0vWkN1UGxiczQzdTE2VHg2cTJiWXRvVGZ5VlJoaFpkQjBmc3J2d0Rlakx1bTdPYlgzMkhDdHc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MjYyNDE0CWZpbGU6TWF4R2FtZVN0dWRpb18zLjAuNV94NjQtc2V0dXAuZXhlCkVaSnFCNS9nUVUrU0t4bXZoNXdVbTB4ODlYU09FYmN3VTdWRllySGZDSlpsQnB1QzRUNndITkYva1hpeTU4L3hoK1pIczYra3FhV2RBUGlZN2ZOVUR3PT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.0.5/MaxGameStudio_3.0.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3EvS3k3Q3VqN2RYdXIwR05qYWlJR1pTajJtTHpkazFHZll1VldpcGZ6blFob1U1R2xtVnZYWjZsSkFyMThyQnJkR3RjUkVtaFV6OEFZU2ZlRkZyVUFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NTEwMTI3CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuMF94NjQtc2V0dXAuZXhlClF3Vzh3TUdLeVoxdnFSMm56N21WNlNkNFIyd0lscWdwbno5VnN6dTBHK09STVFEa0l2WGQvSmhzUnRBTENhRTRrNmpaeUcwcng1V1RqTEZlWUErVkJnPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.0/MaxGameStudio_3.1.0_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.0.5",
+    "version": "3.1.0",
     "fixed": [
-      "修复首次打开软件时误显示 CS2 专属上手指南的问题。",
-      "修复普通更新在用户未确认时可能自动进入更新流程的问题。"
+      "将英雄联盟入口收敛为由 MaxGameStudio 管理的单一内嵌工作台。",
+      "明确由宿主管理内嵌工作台的生命周期和更新边界，禁用运行时的独立更新路径。",
+      "修复节省内存与后台并行的窗口边界：仅节省内存会销毁主 WebView，后台并行保留主窗口、主 WebView 与后端。",
+      "修复浅色与深色主题下双主题按钮的可见性，并清理侧栏遗留的红色边线。",
+      "移除旧的 League 游戏内发送入口，不再把 Game Send 作为当前可用功能。",
+      "修复升级时内嵌英雄联盟工作台仍在运行可能造成文件占用的问题；工作台未退出时会安全中止，不会覆盖正在使用的文件。"
     ],
     "added": [
-      "新增 MaxGameStudio 多游戏首页和独立首页侧栏入口。",
-      "新增离线版本公告、Bug/需求 Issue 表单和 PR/仓库入口。",
-      "CS2 上手指南保留在 CS2 分区内，不再作为首页欢迎层。",
-      "无畏契约真拉伸现在会同步并备份 GameUserSettings.ini，可按需锁定、解锁或恢复。"
+      "从固定 v1.5.1 源码构建并内嵌英雄联盟工作台，同时保留原始 MIT 版权与许可证归属。",
+      "启动时可选择每次询问、节省内存或后台并行；记住的选择只在检测到客户端时自动进入，手动打开 /league 仍始终可以重新选择，也可随时清除记忆。",
+      "可选仅为内嵌英雄联盟工作台请求管理员权限，不提升整个 MaxGameStudio；管理员选择可随启动模式记住。",
+      "新增独立的 League 工作台图标，便于在系统窗口和内嵌资源中识别。"
     ],
     "optimized": [
-      "更新提示同时提供“立即更新”和“暂不更新此版本”，只有明确点击立即更新才会开始更新。",
-      "CFG 同步只修改已有分辨率字段；检测到游戏正在运行时会安全阻止写入。"
+      "节省内存模式会暂停 MaxGameStudio 后端与 CS2/无畏契约后台任务，只保留轻量守护进程和英雄联盟工作台；退出工作台后自动恢复主窗口和后端。",
+      "后台并行模式保留主程序主窗口、主 WebView 与后台任务，与英雄联盟工作台同时运行；启动前会直接提示额外内存占用的本机实测参考值。",
+      "管理员启动会按 Windows 权限策略显示 UAC；取消授权时保留 MaxGameStudio 主窗口与后端，不把取消操作记为成功。",
+      "管理员工作台不再直接从用户可写安装目录提权运行：获准后会在同一磁盘创建随机受保护会话，提权侧再次绑定清单摘要、逐文件复核 SHA-256、拒绝链接或额外文件，并在整个运行期间锁住已验证载荷；管理员模式还会使用独立受保护配置，不加载普通用户可写的 Chromium 配置。"
     ]
   }
 }
