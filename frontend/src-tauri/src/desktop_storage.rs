@@ -500,12 +500,20 @@ mod tests {
 
     #[test]
     fn every_window_and_backend_share_the_selected_storage() {
-        let shell = include_str!("lib.rs");
-        assert!(shell.contains("window.create = false;"));
-        assert!(shell.contains("WebviewWindowBuilder::from_config(app, config)?\n                    .data_directory(desktop_storage::directory(\"webview\")?)"));
-        assert!(shell.contains(".with_filename(storage_root.join(\"window-state.json\")"));
-        assert!(shell.contains(".env(\"CS2_INSIGHT_DATA_DIR\", &data_root)"));
-        assert!(!shell.contains(".arg(\"--appdata\")"));
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        // Windows CI may check sources out with CRLF; test both representations.
+        for shell in [source.clone(), source.replace('\n', "\r\n")] {
+            assert!(shell.contains("window.create = false;"));
+            let (_, builder) = shell
+                .split_once("WebviewWindowBuilder::from_config(app, config)?")
+                .expect("startup windows must use the explicit native builder");
+            assert!(builder
+                .trim_start()
+                .starts_with(".data_directory(desktop_storage::directory(\"webview\")?)"));
+            assert!(shell.contains(".with_filename(storage_root.join(\"window-state.json\")"));
+            assert!(shell.contains(".env(\"CS2_INSIGHT_DATA_DIR\", &data_root)"));
+            assert!(!shell.contains(".arg(\"--appdata\")"));
+        }
         let runtime = include_str!("league_runtime.rs");
         assert!(runtime.contains("desktop_storage::directory(\"league-runtime\")"));
         assert!(runtime.contains("desktop_storage::directory(\"temp/admin-launchers\")"));
