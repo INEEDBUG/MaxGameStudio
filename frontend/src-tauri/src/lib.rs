@@ -1569,7 +1569,10 @@ mod tests {
 
     #[test]
     fn tauri_exit_suppresses_restore_and_waits_before_backend_stop() {
-        let source = include_str!("lib.rs");
+        // GitHub's Windows checkout can materialize this file with CRLF while
+        // local builds use LF. Normalize before asserting source ordering so
+        // the release gate checks behavior instead of checkout line endings.
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
         let start = source
             .find("RunEvent::Exit =>")
             .expect("Tauri Exit event should exist");
