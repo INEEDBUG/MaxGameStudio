@@ -232,9 +232,7 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 
 ### Planned
 
-- [ ] **Advanced tactical coach** — Add route comparison, utility-quality scoring, and explainable automated tactical suggestions on top of the existing metrics, trajectories, and route review.
-- [ ] **Review presentation** — Add clearer per-match comparisons, filtering, and exportable reports for the existing tactical indicators.
-- [ ] **Release trust documentation** — Publish the stable Authenticode publisher identity and user-facing verification steps alongside the existing checksum and Tauri updater-signature workflow.
+- [ ] **Cross-device CFG sync** — Use Google Drive or WebDAV to store and synchronize CS2 and VALORANT CFG files, reducing manual configuration work when switching between accounts on one device or using the same account across multiple devices.
 
 
 ---
