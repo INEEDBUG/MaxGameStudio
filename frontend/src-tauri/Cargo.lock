@@ -594,11 +594,12 @@ dependencies = [
 
 [[package]]
 name = "cs2-insight-agent-desktop"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "base64 0.22.1",
  "embed-resource",
  "getrandom 0.3.4",
+ "rfd",
  "serde_json",
  "sha2",
  "tauri",

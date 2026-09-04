@@ -22,7 +22,12 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
+mod desktop_storage;
 mod league_runtime;
+
+pub fn desktop_logs_dir() -> Option<PathBuf> {
+    desktop_storage::directory("data/logs").ok()
+}
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -99,6 +104,7 @@ async fn show_league_mini(app: AppHandle, request_focus: bool) -> Result<(), Str
     mini.bootstrapping.store(true, Ordering::SeqCst);
     let build_result =
         WebviewWindowBuilder::new(&app, "league-mini", WebviewUrl::App("mini.html".into()))
+            .data_directory(desktop_storage::directory("webview")?)
             .title("MaxGameStudio Mini")
             .inner_size(340.0, 420.0)
             .min_inner_size(340.0, 420.0)
@@ -141,6 +147,7 @@ fn build_league_ongoing_window(app: &AppHandle) -> Result<(), String> {
         WebviewUrl::App("ongoing.html".into()),
     )
     .title("MaxGameStudio · League 实时对局")
+    .data_directory(desktop_storage::directory("webview")?)
     .inner_size(1360.0, 840.0)
     .min_inner_size(980.0, 640.0)
     .resizable(true)
@@ -245,6 +252,7 @@ async fn show_league_cd_timer(app: AppHandle) -> Result<(), String> {
         "league-cd-timer",
         WebviewUrl::App("cd-timer.html".into()),
     )
+    .data_directory(desktop_storage::directory("webview")?)
     .title("MaxGameStudio · League 技能计时器")
     .inner_size(132.0, 252.0)
     .min_inner_size(112.0, 220.0)
@@ -780,13 +788,7 @@ fn backend_session_token(state: State<'_, BackendProcess>) -> String {
 fn read_legacy_ui_state() -> Result<Option<String>, String> {
     #[cfg(windows)]
     {
-        let app_data = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .ok_or_else(|| "Windows APPDATA 环境变量不存在".to_string())?;
-        let state_file = app_data
-            .join("CS2 Insight Agent")
-            .join("data")
-            .join("desktop-ui-state-v1.json");
+        let state_file = desktop_storage::root()?.join("data/desktop-ui-state-v1.json");
         if !state_file.is_file() {
             return Ok(None);
         }
@@ -799,45 +801,10 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
     Ok(None)
 }
 
-fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<PathBuf, String> {
+fn writable_data_root(_app: &AppHandle, _root: &Path, _python: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        let app_data = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .ok_or_else(|| "Windows APPDATA 环境变量不存在".to_string())?;
-        let migration_script = root.join("backend/app/desktop_data_migration.py");
-        if !migration_script.is_file() {
-            return Err(format!(
-                "未找到桌面数据迁移脚本：{}",
-                migration_script.display()
-            ));
-        }
-
-        let mut command = Command::new(python);
-        command
-            .arg("-I")
-            .arg(&migration_script)
-            .arg("--appdata")
-            .arg(&app_data)
-            .env("PYTHONNOUSERSITE", "1")
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        command.creation_flags(CREATE_NO_WINDOW);
-        let output = command
-            .output()
-            .map_err(|error| format!("无法执行桌面数据迁移：{error}"))?;
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if detail.is_empty() {
-                format!("桌面数据迁移失败，退出码：{}", output.status)
-            } else {
-                format!("桌面数据迁移失败：{detail}")
-            });
-        }
-
-        let data_root = app_data.join("CS2 Insight Agent").join("data");
+        let data_root = desktop_storage::root()?.join("data");
         fs::create_dir_all(data_root.join("logs"))
             .map_err(|error| format!("无法创建应用数据目录 {}：{error}", data_root.display()))?;
         Ok(data_root)
@@ -968,6 +935,7 @@ pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
         )
         .env("CS2_INSIGHT_LOG_DIR", &logs_dir)
         .env("CS2_INSIGHT_DATA_DIR", &data_root)
+        .env("CS2_INSIGHT_TEMP_DIR", desktop_storage::directory("temp")?)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -1097,6 +1065,32 @@ pub(crate) fn stop_backend(app: &AppHandle) {
 }
 
 pub fn run() {
+    let storage_root = match desktop_storage::initialize() {
+        Ok(path) => path,
+        Err(error) => {
+            #[cfg(windows)]
+            rfd::MessageDialog::new()
+                .set_title("MaxGameStudio — 存储位置不可用")
+                .set_description(&error)
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+            return;
+        }
+    };
+    let mut context = tauri::generate_context!();
+    let startup_windows: Vec<_> = context
+        .config()
+        .app
+        .windows
+        .iter()
+        .filter(|window| window.create)
+        .cloned()
+        .collect();
+    for window in &mut context.config_mut().app.windows {
+        // Tauri 2.11's WindowConfig conversion drops data_directory. Build
+        // explicitly below so the native builder receives the absolute path.
+        window.create = false;
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -1112,6 +1106,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_filename(storage_root.join("window-state.json").to_string_lossy())
                 .with_state_flags(StateFlags::POSITION | StateFlags::SIZE)
                 .with_filter(|label| label.starts_with("league-"))
                 .build(),
@@ -1124,6 +1119,9 @@ pub fn run() {
         .manage(LeagueCdTimerLifecycle::default())
         .manage(LeaguePrivacyLifecycle::default())
         .invoke_handler(tauri::generate_handler![
+            desktop_storage::get_desktop_storage,
+            desktop_storage::choose_desktop_storage,
+            desktop_storage::cancel_desktop_storage_change,
             read_legacy_ui_state,
             backend_session_token,
             set_close_to_tray,
@@ -1148,7 +1146,12 @@ pub fn run() {
             league_runtime::launch_league_runtime,
             league_runtime::stop_league_runtime
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            for config in &startup_windows {
+                WebviewWindowBuilder::from_config(app, config)?
+                    .data_directory(desktop_storage::directory("webview")?)
+                    .build()?;
+            }
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
@@ -1195,7 +1198,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build MaxGameStudio desktop shell");
 
     app.run(|handle, event| match event {
@@ -1488,11 +1491,11 @@ mod tests {
     fn ongoing_window_is_created_on_demand_instead_of_hidden_at_startup() {
         let source = include_str!("lib.rs");
         let setup = source
-            .split_once(".setup(|app|")
+            .split_once(".setup(move |app|")
             .map(|(_, body)| body)
             .expect("Tauri setup should exist");
         let setup_body = setup
-            .split_once(".build(tauri::generate_context!())")
+            .split_once(".build(context)")
             .map(|(body, _)| body)
             .expect("setup should finish before the app build");
         assert!(!setup_body.contains("prime_league_ongoing_window"));
@@ -1607,7 +1610,7 @@ mod tests {
         let source = include_str!("lib.rs");
         let handler = source
             .split_once(".invoke_handler(tauri::generate_handler![")
-            .and_then(|(_, body)| body.split_once(".setup(|app|"))
+            .and_then(|(_, body)| body.split_once(".setup(move |app|"))
             .map(|(handler, _)| handler)
             .expect("Tauri command handler should exist");
         assert!(!handler.contains("restart_as_administrator"));

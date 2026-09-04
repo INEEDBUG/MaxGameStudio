@@ -6,15 +6,13 @@ fn install_panic_log() {
         backtrace::Backtrace,
         fs::{self, OpenOptions},
         io::Write,
-        path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     std::panic::set_hook(Box::new(|info| {
-        let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        let Some(logs) = cs2_insight_agent_desktop_lib::desktop_logs_dir() else {
             return;
         };
-        let logs = app_data.join("CS2 Insight Agent").join("data").join("logs");
         if fs::create_dir_all(&logs).is_err() {
             return;
         }

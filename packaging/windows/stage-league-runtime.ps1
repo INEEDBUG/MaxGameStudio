@@ -367,6 +367,16 @@ function Apply-EmbeddedUiPruning([string]$SourceRoot) {
     "  const embeddedLaunchRequested = process.argv.includes('--maxgamestudio-embedded')",
     "  if (embeddedLaunchRequested) {",
     "    process.env.MAXGAMESTUDIO_EMBEDDED = '1'",
+    "    const profile = app.commandLine.getSwitchValue('user-data-dir')",
+    "    if (!profile || !path.isAbsolute(profile)) throw new Error('Embedded storage directory is required')",
+    "    fs.mkdirSync(profile, { recursive: true })",
+    "    app.setPath('userData', profile)",
+    "    app.setPath('sessionData', profile)",
+    "    for (const name of ['logs', 'crashDumps', 'temp'] as const) {",
+    "      const directory = path.join(profile, name)",
+    "      fs.mkdirSync(directory, { recursive: true })",
+    "      app.setPath(name, directory)",
+    "    }",
     "  }",
     "  const embeddedHostPidArgument = process.argv.find(",
     "    (argument) => typeof argument === 'string' && argument.startsWith('--maxgamestudio-host-pid=')",
@@ -411,6 +421,8 @@ function Apply-EmbeddedUiPruning([string]$SourceRoot) {
     "  }"
   ) -join [Environment]::NewLine
   Replace-TextExactlyOnce $mainBootstrapPath $watchdogAnchor ($watchdogAnchor + [Environment]::NewLine + $watchdogBlock)
+  $loggerPath = Join-Path $SourceRoot "src\main\logger\index.ts"
+  Replace-TextExactlyOnce $loggerPath "process.platform === 'darwin'" "(process.platform === 'darwin' || process.env.MAXGAMESTUDIO_EMBEDDED === '1')"
   $watchdogText = Get-Content -LiteralPath $mainBootstrapPath -Raw -Encoding utf8
   foreach ($watchdogContract in @(
     "--maxgamestudio-embedded",

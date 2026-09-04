@@ -78,9 +78,11 @@ def test_same_directory_is_preinstall_only_and_other_directories_are_postinstall
     assert preinstall.index("Call CS2_RemoveLegacyTauri") < preinstall.index("SetOutPath $INSTDIR")
 
     runtime_check = postinstall.index("Call CS2_ValidateBundledRuntime")
-    data_migration = postinstall.index("desktop_data_migration.py")
     post_cleanup = postinstall.index(different_scope)
-    assert runtime_check < data_migration < post_cleanup
+    assert runtime_check < post_cleanup
+    assert "desktop_data_migration.py" not in postinstall
+    assert 'StrCpy $CS2ElectronScope "all"' not in postinstall
+    assert "Call CS2_RemoveLegacyElectron" not in postinstall
     assert postinstall.index("Call CS2_RemoveLegacyTauri", post_cleanup) > post_cleanup
 
     # If a same-directory legacy registry entry survives PREINSTALL, the
@@ -101,9 +103,9 @@ def test_runtime_and_data_failure_abort_before_legacy_tauri_retirement(hook: str
     assert postinstall.index("Call CS2_ValidateBundledRuntime") < postinstall.index(
         "Call CS2_RemoveLegacyTauri"
     )
-    assert postinstall.index("desktop_data_migration.py") < postinstall.index(
-        "Call CS2_RemoveLegacyTauri"
-    )
+    assert "desktop_data_migration.py" not in postinstall
+    assert 'StrCpy $CS2ElectronScope "all"' not in postinstall
+    assert "Call CS2_RemoveLegacyElectron" not in postinstall
     assert "Call CS2_AbortMigrationInstall" in postinstall
 
 

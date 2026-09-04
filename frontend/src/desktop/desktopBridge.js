@@ -42,6 +42,9 @@ export const desktopBridge = isDesktopApp
         administrator: Boolean(options?.administrator),
       }),
       stopLeagueRuntime: () => invoke("stop_league_runtime"),
+      getDesktopStorage: () => invoke("get_desktop_storage"),
+      chooseDesktopStorage: () => invoke("choose_desktop_storage"),
+      cancelDesktopStorageChange: () => invoke("cancel_desktop_storage_change"),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];
         const selected = await open({

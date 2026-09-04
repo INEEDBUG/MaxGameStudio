@@ -74,6 +74,8 @@ struct ElevatedRuntimeProcess {
 struct PreparedAdminLauncher {
     path: PathBuf,
     guard: Option<File>,
+    // Pin the entire path, including writable ancestors, until runas exits.
+    directory_guards: Vec<File>,
 }
 
 #[cfg(windows)]
@@ -81,6 +83,7 @@ impl Drop for PreparedAdminLauncher {
     fn drop(&mut self) {
         self.guard.take();
         let _ = fs::remove_file(&self.path);
+        self.directory_guards.clear();
     }
 }
 
@@ -368,20 +371,23 @@ fn verify_runtime_integrity(executable: &Path) -> Result<(), String> {
 
 fn runtime_user_data_dir(_app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(windows)]
-    let base = std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| "Windows APPDATA 环境变量不存在".to_string())?;
+    {
+        crate::desktop_storage::directory("league-runtime")
+    }
 
     #[cfg(not(windows))]
-    let base = _app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法解析应用数据目录：{error}"))?;
+    {
+        let base = _app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("无法解析应用数据目录：{error}"))?;
 
-    let path = base.join("MaxGameStudio").join("league-runtime");
-    fs::create_dir_all(&path)
-        .map_err(|error| format!("无法创建英雄联盟工作台数据目录 {}：{error}", path.display()))?;
-    Ok(path)
+        let path = base.join("MaxGameStudio").join("league-runtime");
+        fs::create_dir_all(&path).map_err(|error| {
+            format!("无法创建英雄联盟工作台数据目录 {}：{error}", path.display())
+        })?;
+        Ok(path)
+    }
 }
 
 fn runtime_user_data_argument(path: &Path) -> String {
@@ -520,14 +526,13 @@ fn admin_launcher_script(config: &Value) -> Result<Vec<u8>, String> {
 
 #[cfg(windows)]
 fn transient_admin_launcher_path(
-    source_root: &Path,
+    staging_root: &Path,
     session_name: &str,
 ) -> Result<PathBuf, String> {
-    let (_, drive) = normalized_local_windows_drive_path(source_root)?;
-    let _ = protected_admin_session_root(source_root, session_name)?;
-    Ok(PathBuf::from(format!(
-        "{}:\\MaxGameStudioAdminLauncher-{}.ps1",
-        char::from(drive),
+    let (staging_root, _) = normalized_local_windows_drive_path(staging_root)?;
+    let _ = protected_admin_session_root(&staging_root, session_name)?;
+    Ok(staging_root.join(format!(
+        "MaxGameStudioAdminLauncher-{}.ps1",
         &session_name[8..]
     )))
 }
@@ -536,6 +541,8 @@ fn transient_admin_launcher_path(
 fn prepare_admin_launcher(path: PathBuf, config: &Value) -> Result<PreparedAdminLauncher, String> {
     let script = admin_launcher_script(config)?;
     let expected_hash = sha256_bytes(&script);
+    let directory_guards = lock_launcher_ancestors(&path)?;
+    let mut created = false;
     let result = (|| {
         let mut writer = OpenOptions::new()
             .write(true)
@@ -543,6 +550,7 @@ fn prepare_admin_launcher(path: PathBuf, config: &Value) -> Result<PreparedAdmin
             .share_mode(0)
             .open(&path)
             .map_err(|error| format!("无法创建一次性管理员启动脚本 {}：{error}", path.display()))?;
+        created = true;
         writer
             .write_all(&script)
             .map_err(|error| format!("无法写入一次性管理员启动脚本 {}：{error}", path.display()))?;
@@ -568,12 +576,42 @@ fn prepare_admin_launcher(path: PathBuf, config: &Value) -> Result<PreparedAdmin
         Ok(PreparedAdminLauncher {
             path: path.clone(),
             guard: Some(guard),
+            directory_guards,
         })
     })();
-    if result.is_err() {
+    if result.is_err() && created {
         let _ = fs::remove_file(&path);
     }
     result
+}
+
+#[cfg(windows)]
+fn lock_launcher_ancestors(path: &Path) -> Result<Vec<File>, String> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_WRITE,
+    };
+    let mut ancestors: Vec<_> = path
+        .parent()
+        .ok_or("启动脚本没有父目录")?
+        .ancestors()
+        .collect();
+    ancestors.reverse();
+    let mut guards = Vec::new();
+    for ancestor in ancestors {
+        let guard = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(ancestor)
+            .map_err(|e| format!("无法保护管理员启动目录 {}：{e}", ancestor.display()))?;
+        let metadata = guard.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+            return Err("管理员启动目录不能包含链接或重解析点".into());
+        }
+        guards.push(guard);
+    }
+    Ok(guards)
 }
 
 #[cfg(windows)]
@@ -662,17 +700,22 @@ fn launch_elevated_runtime(
         .ok_or_else(|| "无法解析 Windows 系统目录".to_string())?;
     let session_name = random_admin_session_name()?;
     let (normalized_working_directory, _) = normalized_local_windows_drive_path(working_directory)?;
-    let _session_root = protected_admin_session_root(&normalized_working_directory, &session_name)?;
+    let storage_root = crate::desktop_storage::root()?;
+    let (storage_root, _) = normalized_local_windows_drive_path(&storage_root)?;
+    let _session_root = protected_admin_session_root(&storage_root, &session_name)?;
     let runtime_command_line = elevated_runtime_command_line(arguments);
     let config = json!({
         "sourceRoot": normalized_working_directory.to_string_lossy(),
+        "storageRoot": storage_root.to_string_lossy(),
         "manifestSha256": sha256_bytes(EMBEDDED_RUNTIME_HASHES.as_bytes()),
         "sessionName": session_name.clone(),
         "commandLine": runtime_command_line,
         "hostPid": std::process::id(),
     });
-    let launcher_path =
-        transient_admin_launcher_path(&normalized_working_directory, &session_name)?;
+    let launcher_path = transient_admin_launcher_path(
+        &crate::desktop_storage::directory("temp/admin-launchers")?,
+        &session_name,
+    )?;
     let launcher = prepare_admin_launcher(launcher_path.clone(), &config)?;
     // ShellExecuteEx does not reliably preserve Windows PowerShell's exit code
     // across `runas` on every supported Windows configuration. A trusted,
@@ -809,6 +852,7 @@ fn create_main_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .data_directory(crate::desktop_storage::directory("webview")?)
         .title("MaxGameStudio")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1100.0, 700.0)
@@ -1689,16 +1733,36 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn administrator_launcher_uses_a_fixed_safe_path_on_the_source_volume() {
+    fn administrator_launcher_uses_writable_staging_not_install_volume_root() {
         let path = transient_admin_launcher_path(
-            Path::new(r"D:\MaxGameStudio\league-runtime"),
+            Path::new(r"E:\MaxGameStudioData\user\temp\admin-launchers"),
             "session-0123456789abcdef0123456789abcdef",
         )
         .unwrap();
         assert_eq!(
             path,
-            PathBuf::from(r"D:\MaxGameStudioAdminLauncher-0123456789abcdef0123456789abcdef.ps1")
+            PathBuf::from(
+                r"E:\MaxGameStudioData\user\temp\admin-launchers\MaxGameStudioAdminLauncher-0123456789abcdef0123456789abcdef.ps1"
+            )
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn administrator_launcher_preserves_collisions_and_pins_parent_directory() {
+        let root = std::env::temp_dir().join(super::random_admin_session_name().unwrap());
+        fs::create_dir(&root).unwrap();
+        let path = root.join("launcher.ps1");
+        fs::write(&path, b"existing").unwrap();
+        assert!(prepare_admin_launcher(path.clone(), &serde_json::json!({})).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"existing");
+        fs::remove_file(&path).unwrap();
+        let prepared = prepare_admin_launcher(path.clone(), &serde_json::json!({})).unwrap();
+        let moved = root.with_extension("moved");
+        assert!(fs::rename(&root, &moved).is_err());
+        drop(prepared);
+        assert!(!path.exists());
+        fs::remove_dir(root).unwrap();
     }
 
     #[cfg(windows)]

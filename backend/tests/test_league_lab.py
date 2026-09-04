@@ -1543,6 +1543,11 @@ def test_event_stream_reads_events_while_handshake_prime_is_pending(monkeypatch)
 
 def test_snapshot_single_flight_coalesces_concurrent_refreshes(monkeypatch):
     service = LeagueLabService()
+    # This test exercises lock coalescing, not wall-clock TTL expiration.
+    # A slow Windows status probe under concurrent builds must not expire it;
+    # the following test covers TTL boundaries explicitly.
+    service._SNAPSHOT_CACHE_TTL_SECONDS = 60.0
+    monkeypatch.setattr(league_lab, "_league_client_window_is_present", lambda: False)
     refresh_started = asyncio.Event()
     release_refresh = asyncio.Event()
     calls = []

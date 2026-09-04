@@ -16,14 +16,14 @@
 > **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **The latest stable release is `v3.1.1`.** `v2.5.17` was withdrawn due to critical upgrade defects, and internal candidate `v3.0.6` was never published. Existing users can upgrade directly to `v3.1.1`. The CS2 workspace, embedded League workspace, VALORANT tools, and peripheral tuning ship in one installer.
+> **The latest stable release is `v3.1.2`.** `v2.5.17` was withdrawn due to critical upgrade defects, and internal candidate `v3.0.6` was never published. Existing users can upgrade directly to `v3.1.2`. The CS2 workspace, embedded League workspace, VALORANT tools, and peripheral tuning ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
 <p align="center">
   <a href="./PLAYER_GUIDE_EN.md">User Guide</a> •
   <a href="./CONTRIBUTING_EN.md">Contributing</a> •
-  <a href="./docs/releases/v3.1.1.zh-CN.md">v3.1.1 Release Notes</a> •
+  <a href="./docs/releases/v3.1.2.zh-CN.md">v3.1.2 Release Notes</a> •
   <a href="#key-features">Key Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#reference-project-and-attribution">Reference Project</a> •
@@ -44,13 +44,13 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ---
 
-## What's new in v3.1.1
+## What's new in v3.1.2
 
-- **Clear close choice** — Clicking the embedded League workspace `X` now asks whether to return to MaxGameStudio or minimize the League workspace while keeping it running.
-- **Safe cancel** — Canceling the close prompt keeps the current workspace and host state; it does not close the window, stop background tasks, or end a game process.
-- **Consistent modes** — The same close confirmation rules apply to Save memory and Run in parallel, reducing accidental exits while preserving each mode's memory behavior.
+- **Unified storage choice** — Settings can show current, pending, and retained-original paths for app-owned data, backend logs, cache, WebView data, and League temporary files.
+- **Verified pending switch** — A storage change is copied and verified on the next startup, can be canceled before execution, and retains the original directory for recovery.
+- **Installer and admin fixes** — Fresh installs prefer an available non-system fixed drive without assuming `D:`; explicit `/D=` and existing upgrade paths are respected, unavailable storage never silently falls back to `C:`, and the pre-UAC launch script now uses the selected writable temporary directory.
 
-See [`docs/releases/v3.1.1.zh-CN.md`](./docs/releases/v3.1.1.zh-CN.md) for the complete release notes.
+See [`docs/releases/v3.1.2.zh-CN.md`](./docs/releases/v3.1.2.zh-CN.md) for the complete release notes.
 
 ## v3.1.0 previous stable
 
@@ -198,7 +198,7 @@ These screenshots come from the `v2.5.16` desktop UI baseline and local demo fix
 
 ## Installation
 
-> **Current stable version: `v3.1.1`.** The signed installer and updater metadata are published through the repository's stable Release workflow.
+> **Current stable version: `v3.1.2`.** The signed installer and updater metadata are published through the repository's stable Release workflow.
 
 Download the latest `MaxGameStudio_x.x.x_x64-setup.exe` from this repository's [Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases), run the installer and follow the prompts.
 
@@ -228,7 +228,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Released |
 | **v3.0.6 · Mini, ongoing-game, and CFG selection** | Fixes Mini pin/dodge, adds opacity and automatic ongoing windows, progressively enriches player data, and supports manual valid CFG selection | ⚠️ Internal candidate; never released |
 | **v3.1.0 · Embedded League workspace** | Builds one embedded workspace from pinned v1.5.1 source; offers save-memory or background-parallel startup, reversible remembered choices, and protected workspace-only administrator launch | ✅ Previous stable |
-| **v3.1.1 · Embedded workspace close flow** | Adds an explicit return-or-minimize choice for the workspace `X` button, safe cancellation, and consistent close behavior in both startup modes | ✅ Latest stable |
+| **v3.1.1 · Embedded workspace close flow** | Adds an explicit return-or-minimize choice for the workspace `X` button, safe cancellation, and consistent close behavior in both startup modes | ✅ Previous stable |
+| **v3.1.2 · Installer and unified storage** | Fixes the administrator pre-UAC temporary path boundary; adds verified pending storage changes with retained originals; respects explicit install and upgrade locations without silent system-drive fallback | ✅ Latest stable |
 
 ### Planned
 

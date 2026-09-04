@@ -37,19 +37,22 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T' in hook
     # An orphaned backend must not keep port 19871 busy after an upgrade.
     assert "LocalPort 19871" in hook
-    # Same-directory Electron installs are retired before file copy,
-    # different-directory ones only after migration (postinstall).
+    # Same-directory Electron installs are retired before file copy; a
+    # different-directory copy remains as recovery until first-launch storage
+    # migration verifies the new root.
     assert 'StrCpy $CS2ElectronScope "samedir"' in hook
-    assert 'StrCpy $CS2ElectronScope "all"' in hook
+    postinstall = hook[hook.index("!macro NSIS_HOOK_POSTINSTALL"):]
+    assert 'StrCpy $CS2ElectronScope "all"' not in postinstall
+    assert "Call CS2_RemoveLegacyElectron" not in postinstall
     assert "EnumRegKey $R5 HKCU" in hook
     assert "EnumRegKey $R5 HKLM" in hook
     assert "SetRegView 64" in hook
     assert "SetRegView 32" in hook
     assert "uninstall cs2 insight agent.exe" in hook.lower()
     assert "ExecWait '$R8 /S'" in hook
-    assert "desktop_data_migration.py" in hook
-    assert "--require-desktop-stopped" in hook
-    assert "--require-electron-ui-export" in hook
+    assert "desktop_data_migration.py" not in hook
+    assert "--require-desktop-stopped" not in hook
+    assert "--require-electron-ui-export" not in hook
     # In-place upgrades must remove every historical patched-parser metadata
     # generation before copying the new runtime, not a hard-coded version list.
     assert 'FindFirst $0 $1 "$INSTDIR\\python\\Lib\\site-packages\\demoparser2-*.dist-info"' in hook
@@ -65,7 +68,6 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'backend\\app\\demoparser_runtime.py' in hook
     assert hook.count("Call CS2_ValidateBundledRuntime") == 2
     final_validation = hook.rindex("Call CS2_ValidateBundledRuntime")
-    assert final_validation > hook.index("Call CS2_RemoveLegacyElectron", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
     assert final_validation > hook.index("Call CS2_RemoveLegacyTauri", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
     assert final_validation > hook.index("Call CS2_RemoveLegacyBrandShortcuts", hook.index("!macro NSIS_HOOK_POSTINSTALL"))
     assert "pyarrow-25.0.0.dist-info" in hook

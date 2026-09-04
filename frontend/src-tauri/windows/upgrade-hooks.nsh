@@ -5,9 +5,9 @@
 ;   * User data under %APPDATA% is never touched by anything in this file.
 ;   * The exact legacy Tauri entry "CS2 Ultimate Insight Studio" is retired
 ;     only from its registered install directory; "MaxGameStudio" is ignored.
-;   * A legacy Electron install in a DIFFERENT directory is only uninstalled
-;     after the new files and the user-data migration are verified
-;     (postinstall), keeping a runnable fallback until that point.
+;   * A legacy Electron install in a DIFFERENT directory is retained as a
+;     recovery source. Storage migration belongs to the next application start,
+;     after selecting the data volume, not to the installer.
 ;   * A legacy Electron install in the SAME directory must be uninstalled
 ;     BEFORE files are copied: electron-builder's uninstaller deletes the
 ;     whole install directory and would otherwise wipe the freshly installed
@@ -34,6 +34,41 @@ Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
 Var CS2LegacyTauriScope  ; "samedir" (preinstall) or "differentdir" (postinstall)
 Var CS2LegacyTauriDir    ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2LegacyTauriUninsExe ; parsed legacy Tauri uninstaller executable path
+
+; MUI calls this after Tauri's .onInit has restored the registered install
+; location, but before displaying the directory page. Keep /D and upgrades.
+!define MUI_CUSTOMFUNCTION_GUIINIT MGS_SelectFreshInstallDrive
+Function MGS_SelectFreshInstallDrive
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
+  StrCmp $0 "" 0 mgs_drive_done
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio" "InstallLocation"
+  StrCmp $0 "" 0 mgs_drive_done
+  ClearErrors
+  ${GetOptions} $CMDLINE "/D=" $0
+  IfErrors +2 0
+    Goto mgs_drive_done
+  StrCmp $INSTDIR "$LOCALAPPDATA\MaxGameStudio" 0 mgs_drive_done
+  StrCpy $1 0
+  StrCpy $3 $WINDIR 2
+  mgs_drive_next:
+    StrCpy $2 "ABCDEFGHIJKLMNOPQRSTUVWXYZ" 1 $1
+    StrCmp $2 "" mgs_drive_done
+    IntOp $1 $1 + 1
+    StrCpy $2 "$2:"
+    StrCmp $2 $3 mgs_drive_next
+    System::Call 'kernel32::GetDriveTypeW(w "$2\") i.r0'
+    IntCmp $0 3 0 mgs_drive_next mgs_drive_next
+    StrCpy $INSTDIR "$2\MaxGameStudio"
+  mgs_drive_done:
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -733,11 +768,24 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  ; A silent fresh installation has no directory page or GUI-init callback.
+  ; Require an explicit /D instead of silently choosing the system disk.
+  IfSilent 0 mgs_silent_path_done
+  ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
+  StrCmp $0 "" 0 mgs_silent_path_done
+  ClearErrors
+  ${GetOptions} $CMDLINE "/D=" $0
+  IfErrors 0 mgs_silent_path_done
+  StrCpy $R7 "Fresh silent installations require an explicit /D= installation directory. No application files were copied."
+  Call CS2_AbortMigrationInstall
+  mgs_silent_path_done:
   Call CS2_PrepareRunningApps
 
   ; Same-directory legacy installs must be retired before any file copy —
   ; their uninstallers may delete $INSTDIR together with the new files.
-  ; Different-directory installs stay untouched until NSIS_HOOK_POSTINSTALL.
+  ; Different-directory installs stay untouched.  First-launch native storage
+  ; bootstrap owns user-data/UI migration, so the installer must not retire a
+  ; runnable Electron recovery copy before that verification exists.
   ; Do not hold $INSTDIR as the working directory while it may be deleted.
   SetOutPath $PLUGINSDIR
   StrCpy $CS2LegacyTauriScope "samedir"
@@ -794,24 +842,11 @@ FunctionEnd
   ; file copy at install time instead of surfacing as a backend startup dialog.
   Call CS2_ValidateBundledRuntime
 
-  ; Run the same idempotent migration used by the desktop startup before the
-  ; finish page can launch Tauri. A failure leaves every legacy source intact.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export' $R0
-  ${If} ${Errors}
-    StrCpy $R7 "MaxGameStudio 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看应用数据目录中的 desktop-data-migration-error.log。"
-    Call CS2_AbortMigrationInstall
-  ${EndIf}
-  ${If} $R0 != 0
-    StrCpy $R7 "用户数据迁移校验失败（退出码 $R0）。旧数据仍然保留，应用不会以空配置启动。请查看应用数据目录中的 desktop-data-migration-error.log。"
-    Call CS2_AbortMigrationInstall
-  ${EndIf}
-
-  ; Only retire different-directory legacy installs after the new runtime and
-  ; user-data migration are known-good. Any earlier failure leaves a runnable
-  ; legacy fallback in place.
-  StrCpy $CS2ElectronScope "all"
-  Call CS2_RemoveLegacyElectron
+  ; User-data and renderer-state migration is deliberately deferred to the
+  ; first-launch native storage bootstrap.  It must select and validate the
+  ; canonical non-system storage root before touching legacy sources.  Since
+  ; this installer no longer proves that migration, retain any different-dir
+  ; Electron installation as a recoverable fallback.
   StrCpy $CS2LegacyTauriScope "differentdir"
   Call CS2_RemoveLegacyTauri
 

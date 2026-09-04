@@ -16,6 +16,7 @@ import {
 import { clearHandledLeagueSession } from "../utils/leagueRuntimeLaunchCoordinator.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
+import DesktopStorageSettings from "../components/DesktopStorageSettings.jsx";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import {
   Settings as SettingsIcon,
@@ -1055,6 +1056,7 @@ export default function SettingsPage() {
               {/* Paths (CS2 + application and LiteCut data directories) */}
               {activeTab === "paths" && (
               <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
+                <DesktopStorageSettings search={search && !matches("应用统一存储 Unified app storage")} />
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}

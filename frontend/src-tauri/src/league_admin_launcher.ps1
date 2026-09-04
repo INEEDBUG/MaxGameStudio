@@ -53,6 +53,7 @@ function New-ProtectedDirectory([string]$path) {
 }
 
 function Assert-ProtectedDirectoryAcl([string]$path) {
+  if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Protected runtime directories cannot be links.' }
   $acl = [IO.Directory]::GetAccessControl($path)
   if (-not $acl.AreAccessRulesProtected) { throw "Protected runtime ACL inherits permissions: $path" }
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
@@ -98,16 +99,54 @@ function Remove-ProtectedSession([string]$root) {
   $exitCode = 211
   $sourceRoot = [IO.Path]::GetFullPath([string]$config.sourceRoot).TrimEnd('\')
   if (-not [IO.Path]::IsPathRooted($sourceRoot) -or $sourceRoot.StartsWith('\\')) { throw 'The runtime source must be on a local drive.' }
-  $driveRoot = [IO.Path]::GetPathRoot($sourceRoot)
+  $storageRoot = [IO.Path]::GetFullPath([string]$config.storageRoot).TrimEnd('\')
+  if ($storageRoot -notmatch '^[A-Za-z]:\\' -or $storageRoot.StartsWith('\\')) { throw 'Storage must be on a local drive.' }
+  $driveRoot = [IO.Path]::GetPathRoot($storageRoot)
   $adminRoot = Join-Path $driveRoot 'MaxGameStudioAdminRuntime'
   $sessionsRoot = Join-Path $adminRoot 'Sessions'
   $profilesRoot = Join-Path $adminRoot 'Profiles'
   $profileDigest = Get-Sha256HexFromBytes ([Text.Encoding]::UTF8.GetBytes($sourceRoot.ToLowerInvariant()))
   $profileRoot = Join-Path $profilesRoot ('profile-' + $profileDigest.Substring(0, 32))
-  foreach ($parent in @($adminRoot, $sessionsRoot, $profilesRoot, $profileRoot)) {
+  foreach ($parent in @($adminRoot, $sessionsRoot, $profilesRoot)) {
     Ensure-ProtectedDirectory $parent
     Assert-ProtectedDirectoryAcl $parent
   }
+
+  # A previous version kept the protected profile on the installation volume.
+  # Copy it only while all workspaces are closed, retain the original, and do
+  # not expose privileged profile contents to the ordinary user's data tree.
+  $legacyProfiles = Join-Path ([IO.Path]::GetPathRoot($sourceRoot)) 'MaxGameStudioAdminRuntime\Profiles'
+  $legacyProfile = Join-Path $legacyProfiles ('profile-' + $profileDigest.Substring(0, 32))
+  if (-not [IO.Directory]::Exists($profileRoot) -and [IO.Directory]::Exists($legacyProfile)) {
+    if (@([Diagnostics.Process]::GetProcessesByName('MaxGameStudioLeague')).Count -ne 0) { throw 'Close other workspaces before profile migration.' }
+    Assert-ProtectedDirectoryAcl $legacyProfile
+    $profileEntries = @(Get-PlainTreeEntries $legacyProfile)
+    $profileStage = Join-Path $profilesRoot ([string]$config.sessionName + '-profile')
+    if ([IO.Directory]::Exists($profileStage)) { throw 'Profile staging path already exists.' }
+    New-ProtectedDirectory $profileStage
+    try {
+      foreach ($entry in $profileEntries) {
+        $relative = $entry.Substring($legacyProfile.Length + 1)
+        $target = Join-Path $profileStage $relative
+        if ([IO.Directory]::Exists($entry)) { [void][IO.Directory]::CreateDirectory($target); continue }
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+        $original = [IO.File]::Open($entry, 'Open', 'Read', 'Read')
+        try {
+          $copy = [IO.File]::Open($target, 'CreateNew', 'ReadWrite', 'None')
+          try {
+            $original.CopyTo($copy)
+            $copy.Flush($true)
+            $original.Position = 0; $copy.Position = 0
+            if ((Get-Sha256HexFromStream $original) -ne (Get-Sha256HexFromStream $copy)) { throw 'Profile verification failed.' }
+          } finally { $copy.Dispose() }
+        } finally { $original.Dispose() }
+      }
+      [IO.Directory]::Move($profileStage, $profileRoot)
+    } finally {
+      if ([IO.Directory]::Exists($profileStage)) { Remove-ProtectedSession $profileStage }
+    }
+  }
+  Ensure-ProtectedDirectory $profileRoot
 
   $exitCode = 212
   # Every launch uses a cryptographically random session name. Do not delete
