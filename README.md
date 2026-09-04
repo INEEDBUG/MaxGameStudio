@@ -16,14 +16,14 @@
 > **One MaxGameStudio desktop app:** CS2, League of Legends, VALORANT, and peripheral tuning share the same Tauri client. Open a game section to reveal all features for that game—no separate desktop applications are required.
 
 > [!NOTE]
-> **The latest stable release is `v3.1.0`.** `v2.5.17` was withdrawn due to critical upgrade defects, and internal candidate `v3.0.6` was never published. Existing users can upgrade directly to `v3.1.0`. The CS2 workspace, embedded League workspace, VALORANT tools, and peripheral tuning ship in one installer.
+> **The latest stable release is `v3.1.1`.** `v2.5.17` was withdrawn due to critical upgrade defects, and internal candidate `v3.0.6` was never published. Existing users can upgrade directly to `v3.1.1`. The CS2 workspace, embedded League workspace, VALORANT tools, and peripheral tuning ship in one installer.
 
 > This repository is not software written from scratch. It is a clearly attributed, noncommercial derivative built from source-available and open-source projects. Read the source and license boundaries below before using or redistributing it.
 
 <p align="center">
   <a href="./PLAYER_GUIDE_EN.md">User Guide</a> •
   <a href="./CONTRIBUTING_EN.md">Contributing</a> •
-  <a href="./docs/releases/v3.1.0.zh-CN.md">v3.1.0 Release Notes</a> •
+  <a href="./docs/releases/v3.1.1.zh-CN.md">v3.1.1 Release Notes</a> •
   <a href="#key-features">Key Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#reference-project-and-attribution">Reference Project</a> •
@@ -44,25 +44,24 @@ This repository does not display upstream donation QR codes or solicit money on 
 
 ---
 
-## What's new in v3.1.0
+## What's new in v3.1.1
 
-- **One embedded League workspace** — The League entry is consolidated into one MaxGameStudio-managed workspace. Its runtime is built from pinned `v1.5.1` source and embedded with the desktop resources, while the original MIT copyright and license attribution remain available.
-- **Save memory** — Starting the workspace pauses the MaxGameStudio backend and CS2/VALORANT background tasks, destroys the main WebView, and leaves only the lightweight Tauri supervisor plus the embedded workspace; the main window and backend recover when the workspace exits.
-- **Run in parallel** — Keeps the MaxGameStudio main window, main WebView, backend, and background tasks running alongside the workspace. This can use more memory, so the launcher shows a local measured reference while actual usage still varies by page and system.
-- **Reversible automatic entry** — Choose Ask every time, Save memory, or Run in parallel. A remembered choice is used for automatic entry only when a League client is detected. Opening `/league` always shows the chooser, with the remembered mode merely preselected; the workspace entry and Settings → System & Updates can clear the choice and restore the prompt.
-- **Optional administrator launch** — Request elevation for the embedded League workspace only; MaxGameStudio itself is never elevated. The administrator choice can be remembered with Save memory or Run in parallel. Windows may show a UAC prompt according to its policy; cancelling it leaves the main window and backend running and does not save the cancelled launch. The host first verifies the installed payload, then trusted Windows PowerShell copies only manifest-listed files into a random protected session on the same drive. The elevated side binds the embedded manifest digest, rechecks every SHA-256 value, rejects links and extra files, keeps the verified payload locked for the full session, and uses a separate protected Chromium profile instead of loading privileged code or profile state from the user-writable install tree.
-- **UI and tool boundaries** — Fixes visibility of the paired theme buttons in both light and dark themes, removes the stray red sidebar line, adds a dedicated League workspace icon, and removes the obsolete League in-game-send entry so Game Send is no longer presented as an available feature.
-- **Release integrity** — The Tauri updater signature remains mandatory, and bundled payloads are verified against embedded SHA-256 manifests. Authenticode is applied when repository certificate secrets are configured; otherwise Windows may show “Unknown publisher” during installation or elevation.
-- **Version succession** — Historical internal candidate `v3.0.6` was never released. Existing `v3.0.5` users upgrade directly to stable `v3.1.0`; the old candidate notes remain available for traceability only.
+- **Clear close choice** — Clicking the embedded League workspace `X` now asks whether to return to MaxGameStudio or minimize the League workspace while keeping it running.
+- **Safe cancel** — Canceling the close prompt keeps the current workspace and host state; it does not close the window, stop background tasks, or end a game process.
+- **Consistent modes** — The same close confirmation rules apply to Save memory and Run in parallel, reducing accidental exits while preserving each mode's memory behavior.
 
-See [`docs/releases/v3.1.0.zh-CN.md`](./docs/releases/v3.1.0.zh-CN.md) for the complete release notes.
+See [`docs/releases/v3.1.1.zh-CN.md`](./docs/releases/v3.1.1.zh-CN.md) for the complete release notes.
+
+## v3.1.0 previous stable
+
+The previous release introduced the single embedded League workspace, reversible startup modes, optional workspace-only administrator launch, and the protected runtime packaging boundary. See [`docs/releases/v3.1.0.zh-CN.md`](./docs/releases/v3.1.0.zh-CN.md) for its complete release notes.
 
 ---
 
-## v3.0.6 historical local candidate (unreleased; superseded by v3.1.0)
+## v3.0.6 historical local candidate (unreleased; superseded by v3.1.1)
 
 > [!WARNING]
-> `v3.0.6` was never released and has no GitHub Release or formal updater entry. The notes below are retained as a historical candidate record; it was superseded by stable `v3.1.0`, and the client must not treat `v3.0.6` as an upgrade.
+> `v3.0.6` was never released and has no GitHub Release or formal updater entry. The notes below are retained as a historical candidate record; it was superseded by stable `v3.1.0` and later `v3.1.1`, and the client must not treat `v3.0.6` as an upgrade.
 
 - **Mini pin and opacity** — Pinning can be toggled and persisted; a new 40%–100% opacity control keeps the window recoverable.
 - **Verified dodge outcome** — A successful HTTP response is no longer enough; the client must leave champion select or lose the active session before success is shown.
@@ -199,7 +198,7 @@ These screenshots come from the `v2.5.16` desktop UI baseline and local demo fix
 
 ## Installation
 
-> **Current stable version: `v3.1.0`.** The signed installer and updater metadata are published through the repository's stable Release workflow.
+> **Current stable version: `v3.1.1`.** The signed installer and updater metadata are published through the repository's stable Release workflow.
 
 Download the latest `MaxGameStudio_x.x.x_x64-setup.exe` from this repository's [Releases page](https://github.com/INEEDBUG/MaxGameStudio/releases), run the installer and follow the prompts.
 
@@ -228,7 +227,8 @@ The desktop app checks the signed GitHub updater channel at launch and every 15 
 | **v3.0.4 · Regional languages and live-game analysis** | Adds four regional language choices, fixes active-section collapse, removes duplicate League navigation, and gives ongoing-game analysis a dedicated progressively loaded page with stricter premade and win-rate evidence | ✅ Released |
 | **v3.0.5 · Home, update confirmation, and VALORANT CFG** | Adds a standalone home and feedback links; requires explicit update confirmation; adds CFG resolution sync, backup, read-only lock, unlock, and restore to true stretch | ✅ Released |
 | **v3.0.6 · Mini, ongoing-game, and CFG selection** | Fixes Mini pin/dodge, adds opacity and automatic ongoing windows, progressively enriches player data, and supports manual valid CFG selection | ⚠️ Internal candidate; never released |
-| **v3.1.0 · Embedded League workspace** | Builds one embedded workspace from pinned v1.5.1 source; offers save-memory or background-parallel startup, reversible remembered choices, and protected workspace-only administrator launch | ✅ Latest stable |
+| **v3.1.0 · Embedded League workspace** | Builds one embedded workspace from pinned v1.5.1 source; offers save-memory or background-parallel startup, reversible remembered choices, and protected workspace-only administrator launch | ✅ Previous stable |
+| **v3.1.1 · Embedded workspace close flow** | Adds an explicit return-or-minimize choice for the workspace `X` button, safe cancellation, and consistent close behavior in both startup modes | ✅ Latest stable |
 
 ### Planned
 

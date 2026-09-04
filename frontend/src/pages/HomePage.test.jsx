@@ -14,7 +14,7 @@ describe("HomePage", () => {
   test("presents cross-game release notes and feedback actions", () => {
     render(<MemoryRouter><HomePage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "home.title" })).toBeTruthy();
-    expect(screen.getByText("修复后台并行模式错误关闭 MaxGameStudio 主窗口的问题；现在只有节省内存模式会收起主程序。")).toBeTruthy();
+    expect(screen.getByText("修复点击内嵌英雄联盟工作台右上角 X 后直接返回 MaxGameStudio 的问题。")).toBeTruthy();
     expect(screen.getByRole("note").textContent).toContain("home.stableReleaseNotice");
     expect(screen.getByRole("button", { name: /home.reportBug/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /home.requestFeature/ })).toBeTruthy();

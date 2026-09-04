@@ -704,22 +704,84 @@ try {
     Replace-TextExactlyOnce $apiMainPath "    this._noticeLoader.watch()" "    // MaxGameStudio owns user notices for the embedded runtime."
     $mainWindowPath = Join-Path $source "src\main\shards\window-manager\main-window\window.ts"
     $windowLineBreak = [Environment]::NewLine
-    $embeddedCloseGuard = "    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1') {" + $windowLineBreak +
-      "      this.close(true)" + $windowLineBreak +
-      "      return" + $windowLineBreak +
-      "    }"
     $closeStrategyAnchor = "    const s = this._nextCloseAction || this.settings.closeAction"
-    $patchedCloseStrategyAnchor = $embeddedCloseGuard + $windowLineBreak + $windowLineBreak + $closeStrategyAnchor
+    $embeddedCloseMinimize = @(
+      "    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1' && s === 'minimize-to-tray') {"
+      "      event.preventDefault()"
+      "      this._window?.minimize()"
+      "      this._nextCloseAction = null"
+      "      return"
+      "    }"
+    ) -join $windowLineBreak
+    $patchedCloseStrategyAnchor = $closeStrategyAnchor + $windowLineBreak + $embeddedCloseMinimize
     Replace-TextExactlyOnce $mainWindowPath $closeStrategyAnchor $patchedCloseStrategyAnchor
     $patchedWindowText = Get-Content -LiteralPath $mainWindowPath -Raw -Encoding utf8
-    if (-not $patchedWindowText.Contains($embeddedCloseGuard)) {
-      throw "Embedded close guard was not applied to main window handleClose."
+    if (-not $patchedWindowText.Contains($embeddedCloseMinimize)) {
+      throw "Embedded close minimization was not applied to main window handleClose."
     }
     $trueCloseIndex = $patchedWindowText.IndexOf('    if (this._trueClose || this._context.shared.global.isReadyToQuit) {')
-    $embeddedCloseIndex = $patchedWindowText.IndexOf("    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1') {")
     $closeStrategyIndex = $patchedWindowText.IndexOf($closeStrategyAnchor)
-    if ($trueCloseIndex -lt 0 -or $embeddedCloseIndex -le $trueCloseIndex -or $closeStrategyIndex -le $embeddedCloseIndex) {
-      throw "Embedded close guard order is unsafe: true-close must be handled before embedded close conversion."
+    $embeddedMinimizeIndex = $patchedWindowText.IndexOf("    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1' && s === 'minimize-to-tray') {")
+    if ($trueCloseIndex -lt 0 -or $closeStrategyIndex -le $trueCloseIndex -or $embeddedMinimizeIndex -le $closeStrategyIndex) {
+      throw "Embedded close minimization order is unsafe: close strategy must be resolved first."
+    }
+    if ($patchedWindowText.Contains("if (process.env.MAXGAMESTUDIO_EMBEDDED === '1') {")) {
+      throw "Embedded close path must not bypass the close strategy."
+    }
+    # Keep the runtime's existing `ask` and `quit` branches intact. In
+    # embedded mode the `minimize-to-tray` strategy is deliberately mapped to
+    # BrowserWindow.minimize(), because the embedded tray is disabled and the
+    # taskbar must remain a reliable restore path.
+    $shellEnglishPath = Join-Path $source "src\shared\i18n\en\renderer\shell.yaml"
+    $shellChinesePath = Join-Path $source "src\shared\i18n\zh-CN\renderer\shell.yaml"
+    $settingsEnglishPath = Join-Path $source "src\shared\i18n\en\renderer\settings.yaml"
+    $settingsChinesePath = Join-Path $source "src\shared\i18n\zh-CN\renderer\settings.yaml"
+    foreach ($i18nPath in @($shellEnglishPath, $shellChinesePath, $settingsEnglishPath, $settingsChinesePath)) {
+      if (-not (Test-Path -LiteralPath $i18nPath -PathType Leaf)) {
+        throw "Embedded close copy i18n target is missing: $i18nPath"
+      }
+    }
+    # Keep this staging script ASCII-only for Windows PowerShell 5.1. Build
+    # the Chinese labels from code points instead of embedding them literally.
+    $zhCloseLeagueWorkspace = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
+    $zhMinimizeLeagueWorkspace = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
+    $zhReturnToMaxGameStudio = (& $makeUnicodeText @(0x8FD4, 0x56DE)) + ' MaxGameStudio'
+    $zhLeagueWorkspaceCloseAction = & $makeUnicodeText @(0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x5173, 0x95ED, 0x884C, 0x4E3A)
+    $zhCloseLeagueWorkspaceDescription = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x65F6, 0x6267, 0x884C, 0x7684, 0x64CD, 0x4F5C)
+    $zhQuitCommonAppName = (& $makeUnicodeText @(0x9000, 0x51FA)) + ' $t(common:appName)'
+    $zhMinimizeToTray = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x5230, 0x6258, 0x76D8, 0x533A)
+    $zhMinimizeToTraySettings = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x5230, 0x6258, 0x76D8)
+    $zhQuitApplication = & $makeUnicodeText @(0x9000, 0x51FA, 0x5E94, 0x7528)
+    $zhMainWindowCloseAction = & $makeUnicodeText @(0x4E3B, 0x7A97, 0x53E3, 0x5173, 0x95ED, 0x7B56, 0x7565)
+    $zhMainWindowCloseDescription = & $makeUnicodeText @(0x5F53, 0x5173, 0x95ED, 0x4E3B, 0x7A97, 0x53E3, 0x65F6, 0x6240, 0x6267, 0x884C, 0x7684, 0x884C, 0x4E3A)
+    $zhAskEveryTime = & $makeUnicodeText @(0x6BCF, 0x6B21, 0x8BE2, 0x95EE)
+    Replace-TextExactlyOnce $shellEnglishPath "    title: Quit `$t(common:appName)" "    title: Close League Workspace"
+    Replace-TextExactlyOnce $shellEnglishPath "      minimize-to-tray: Minimize to tray" "      minimize-to-tray: Minimize League Workspace"
+    Replace-TextExactlyOnce $shellEnglishPath "      quit: Quit" "      quit: Return to MaxGameStudio"
+    Replace-TextExactlyOnce $shellChinesePath ("    title: " + $zhQuitCommonAppName) ("    title: " + $zhCloseLeagueWorkspace)
+    Replace-TextExactlyOnce $shellChinesePath ("      minimize-to-tray: " + $zhMinimizeToTray) ("      minimize-to-tray: " + $zhMinimizeLeagueWorkspace)
+    Replace-TextExactlyOnce $shellChinesePath ("      quit: " + $zhQuitApplication) ("      quit: " + $zhReturnToMaxGameStudio)
+    Replace-TextExactlyOnce $settingsEnglishPath "        label: Main Window Close Action" "        label: League Workspace Close Action"
+    Replace-TextExactlyOnce $settingsEnglishPath "        description: The action to be executed when the main window is closed" "        description: The action to take when closing the League workspace"
+    Replace-TextExactlyOnce $settingsEnglishPath "          minimize-to-tray: Minimize to tray" "          minimize-to-tray: Minimize League Workspace"
+    Replace-TextExactlyOnce $settingsEnglishPath "          quit: Quit" "          quit: Return to MaxGameStudio"
+    Replace-TextExactlyOnce $settingsChinesePath ("        label: " + $zhMainWindowCloseAction) ("        label: " + $zhLeagueWorkspaceCloseAction)
+    Replace-TextExactlyOnce $settingsChinesePath ("        description: " + $zhMainWindowCloseDescription) ("        description: " + $zhCloseLeagueWorkspaceDescription)
+    Replace-TextExactlyOnce $settingsChinesePath ("          minimize-to-tray: " + $zhMinimizeToTraySettings) ("          minimize-to-tray: " + $zhMinimizeLeagueWorkspace)
+    Replace-TextExactlyOnce $settingsChinesePath ("          quit: " + $zhQuitApplication) ("          quit: " + $zhReturnToMaxGameStudio)
+    $closeCopyContracts = @(
+      @{ Path = $shellEnglishPath; Values = @('Close League Workspace', 'Minimize League Workspace', 'Return to MaxGameStudio') }
+      @{ Path = $settingsEnglishPath; Values = @('League Workspace Close Action', 'Minimize League Workspace', 'Return to MaxGameStudio', 'Ask every time') }
+      @{ Path = $shellChinesePath; Values = @($zhCloseLeagueWorkspace, $zhMinimizeLeagueWorkspace, $zhReturnToMaxGameStudio) }
+      @{ Path = $settingsChinesePath; Values = @($zhLeagueWorkspaceCloseAction, $zhCloseLeagueWorkspaceDescription, $zhMinimizeLeagueWorkspace, $zhReturnToMaxGameStudio, $zhAskEveryTime) }
+    )
+    foreach ($contract in $closeCopyContracts) {
+      $closeCopyText = Get-Content -LiteralPath $contract.Path -Raw -Encoding utf8
+      foreach ($value in $contract.Values) {
+        if (-not $closeCopyText.Contains($value)) {
+          throw "Embedded close copy i18n contract is missing '$value': $($contract.Path)"
+        }
+      }
     }
     $settingsIpcPath = Join-Path $source "src\main\shards\setting-factory\ipc-handlers.ts"
     $settingsOldFileName = 'league-akari-settings.json'

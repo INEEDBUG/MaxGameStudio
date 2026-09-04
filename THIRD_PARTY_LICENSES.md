@@ -2,7 +2,7 @@
 
 MaxGameStudio 在编译与运行时依赖以下开源组件。常规编译依赖主要使用 MIT / BSD / Apache-2.0 / ISC 等宽松型许可证；另有下文单独列出的可选 GPL 工具。项目主体仍使用 **PolyForm Noncommercial 1.0.0**。
 
-League 工作台与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面应用分发，不是独立的桌面产品；下列条目记录它们实际涉及的依赖与许可证边界。`v3.1.0` 当前仍是本地候选，本文不表示已有公开 Release 或正式更新包。
+League 工作台与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面应用分发，不是独立的桌面产品；下列条目记录它们实际涉及的依赖与许可证边界。当前稳定版本为 `v3.1.1`；本文仅记录依赖归属与许可证边界，不替代 GitHub Release 的版本说明。
 
 分发本项目编译产物（便携包 / 安装包 / Docker 镜像等）时，请保留各自的版权声明与许可证全文。具体许可证文本可在每个依赖包源码中的 `LICENSE` 文件查阅。
 
