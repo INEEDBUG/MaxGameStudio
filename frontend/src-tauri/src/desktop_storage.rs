@@ -39,17 +39,73 @@ mod windows {
         sync::Mutex,
     };
     use windows_sys::Win32::{
-        Foundation::ERROR_FILE_NOT_FOUND,
+        Foundation::{
+            CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
         Storage::FileSystem::GetDriveTypeW,
         System::Registry::{
             RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW, HKEY_CURRENT_USER,
             KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
         },
+        System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
     };
     static SETTINGS_LOCK: Mutex<()> = Mutex::new(());
     const KEY: &str = "Software\\MaxGameStudio\\Storage";
     fn wide(value: &OsStr) -> Vec<u16> {
         value.encode_wide().chain(Some(0)).collect()
+    }
+    // Bootstrap precedes Tauri's single-instance plugin. Keep the locator read,
+    // native choice, migration and locator commit in one cross-process section.
+    pub(super) struct StartupLock(HANDLE);
+    impl StartupLock {
+        pub(super) fn acquire(identity: &OsStr) -> Result<Option<Self>, String> {
+            let digest = Sha256::digest(identity.to_string_lossy().to_lowercase().as_bytes());
+            // HKCU is shared across a user's logon sessions, so use the global
+            // mutex namespace. This is a mutex, not a privileged file mapping.
+            // Default Windows object ACL; no filesystem or system TEMP writes.
+            let name = wide(OsStr::new(&format!(
+                "Global\\MaxGameStudio.StorageBootstrap.{digest:x}"
+            )));
+            let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+            if handle.is_null() {
+                return Err(format!(
+                    "无法保护存储初始化：{}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            // A duplicate must exit before reading settings. Waiting here would
+            // keep another desktop process alive and block Python's writer gate.
+            let result = unsafe { WaitForSingleObject(handle, 0) };
+            if result == WAIT_OBJECT_0 || result == WAIT_ABANDONED {
+                // An interrupted owner may have left a partial transaction.
+                // initialize still re-reads and validates the persisted state;
+                // Python's nonempty-target/hash checks are never bypassed.
+                Ok(Some(Self(handle)))
+            } else if result == WAIT_TIMEOUT {
+                unsafe { CloseHandle(handle) };
+                Ok(None)
+            } else {
+                let error = std::io::Error::last_os_error();
+                unsafe { CloseHandle(handle) };
+                Err(format!("无法等待存储初始化：{error}"))
+            }
+        }
+    }
+    impl Drop for StartupLock {
+        fn drop(&mut self) {
+            unsafe {
+                ReleaseMutex(self.0);
+                CloseHandle(self.0);
+            }
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn abandon_lock_for_test(identity: &OsStr) -> isize {
+        let guard = StartupLock::acquire(identity).unwrap().unwrap();
+        let handle = guard.0 as isize;
+        // Keep a handle open while this test thread exits owning the mutex.
+        std::mem::forget(guard);
+        handle
     }
     fn settings() -> Result<Value, String> {
         let key = wide(OsStr::new(KEY));
@@ -286,7 +342,11 @@ mod windows {
         }
         Ok(())
     }
-    pub(super) fn initialize() -> Result<PathBuf, String> {
+    pub(super) fn initialize() -> Result<Option<PathBuf>, String> {
+        let identity = std::env::var_os("USERPROFILE").ok_or("USERPROFILE 不存在")?;
+        let Some(_startup_lock) = StartupLock::acquire(&identity)? else {
+            return Ok(None);
+        };
         let mut config = settings()?;
         let current = config["root"].as_str().map(PathBuf::from);
         if let Some(path) = current.as_ref() {
@@ -327,7 +387,7 @@ mod windows {
                     {
                         config["pending"] = Value::Null;
                         save(&config)?;
-                        return Ok(source.clone());
+                        return Ok(Some(source.clone()));
                     }
                 }
                 return Err(error);
@@ -337,7 +397,7 @@ mod windows {
             config["pending"] = Value::Null;
             save(&config)?;
         }
-        Ok(chosen)
+        Ok(Some(chosen))
     }
     pub(super) fn status() -> Result<Value, String> {
         let _lock = SETTINGS_LOCK.lock().map_err(|_| "存储设置忙")?;
@@ -409,9 +469,12 @@ fn storage_bytes(root: &Path) -> Result<u64, String> {
     Ok(bytes)
 }
 
-pub(crate) fn initialize() -> Result<PathBuf, String> {
+pub(crate) fn initialize() -> Result<Option<PathBuf>, String> {
     #[cfg(windows)]
-    let path = windows::initialize()?;
+    let Some(path) = windows::initialize()?
+    else {
+        return Ok(None);
+    };
     #[cfg(not(windows))]
     let path = std::env::var_os("MAXGAMESTUDIO_DATA_ROOT")
         .map(PathBuf::from)
@@ -422,7 +485,7 @@ pub(crate) fn initialize() -> Result<PathBuf, String> {
     std::env::set_var("TEMP", &temp);
     std::env::set_var("TMP", &temp);
     std::env::set_var("TMPDIR", &temp);
-    Ok(path)
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -468,6 +531,142 @@ pub(crate) async fn cancel_desktop_storage_change() -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    fn fixture() -> PathBuf {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let nonce: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("mgs-storage-startup-{nonce}"));
+        fs::create_dir(&path).unwrap();
+        path
+    }
+
+    #[cfg(windows)]
+    fn wait_for_file(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !path.exists() {
+            assert!(std::time::Instant::now() < deadline, "{}", path.display());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    // Runs only inside the test executable, never reads the real registry or
+    // legacy APPDATA. Parent and child use an isolated fixture as their identity.
+    #[cfg(windows)]
+    #[test]
+    fn startup_lock_child() {
+        let Some(root) = std::env::var_os("MGS_TEST_STORAGE_LOCK_FIXTURE") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        fs::write(root.join("child-ready"), b"ready").unwrap();
+        let Some(_guard) = windows::StartupLock::acquire(root.as_os_str()).unwrap() else {
+            return;
+        };
+        fs::write(root.join("child-entered"), b"entered").unwrap();
+        let locator = fs::read_to_string(root.join("locator.json")).unwrap();
+        assert_eq!(locator, "committed destination");
+        assert_eq!(
+            fs::read_to_string(root.join("live.log")).unwrap(),
+            "new runtime data"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn duplicate_startup_exits_before_read_and_later_launch_reads_committed_locator() {
+        use std::os::windows::process::CommandExt;
+        let root = fixture();
+        fs::write(root.join("locator.json"), b"not migrated").unwrap();
+        let guard = windows::StartupLock::acquire(root.as_os_str())
+            .unwrap()
+            .unwrap();
+        let spawn = || {
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "desktop_storage::tests::startup_lock_child",
+                    "--nocapture",
+                ])
+                .env("MGS_TEST_STORAGE_LOCK_FIXTURE", &root)
+                .creation_flags(0x08000000)
+                .spawn()
+                .unwrap()
+        };
+        let mut child = spawn();
+        wait_for_file(&root.join("child-ready"));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let exited_while_initializing = child.try_wait().unwrap();
+        let entered_before_commit = root.join("child-entered").exists();
+        fs::write(root.join("locator.json"), b"committed destination").unwrap();
+        fs::write(root.join("live.log"), b"new runtime data").unwrap();
+        drop(guard);
+        let status = child.wait().unwrap();
+        assert!(
+            exited_while_initializing.is_some(),
+            "duplicate blocked migration's active-writer gate"
+        );
+        assert!(
+            !entered_before_commit,
+            "second startup read a stale locator before migration committed"
+        );
+        assert!(status.success());
+        assert!(spawn().wait().unwrap().success());
+        assert!(root.join("child-entered").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("live.log")).unwrap(),
+            "new runtime data"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_lock_is_taken_before_the_locator_snapshot() {
+        let source = include_str!("desktop_storage.rs");
+        let (_, initialize) = source.split_once("pub(super) fn initialize()").unwrap();
+        assert!(
+            initialize.find("StartupLock::acquire").unwrap()
+                < initialize.find("settings()?").unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn interrupted_initializer_releases_abandoned_mutex() {
+        let root = fixture();
+        let identity = root.clone();
+        let abandoned =
+            std::thread::spawn(move || windows::abandon_lock_for_test(identity.as_os_str()))
+                .join()
+                .unwrap();
+        let guard = windows::StartupLock::acquire(root.as_os_str())
+            .unwrap()
+            .unwrap();
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(abandoned as _) };
+        drop(guard);
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_initializer_releases_mutex_for_retry() {
+        let root = fixture();
+        let identity = root.clone();
+        let result: Result<(), String> = std::thread::spawn(move || {
+            let _guard = windows::StartupLock::acquire(identity.as_os_str())?.unwrap();
+            Err("injected initialization error".into())
+        })
+        .join()
+        .unwrap();
+        assert!(result.is_err());
+        let guard = windows::StartupLock::acquire(root.as_os_str())
+            .unwrap()
+            .unwrap();
+        drop(guard);
+        fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn migration_roots_must_not_overlap() {
         assert!(!distinct_trees(

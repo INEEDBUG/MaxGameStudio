@@ -244,6 +244,48 @@ def test_process_gate_allows_current_host_pid_and_completes(tmp_path: Path, monk
     assert result.mode == "migrated"
 
 
+def test_process_gate_rechecks_a_short_lived_duplicate(tmp_path: Path, monkeypatch):
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    _tree(source)
+    snapshots = iter([[(10, "cs2-insight-agent-desktop.exe"), (20, "cs2-insight-agent-desktop.exe")],
+                      [(10, "cs2-insight-agent-desktop.exe")], [(10, "cs2-insight-agent-desktop.exe")]])
+    monkeypatch.setattr("app.desktop_storage_migration._process_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr("app.desktop_storage_migration.ensure_backend_stopped", lambda: None)
+    sleeps = []
+    monkeypatch.setattr("app.desktop_storage_migration.time.sleep", sleeps.append)
+    assert migrate_storage(source=source, destination=destination, host_pid=10).mode == "migrated"
+    assert sleeps == [0.1]
+
+
+def test_process_gate_does_not_ignore_a_backend_started_during_retry(tmp_path: Path, monkeypatch):
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    _tree(source)
+    checks = []
+    def backend_check():
+        checks.append(True)
+        if len(checks) > 1:
+            raise StorageMigrationError("backend still running")
+    monkeypatch.setattr("app.desktop_storage_migration.ensure_backend_stopped", backend_check)
+    monkeypatch.setattr("app.desktop_storage_migration._process_snapshot",
+                        lambda: [(20, "cs2-insight-agent-desktop.exe")])
+    monkeypatch.setattr("app.desktop_storage_migration.time.sleep", lambda _: None)
+    with pytest.raises(StorageMigrationError, match="backend still running"):
+        migrate_storage(source=source, destination=destination, host_pid=10)
+    assert not destination.exists()
+
+
+def test_reentry_never_overwrites_data_changed_after_migration(tmp_path: Path):
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    _tree(source)
+    migrate_storage(source=source, destination=destination, process_check=False)
+    current = destination / "data" / "db.sqlite-wal"
+    current.write_bytes(b"new runtime data")
+    with pytest.raises(StorageMigrationError, match="absent or empty"):
+        migrate_storage(source=source, destination=destination, process_check=False)
+    assert current.read_bytes() == b"new runtime data"
+    assert (source / "data" / "db.sqlite-wal").read_bytes() == b"\x00\xff\r\nraw"
+
+
 def test_staging_acl_failure_is_fail_closed(tmp_path: Path, monkeypatch):
     source, destination = tmp_path / "source", tmp_path / "destination"
     _tree(source)

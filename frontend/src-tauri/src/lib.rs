@@ -1066,7 +1066,8 @@ pub(crate) fn stop_backend(app: &AppHandle) {
 
 pub fn run() {
     let storage_root = match desktop_storage::initialize() {
-        Ok(path) => path,
+        Ok(Some(path)) => path,
+        Ok(None) => return, // another process owns bootstrap; do not enter migration
         Err(error) => {
             #[cfg(windows)]
             rfd::MessageDialog::new()
@@ -1185,6 +1186,16 @@ pub fn run() {
             let handle = app.handle().clone();
             thread::spawn(move || {
                 if let Err(error) = start_backend(&handle) {
+                    // Closing during startup deliberately cancels readiness.
+                    // The exit path owns cleanup; do not show a failure dialog
+                    // for that normal cancellation or issue a competing exit.
+                    if handle
+                        .state::<AppLifecycle>()
+                        .quitting
+                        .load(Ordering::SeqCst)
+                    {
+                        return;
+                    }
                     handle
                         .dialog()
                         .message(format!(
@@ -1472,6 +1483,18 @@ mod tests {
         assert!(source.contains("mini.should_show.store(should_show"));
         assert!(source.contains("fn mark_league_window_ready"));
         assert!(source.contains("lifecycle.ready.store(true"));
+    }
+
+    #[test]
+    fn cancelling_startup_does_not_show_backend_failure() {
+        let source = include_str!("lib.rs");
+        let (_, handler) = source
+            .split_once("if let Err(error) = start_backend(&handle) {")
+            .unwrap();
+        let (before_dialog, _) = handler.split_once(".dialog()").unwrap();
+        let compact: String = before_dialog.split_whitespace().collect();
+        assert!(compact
+            .contains("ifhandle.state::<AppLifecycle>().quitting.load(Ordering::SeqCst){return;}"));
     }
 
     #[test]

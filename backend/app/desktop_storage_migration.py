@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -174,6 +175,15 @@ def ensure_desktop_stopped(*, host_pid: int | None = None) -> None:
     ensure_backend_stopped()
     running = _process_snapshot()
     blocked = [(pid, name) for pid, name in running if pid != host_pid]
+    # A duplicate bootstrap now exits immediately when the native startup mutex
+    # is owned. Confirm short-lived snapshots before rejecting; persistent live
+    # hosts/League still fail closed, and no PID is silently exempted.
+    for _ in range(2):
+        if not blocked:
+            break
+        time.sleep(0.1)
+        ensure_backend_stopped()
+        blocked = [(pid, name) for pid, name in _process_snapshot() if pid != host_pid]
     if blocked:
         details = ", ".join(f"{name} (PID {pid})" for pid, name in blocked)
         raise StorageMigrationError(f"desktop process is still running: {details}")
