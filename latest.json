@@ -1,27 +1,29 @@
 {
-  "version": "3.1.1",
+  "version": "3.1.2",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-09-04T18:17:45.271Z",
+  "pub_date": "2026-09-05T14:55:22.760Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3RkUDNwc2tBUkNSUFN6SDhSOUY4TVRMTWhLd080TFJkRS9aYmhQRmgzc3RzZjZEOXZLdjdncHpUTGJyemZWQWNrK3kxeVpDcFNHVGRMK3d2SXFYWVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NTQ1ODU4CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuMV94NjQtc2V0dXAuZXhlCnI5Nk9xQjBzWlh1QWRrR2ZRUkFrbjM0Y1hVL2pPTU5ua0lyT0tTRnl3c29iMng4SDhVVDNKM3l6Z1dIWXFrMkhkbEh0dFlaYjNMZXZTaklhRUswQkRRPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.1/MaxGameStudio_3.1.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2s1MFN4U0dJUFFyZjFtd1dEbzZKUjdYQmJIYXlqYXE1UlV4V2gxRXhZd21xdmRWZE1XeFF2ME5aSGw5NXVKd3RMaVYwS2FwZWtSaHNWaXd6bmZreEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjIwMTE2CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuMl94NjQtc2V0dXAuZXhlCm5wTGltZGhFV3NkS09BUWkyb0kydzRuTGRHOGxXR3FKT3ZoN1BkN25iUUh1OFNmOEZPL2oxUVRuSE1mMVNGRlkvbzJaOGd4dzBNT1hHT0lvVlE0TENBPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.2/MaxGameStudio_3.1.2_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.1.1",
+    "version": "3.1.2",
     "fixed": [
-      "修复点击内嵌英雄联盟工作台右上角 X 后直接返回 MaxGameStudio 的问题。",
-      "修复关闭工作台时未明确选择就离开当前会话的问题。",
-      "修复节省内存与后台并行模式的关闭行为不一致问题。"
+      "修复部分电脑以管理员权限启动英雄联盟工作台时提示“拒绝访问”的问题。"
     ],
     "added": [
-      "新增关闭确认选项：返回 MaxGameStudio，或最小化英雄联盟工作台并保留运行状态。"
+      "启动时优先复用已有数据位置，不会自动迁移、复制或删除旧数据；新安装可使用推荐的非系统盘位置。",
+      "设置显示数据、日志、缓存、WebView、英雄联盟运行时和临时文件的实际位置；可手动切换目录，空目录从新设置开始。",
+      "普通模式预热英雄联盟工作台但不连接客户端或运行自动化；管理员模式需要 UAC，不进行普通预热。"
     ],
     "optimized": [
-      "点击取消不会退出工作台，也不会终止 MaxGameStudio 或游戏后台任务。",
-      "关闭确认与节省内存、后台并行两种启动模式保持一致，减少误操作。"
+      "设置会如实显示已有数据的位置；磁盘不可用时会提示，不会偷偷改存 C 盘。",
+      "切换失败会取消本次切换并继续使用原目录；原目录也不可用时会停止启动并明确提示。",
+      "Windows 系统记录和游戏自身的配置文件不在迁移范围内。",
+      "节省内存模式在工作台显示后隐藏主窗口；后台并行模式保留主窗口。首次或未预热启动仍可能需要数秒，不保证 1 秒内打开。"
     ]
   }
 }
