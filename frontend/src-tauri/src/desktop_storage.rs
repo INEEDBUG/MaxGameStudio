@@ -1,5 +1,5 @@
 //! One storage root for application-owned files. Registry holds only a locator;
-//! migration copies and verifies before changing it, and never deletes sources.
+//! existing data stays in place; changing the locator never copies/deletes data.
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -7,19 +7,44 @@ use std::{
     sync::OnceLock,
 };
 
-static ROOT: OnceLock<PathBuf> = OnceLock::new();
+#[derive(Clone, Debug)]
+struct StorageLayout {
+    root: PathBuf,
+    // Only legacy installations need separate, existing component paths.
+    legacy: Option<(PathBuf, PathBuf, PathBuf)>,
+}
+
+impl StorageLayout {
+    fn path(&self, name: &str) -> PathBuf {
+        if let Some((data, webview, league)) = &self.legacy {
+            for (prefix, base) in [
+                ("data", data),
+                ("webview", webview),
+                ("league-runtime", league),
+            ] {
+                if let Ok(relative) = Path::new(name).strip_prefix(prefix) {
+                    return base.join(relative);
+                }
+            }
+        }
+        self.root.join(name)
+    }
+}
+
+static ROOT: OnceLock<StorageLayout> = OnceLock::new();
 pub(crate) fn root() -> Result<PathBuf, String> {
     let path = ROOT
         .get()
-        .cloned()
+        .map(|layout| layout.root.clone())
         .ok_or_else(|| "应用存储尚未初始化".to_string())?;
-    if !path.join(".storage-migration-v1.json").is_file() {
+    if !path.is_dir() {
         return Err("已选存储目录不再可用，请检查磁盘；不会自动回退系统盘".into());
     }
     Ok(path)
 }
 pub(crate) fn directory(name: &str) -> Result<PathBuf, String> {
-    let path = root()?.join(name);
+    root()?; // An unavailable selected disk must not silently create a new root.
+    let path = ROOT.get().ok_or("应用存储尚未初始化")?.path(name);
     fs::create_dir_all(&path).map_err(|e| format!("无法访问存储目录 {}：{e}", path.display()))?;
     Ok(path)
 }
@@ -32,12 +57,7 @@ fn distinct_trees(source: &Path, destination: &Path) -> bool {
 mod windows {
     use super::*;
     use sha2::{Digest, Sha256};
-    use std::{
-        ffi::OsStr,
-        os::windows::{ffi::OsStrExt, process::CommandExt},
-        process::{Command, Stdio},
-        sync::Mutex,
-    };
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt, sync::Mutex};
     use windows_sys::Win32::{
         Foundation::{
             CloseHandle, ERROR_FILE_NOT_FOUND, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -55,7 +75,7 @@ mod windows {
         value.encode_wide().chain(Some(0)).collect()
     }
     // Bootstrap precedes Tauri's single-instance plugin. Keep the locator read,
-    // native choice, migration and locator commit in one cross-process section.
+    // layout selection and locator commit in one cross-process section.
     pub(super) struct StartupLock(HANDLE);
     impl StartupLock {
         pub(super) fn acquire(identity: &OsStr) -> Result<Option<Self>, String> {
@@ -74,12 +94,11 @@ mod windows {
                 ));
             }
             // A duplicate must exit before reading settings. Waiting here would
-            // keep another desktop process alive and block Python's writer gate.
+            // keep another desktop process alive during initialization.
             let result = unsafe { WaitForSingleObject(handle, 0) };
             if result == WAIT_OBJECT_0 || result == WAIT_ABANDONED {
-                // An interrupted owner may have left a partial transaction.
-                // initialize still re-reads and validates the persisted state;
-                // Python's nonempty-target/hash checks are never bypassed.
+                // An interrupted owner may have left a pending location change.
+                // Re-read and validate persisted state; never copy user data.
                 Ok(Some(Self(handle)))
             } else if result == WAIT_TIMEOUT {
                 unsafe { CloseHandle(handle) };
@@ -265,7 +284,7 @@ mod windows {
         let parent = dialog
             .pick_folder()
             .ok_or_else(|| "已取消选择存储位置，未修改数据".to_string())?;
-        let target = validate_path(&parent.join("MaxGameStudioData"))?;
+        let target = validate_path(&parent)?;
         if system_drive(&target)
             && rfd::MessageDialog::new()
                 .set_title("确认使用系统盘")
@@ -280,124 +299,260 @@ mod windows {
         }
         Ok(target)
     }
-    fn migration(destination: &Path, source: Option<&Path>) -> Result<(), String> {
-        let code_root = if cfg!(debug_assertions) {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-        } else {
-            std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .parent()
-                .ok_or("无安装目录")?
-                .to_path_buf()
-        };
-        let python = if cfg!(debug_assertions) {
-            code_root.join(".venv/Scripts/python.exe")
-        } else {
-            code_root.join("python/python.exe")
-        };
-        let script = code_root.join("backend/app/desktop_storage_migration.py");
-        // Staging temp lives on the chosen volume, never inherited system TEMP.
-        let parent = destination.parent().ok_or("存储目录没有父目录")?;
-        fs::create_dir_all(parent).map_err(|e| format!("无法创建存储父目录：{e}"))?;
-        let mut random = [0u8; 16];
-        getrandom::fill(&mut random).map_err(|e| e.to_string())?;
-        let nonce = random
+    fn has_payload(data: &Path) -> bool {
+        ["cs2-insight.config.json", "cs2-insight.db"]
             .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let temp = parent.join(format!(".mgs-migration-temp-{nonce}"));
-        fs::create_dir(&temp).map_err(|e| format!("无法创建迁移临时目录：{e}"))?;
-        let mut command = Command::new(python);
-        command
-            .arg("-I")
-            .arg(script)
-            .arg("--destination")
-            .arg(destination)
-            .arg("--host-pid")
-            .arg(std::process::id().to_string())
-            .env("TEMP", &temp)
-            .env("TMP", &temp)
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .creation_flags(crate::CREATE_NO_WINDOW);
-        if let Some(source) = source {
-            command.arg("--source").arg(source);
-        } else {
-            command
-                .arg("--legacy-appdata")
-                .arg(std::env::var_os("APPDATA").ok_or("APPDATA 不存在")?)
-                .arg("--legacy-localappdata")
-                .arg(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA 不存在")?);
+            .any(|name| data.join(name).is_file())
+    }
+
+    fn known_root(path: &Path) -> bool {
+        path.join(".storage-location-v2.json").is_file()
+            || path.join(".storage-migration-v1.json").is_file()
+            || has_payload(&path.join("data"))
+    }
+
+    // Detection is read-only. Never turn a legacy data root into a copy source
+    // during startup, and never make its logs/caches hide an older real database.
+    fn legacy_layout(appdata: &Path, local: &Path) -> Option<StorageLayout> {
+        let candidates = [
+            appdata.join("CS2 Insight Agent/data"),
+            appdata.join("com.cs2insightagent.app/data"),
+            appdata.join("cs2-insight-agent/data"),
+            appdata.join("com.cs2insightagent.app"),
+            appdata.join("cs2-insight-agent"),
+        ];
+        let data = candidates.iter().find(|path| has_payload(path)).cloned();
+        let webview = local.join("com.cs2insightagent.app");
+        let league = appdata.join("MaxGameStudio/league-runtime");
+        if data.is_none() && !webview.is_dir() && !league.is_dir() {
+            // Unknown legacy files are still user data; retain them in place.
+            if !candidates[..3].iter().any(|path| path.is_dir()) {
+                return None;
+            }
         }
-        let output = command.output();
-        let _ = fs::remove_dir(&temp); // only remove our empty temporary directory
-        let output = output.map_err(|e| format!("无法启动数据复制校验：{e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "数据复制未完成，原数据保持不变：{}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
+        let data = data
+            .or_else(|| candidates[..3].iter().find(|p| p.is_dir()).cloned())
+            .unwrap_or_else(|| candidates[0].clone());
+        let root = if data.file_name().is_some_and(|name| name == "data") {
+            data.parent()?.to_path_buf()
+        } else {
+            data.clone()
+        };
+        Some(StorageLayout {
+            root,
+            legacy: Some((data, webview, league)),
+        })
+    }
+
+    fn layout_from_config(config: &Value, root: PathBuf) -> Result<StorageLayout, String> {
+        if let Some(required) = config["required_paths"].as_array() {
+            for path in required {
+                let path = Path::new(path.as_str().ok_or("已保存的数据路径格式错误")?);
+                validate_path(path)?;
+                if !path.is_dir() || fs::read_dir(path).is_err() {
+                    return Err(format!(
+                        "原有数据目录暂不可用：{}。为避免空配置启动，未创建替代目录。",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        let legacy = if config["mode"] == "legacy_in_place" {
+            let paths = &config["paths"];
+            let read = |name: &str| -> Result<PathBuf, String> {
+                let path = paths[name]
+                    .as_str()
+                    .ok_or("旧版存储路径设置不完整，未修改数据")?;
+                validate_path(Path::new(path))
+            };
+            Some((read("data")?, read("webview")?, read("league_runtime")?))
+        } else {
+            None
+        };
+        Ok(StorageLayout { root, legacy })
+    }
+
+    fn save_layout(config: &mut Value, layout: &StorageLayout) {
+        config["root"] = json!(layout.root);
+        config["mode"] = json!(if layout.legacy.is_some() {
+            "legacy_in_place"
+        } else {
+            "unified"
+        });
+        config["paths"] = if let Some((data, webview, league)) = &layout.legacy {
+            json!({"data": data, "webview": webview, "league_runtime": league})
+        } else {
+            Value::Null
+        };
+        // Remember only components that already exist; a legacy installation
+        // may never have used League/WebView yet. Missing known data is not a
+        // request to replace it with an empty configuration on the next launch.
+        config["required_paths"] = json!(["data", "webview", "league-runtime"]
+            .iter()
+            .map(|name| layout.path(name))
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>());
+        config["pending"] = Value::Null;
+        config["pending_kind"] = Value::Null;
+    }
+
+    fn prepare_root(path: &Path) -> Result<(), String> {
+        validate_path(path)?;
+        if path.is_dir()
+            && !known_root(path)
+            && fs::read_dir(path)
+                .map_err(|e| e.to_string())?
+                .next()
+                .is_some()
+        {
+            return Err(
+                "所选目录包含其他数据，请选择空文件夹或已有的 MaxGameStudio 数据目录；不会覆盖文件"
+                    .into(),
+            );
+        }
+        fs::create_dir_all(path).map_err(|e| format!("无法使用存储目录：{e}"))?;
+        if !known_root(path) {
+            use std::io::Write;
+            let mut marker = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path.join(".storage-location-v2.json"))
+                .map_err(|e| e.to_string())?;
+            marker
+                .write_all(b"{\"version\":2}\n")
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
-    pub(super) fn initialize() -> Result<Option<PathBuf>, String> {
+
+    // Inputs are explicit so all selection/switch tests use fixtures, not the
+    // developer's registry, profile, or game settings.
+    pub(super) fn select_layout(
+        config: &mut Value,
+        suggested: &Path,
+        appdata: &Path,
+        local: &Path,
+    ) -> Result<StorageLayout, String> {
+        // Commit locator changes only after validation. A failed requested switch
+        // must not strand the user outside the UI that can cancel/retry it.
+        let mut candidate = config.clone();
+        match select_layout_inner(&mut candidate, suggested, appdata, local) {
+            Ok(layout) => {
+                if config["pending_kind"] == "switch-only-v2" {
+                    candidate["last_switch_error"] = Value::Null;
+                }
+                *config = candidate;
+                Ok(layout)
+            }
+            Err(error) => {
+                if config["pending_kind"] != "switch-only-v2"
+                    || !config["pending"].is_string()
+                    || !config["root"].is_string()
+                {
+                    return Err(error);
+                }
+                let mut restored = config.clone();
+                restored["pending"] = Value::Null;
+                restored["pending_kind"] = Value::Null;
+                // Revalidate the original root AND all known components. Never
+                // replace missing original data with an empty fallback profile.
+                let layout = select_layout_inner(&mut restored, suggested, appdata, local)
+                    .map_err(|original_error| {
+                        format!("更改存储位置失败：{error}；原目录也不可用：{original_error}")
+                    })?;
+                restored["last_switch_error"] = json!(format!(
+                    "未能切换至 {}，已取消这次更改并继续使用原目录 {}。原因：{error}",
+                    config["pending"].as_str().unwrap_or_default(),
+                    layout.root.display()
+                ));
+                *config = restored;
+                Ok(layout)
+            }
+        }
+    }
+
+    fn select_layout_inner(
+        config: &mut Value,
+        suggested: &Path,
+        appdata: &Path,
+        local: &Path,
+    ) -> Result<StorageLayout, String> {
+        let current = config["root"].as_str().map(PathBuf::from);
+        // Old queued migration requests are cancelled, NOT silently reinterpreted
+        // as permission to start with an empty configuration.
+        if config["pending_kind"] == "switch-only-v2" {
+            if let Some(target) = config["pending"].as_str().map(PathBuf::from) {
+                let saved_layout = config["locations"][target.to_string_lossy().as_ref()].clone();
+                let layout = if saved_layout.is_object() {
+                    if !target.is_dir() {
+                        return Err("所选旧数据目录暂不可用，未切换位置".into());
+                    }
+                    layout_from_config(&saved_layout, validate_path(&target)?)?
+                } else {
+                    prepare_root(&target)?;
+                    StorageLayout {
+                        root: target,
+                        legacy: None,
+                    }
+                };
+                if let Some(current_root) = &current {
+                    let snapshot = json!({"mode": config["mode"], "paths": config["paths"], "required_paths": config["required_paths"]});
+                    if !config["locations"].is_object() {
+                        config["locations"] = json!({});
+                    }
+                    config["locations"][current_root.to_string_lossy().as_ref()] = snapshot;
+                }
+                config["previous"] = current.map(|path| json!(path)).unwrap_or(Value::Null);
+                save_layout(config, &layout);
+                return Ok(layout);
+            }
+        }
+        config["pending"] = Value::Null;
+        config["pending_kind"] = Value::Null;
+        let layout = if let Some(path) = current {
+            validate_path(&path)?;
+            if !path.is_dir() {
+                return Err(format!("已选数据目录暂不可用：{}。请连接该磁盘后重试；现有数据未搬移，也不会建立空配置。", path.display()));
+            }
+            layout_from_config(config, path)?
+        } else if known_root(suggested) {
+            // Already-used unified data is authoritative even if its locator
+            // disappeared. Runtime writes do NOT invalidate a completed migration.
+            validate_path(suggested)?;
+            StorageLayout {
+                root: suggested.to_path_buf(),
+                legacy: None,
+            }
+        } else if let Some(layout) = legacy_layout(appdata, local) {
+            validate_path(&layout.root)?;
+            fs::create_dir_all(&layout.root).map_err(|e| e.to_string())?;
+            layout
+        } else {
+            prepare_root(suggested)?;
+            StorageLayout {
+                root: suggested.to_path_buf(),
+                legacy: None,
+            }
+        };
+        save_layout(config, &layout);
+        Ok(layout)
+    }
+
+    pub(super) fn initialize() -> Result<Option<StorageLayout>, String> {
         let identity = std::env::var_os("USERPROFILE").ok_or("USERPROFILE 不存在")?;
         let Some(_startup_lock) = StartupLock::acquire(&identity)? else {
             return Ok(None);
         };
         let mut config = settings()?;
-        let current = config["root"].as_str().map(PathBuf::from);
-        if let Some(path) = current.as_ref() {
-            validate_path(path)?;
-            if !path.join(".storage-migration-v1.json").is_file() {
-                return Err(format!("已选存储目录不可用：{}。请重新连接磁盘或恢复原目录；不会自动改用 C 盘或建立空配置。", path.display()));
-            }
-        }
-        let pending = config["pending"].as_str().map(PathBuf::from);
-        let chosen = match pending.or(current.clone()) {
-            Some(path) => validate_path(&path)?,
-            None => {
-                let proposed = suggest();
-                match proposed {
-                    Some(path) if rfd::MessageDialog::new().set_title("MaxGameStudio 数据位置")
-                        .set_description(format!("建议存储位置：{}\n\n将复制并校验旧数据，保留原目录作为回滚副本。缓存、日志、WebView 和英雄联盟数据将写入这里。数据较多时可能需要几分钟，完成后才会打开主窗口，请勿重复启动。选择“否”可自行指定位置。", path.display()))
-                        .set_buttons(rfd::MessageButtons::YesNo).show() == rfd::MessageDialogResult::Yes => validate_path(&path)?,
-                    _ => choose()?,
-                }
-            }
-        };
-        if current.as_ref() != Some(&chosen) {
-            if let Some(source) = &current {
-                if !distinct_trees(source, &chosen) {
-                    return Err("新旧目录不能相同或互相包含".into());
-                }
-            }
-            if let Err(error) = migration(&chosen, current.as_deref()) {
-                if let Some(source) = current.as_ref() {
-                    if rfd::MessageDialog::new()
-                        .set_title("数据迁移未完成")
-                        .set_description(format!(
-                            "{error}\n\n原数据未修改。是否取消此次切换，并继续使用原目录？"
-                        ))
-                        .set_buttons(rfd::MessageButtons::YesNo)
-                        .show()
-                        == rfd::MessageDialogResult::Yes
-                    {
-                        config["pending"] = Value::Null;
-                        save(&config)?;
-                        return Ok(Some(source.clone()));
-                    }
-                }
-                return Err(error);
-            }
-            config["previous"] = current.map(|p| json!(p)).unwrap_or(Value::Null);
-            config["root"] = json!(chosen);
-            config["pending"] = Value::Null;
+        let before = config.clone();
+        let appdata = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA 不存在")?);
+        let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA 不存在")?);
+        let suggested = suggest().unwrap_or_else(|| appdata.join("MaxGameStudioData"));
+        let layout = select_layout(&mut config, &suggested, &appdata, &local)?;
+        if config != before {
             save(&config)?;
         }
-        Ok(Some(chosen))
+        Ok(Some(layout))
     }
     pub(super) fn status() -> Result<Value, String> {
         let _lock = SETTINGS_LOCK.lock().map_err(|_| "存储设置忙")?;
@@ -409,7 +564,14 @@ mod windows {
             .ok_or("无存储卷")?
             .join("MaxGameStudioAdminRuntime");
         Ok(
-            json!({"root": root, "bytes": storage_bytes(&root).ok(), "protected_root": protected_root, "pending": config["pending"], "previous": config["previous"], "system_drive": system_drive(&root), "restart_required": config["pending"].is_string()}),
+            json!({"root": root, "mode": config["mode"], "last_switch_error": config["last_switch_error"], "paths": {
+                "data": ROOT.get().unwrap().path("data"),
+                "logs": ROOT.get().unwrap().path("data/logs"),
+                "cache": ROOT.get().unwrap().path("data/cache"),
+                "webview": ROOT.get().unwrap().path("webview"),
+                "league_runtime": ROOT.get().unwrap().path("league-runtime"),
+                "temp": ROOT.get().unwrap().path("temp")
+            }, "protected_root": protected_root, "pending": config["pending"], "previous": config["previous"], "system_drive": system_drive(&root), "restart_required": config["pending"].is_string()}),
         )
     }
     pub(super) fn schedule() -> Result<Value, String> {
@@ -417,17 +579,26 @@ mod windows {
         if !distinct_trees(&root()?, &target) {
             return Err("新旧目录不能相同或互相包含".into());
         }
+        let _lock = SETTINGS_LOCK.lock().map_err(|_| "存储设置忙")?;
+        let mut config = settings()?;
         if target.exists()
+            && !known_root(&target)
+            && !config["locations"][target.to_string_lossy().as_ref()].is_object()
             && fs::read_dir(&target)
                 .map_err(|e| e.to_string())?
                 .next()
                 .is_some()
         {
-            return Err("目标数据文件夹不是空目录；请选择新的位置，避免覆盖已有数据".into());
+            return Err("请选择空文件夹或已有的 MaxGameStudio 数据目录；不会覆盖其他文件".into());
         }
-        let _lock = SETTINGS_LOCK.lock().map_err(|_| "存储设置忙")?;
-        let mut config = settings()?;
+        if rfd::MessageDialog::new().set_title("确认更改数据位置")
+            .set_description("重启后将使用所选目录。不复制、搬移或删除原目录。空目录会使用全新设置；需要旧数据时可以重新选择原目录。是否继续？")
+            .set_buttons(rfd::MessageButtons::YesNo).show() != rfd::MessageDialogResult::Yes {
+            return Err("已取消更改，原数据位置保持不变".into());
+        }
         config["pending"] = json!(target);
+        config["pending_kind"] = json!("switch-only-v2");
+        config["last_switch_error"] = Value::Null;
         save(&config)?;
         drop(_lock);
         status()
@@ -436,50 +607,29 @@ mod windows {
         let _lock = SETTINGS_LOCK.lock().map_err(|_| "存储设置忙")?;
         let mut config = settings()?;
         config["pending"] = Value::Null;
+        config["pending_kind"] = Value::Null;
+        config["last_switch_error"] = Value::Null;
         save(&config)?;
         drop(_lock);
         status()
     }
 }
 
-fn storage_bytes(root: &Path) -> Result<u64, String> {
-    let mut pending = vec![root.to_path_buf()];
-    let mut bytes = 0u64;
-    while let Some(path) = pending.pop() {
-        for entry in fs::read_dir(&path).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::MetadataExt;
-                if metadata.file_attributes() & 0x400 != 0 {
-                    return Err("存储目录包含链接，无法完整统计".into());
-                }
-            }
-            if metadata.is_symlink() {
-                return Err("存储目录包含链接，无法完整统计".into());
-            }
-            if metadata.is_dir() {
-                pending.push(entry.path());
-            } else {
-                bytes = bytes.saturating_add(metadata.len());
-            }
-        }
-    }
-    Ok(bytes)
-}
-
 pub(crate) fn initialize() -> Result<Option<PathBuf>, String> {
     #[cfg(windows)]
-    let Some(path) = windows::initialize()?
+    let Some(layout) = windows::initialize()?
     else {
         return Ok(None);
     };
     #[cfg(not(windows))]
-    let path = std::env::var_os("MAXGAMESTUDIO_DATA_ROOT")
-        .map(PathBuf::from)
-        .ok_or("设置 MAXGAMESTUDIO_DATA_ROOT 后启动")?;
-    ROOT.set(path.clone()).map_err(|_| "存储已经初始化")?;
+    let layout = StorageLayout {
+        root: std::env::var_os("MAXGAMESTUDIO_DATA_ROOT")
+            .map(PathBuf::from)
+            .ok_or("设置 MAXGAMESTUDIO_DATA_ROOT 后启动")?,
+        legacy: None,
+    };
+    let path = layout.root.clone();
+    ROOT.set(layout).map_err(|_| "存储已经初始化")?;
     let temp = directory("temp")?;
     // Called before the Tauri runtime/worker threads are created. Process-local only.
     std::env::set_var("TEMP", &temp);
@@ -596,8 +746,16 @@ mod tests {
         };
         let mut child = spawn();
         wait_for_file(&root.join("child-ready"));
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let exited_while_initializing = child.try_wait().unwrap();
+        // Keep the initializer lock held throughout: a waiting implementation
+        // still fails, but slow test-runner teardown on a busy disk is allowed.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let exited_while_initializing = loop {
+            let status = child.try_wait().unwrap();
+            if status.is_some() || std::time::Instant::now() >= deadline {
+                break status;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
         let entered_before_commit = root.join("child-entered").exists();
         fs::write(root.join("locator.json"), b"committed destination").unwrap();
         fs::write(root.join("live.log"), b"new runtime data").unwrap();
@@ -716,5 +874,267 @@ mod tests {
         let runtime = include_str!("league_runtime.rs");
         assert!(runtime.contains("desktop_storage::directory(\"league-runtime\")"));
         assert!(runtime.contains("desktop_storage::directory(\"temp/admin-launchers\")"));
+    }
+
+    #[cfg(windows)]
+    fn layout_fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let root = fixture();
+        let appdata = root.join("appdata");
+        let local = root.join("local");
+        let suggested = root.join("suggested");
+        fs::create_dir_all(&appdata).unwrap();
+        fs::create_dir_all(&local).unwrap();
+        (root, appdata, local, suggested)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_root_without_marker_is_used_in_place() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let current = root.join("existing");
+        fs::create_dir_all(current.join("data")).unwrap();
+        let mut config = json!({"root": current});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, current);
+        assert!(selected.legacy.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_migration_marker_remains_authoritative() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let current = root.join("migrated");
+        fs::create_dir_all(&current).unwrap();
+        fs::write(current.join(".storage-migration-v1.json"), b"{}\n").unwrap();
+        let mut config = json!({"root": current});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, current);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_locator_uses_existing_suggested_unified_root() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        fs::create_dir_all(&suggested).unwrap();
+        fs::write(
+            suggested.join(".storage-location-v2.json"),
+            b"{\"version\":2}\n",
+        )
+        .unwrap();
+        let mut config = json!({});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, suggested);
+        assert!(selected.legacy.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_layout_is_in_place_and_preserves_all_component_paths() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let data = appdata.join("CS2 Insight Agent/data");
+        let webview = local.join("com.cs2insightagent.app");
+        let league = appdata.join("MaxGameStudio/league-runtime");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&webview).unwrap();
+        fs::create_dir_all(&league).unwrap();
+        fs::write(data.join("cs2-insight.db"), b"db").unwrap();
+        fs::write(webview.join("profile"), b"webview").unwrap();
+        fs::write(league.join("runtime"), b"league").unwrap();
+        let mut config = json!({});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        let (selected_data, selected_webview, selected_league) = selected.legacy.unwrap();
+        assert_eq!(selected_data, data);
+        assert_eq!(selected_webview, webview);
+        assert_eq!(selected_league, league);
+        assert_eq!(fs::read(data.join("cs2-insight.db")).unwrap(), b"db");
+        assert_eq!(fs::read(webview.join("profile")).unwrap(), b"webview");
+        assert_eq!(fs::read(league.join("runtime")).unwrap(), b"league");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn log_only_canonical_layout_does_not_hide_legacy_database() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        fs::create_dir_all(appdata.join("CS2 Insight Agent/data/logs")).unwrap();
+        fs::write(
+            appdata.join("CS2 Insight Agent/data/logs/start.log"),
+            b"log",
+        )
+        .unwrap();
+        let legacy = appdata.join("cs2-insight-agent/data");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("cs2-insight.db"), b"db").unwrap();
+        let mut config = json!({});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.legacy.unwrap().0, legacy);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn new_install_creates_empty_unified_root_marker() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let mut config = json!({});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, suggested);
+        assert!(suggested.join(".storage-location-v2.json").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stale_pending_without_switch_kind_is_cancelled() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let current = root.join("current");
+        fs::create_dir_all(&current).unwrap();
+        let mut config = json!({"root": current, "pending": root.join("stale")});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, current);
+        assert!(config["pending"].is_null());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn switch_only_uses_empty_target_without_copying_old_data() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let current = root.join("current");
+        let target = root.join("target");
+        fs::create_dir_all(&current).unwrap();
+        fs::write(current.join("old.db"), b"old").unwrap();
+        fs::create_dir_all(&target).unwrap();
+        let mut config =
+            json!({"root": current, "pending": target, "pending_kind": "switch-only-v2"});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, target);
+        assert!(!target.join("old.db").exists());
+        assert!(current.join("old.db").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_pending_switch_keeps_original_data_and_clears_retry_loop() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let current = root.join("current");
+        let target = root.join("target");
+        fs::create_dir_all(current.join("data")).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(current.join("data/cs2-insight.db"), b"original").unwrap();
+        fs::write(target.join("unrelated.txt"), b"do not touch").unwrap();
+        let mut config =
+            json!({"root": current, "pending": target, "pending_kind": "switch-only-v2"});
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.root, current);
+        assert!(config["pending"].is_null());
+        assert!(config["pending_kind"].is_null());
+        assert!(config["last_switch_error"]
+            .as_str()
+            .unwrap()
+            .contains("继续使用原目录"));
+        let again = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(again.root, current);
+        assert_eq!(
+            fs::read(current.join("data/cs2-insight.db")).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            fs::read(target.join("unrelated.txt")).unwrap(),
+            b"do not touch"
+        );
+        assert!(!target.join(".storage-location-v2.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_pending_switch_restores_legacy_layout_but_not_missing_original_data() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let data = appdata.join("CS2 Insight Agent/data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("cs2-insight.db"), b"original").unwrap();
+        let mut config = json!({});
+        windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        let target = root.join("offline-saved-location");
+        config["locations"] = json!({target.to_string_lossy().as_ref(): {"mode": "unified"}});
+        config["pending"] = json!(target);
+        config["pending_kind"] = json!("switch-only-v2");
+        let selected = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert_eq!(selected.path("data"), data);
+        assert!(!target.exists());
+        config["pending"] = json!(target);
+        config["pending_kind"] = json!("switch-only-v2");
+        fs::rename(&data, root.join("preserved-data")).unwrap();
+        let before = config.clone();
+        assert!(windows::select_layout(&mut config, &suggested, &appdata, &local).is_err());
+        assert_eq!(config, before);
+        assert!(!data.exists());
+        assert!(!suggested.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn selecting_saved_legacy_location_restores_legacy_paths() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let data = appdata.join("CS2 Insight Agent/data");
+        let webview = local.join("com.cs2insightagent.app");
+        let league = appdata.join("MaxGameStudio/league-runtime");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&webview).unwrap();
+        fs::create_dir_all(&league).unwrap();
+        fs::write(data.join("cs2-insight.db"), b"db").unwrap();
+        let legacy_root = data.parent().unwrap().to_path_buf();
+        let mut config = json!({"root": legacy_root, "mode": "legacy_in_place",
+            "paths": {"data": data, "webview": webview, "league_runtime": league}});
+        let target = root.join("new");
+        fs::create_dir_all(&target).unwrap();
+        config["pending"] = json!(target);
+        config["pending_kind"] = json!("switch-only-v2");
+        let _ = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        config["pending"] = json!(legacy_root);
+        config["pending_kind"] = json!("switch-only-v2");
+        let restored = windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        assert!(restored.legacy.is_some());
+        assert_eq!(restored.legacy.unwrap().0, data);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_known_component_never_creates_an_empty_replacement() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let data = appdata.join("CS2 Insight Agent/data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("cs2-insight.db"), b"original").unwrap();
+        let mut config = json!({});
+        windows::select_layout(&mut config, &suggested, &appdata, &local).unwrap();
+        fs::rename(&data, root.join("disconnected-data")).unwrap();
+        assert!(windows::select_layout(&mut config, &suggested, &appdata, &local).is_err());
+        assert!(!data.exists());
+        assert_eq!(
+            fs::read(root.join("disconnected-data/cs2-insight.db")).unwrap(),
+            b"original"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_current_disk_fails_closed() {
+        let (root, appdata, local, suggested) = layout_fixture();
+        let missing = root.join("missing");
+        let mut config = json!({"root": missing});
+        let error = match windows::select_layout(&mut config, &suggested, &appdata, &local) {
+            Ok(_) => panic!("missing current disk unexpectedly selected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("暂不可用"));
+        assert!(!suggested.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

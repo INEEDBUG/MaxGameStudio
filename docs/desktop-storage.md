@@ -1,14 +1,16 @@
 # Desktop storage and administrator launch
 
-The 3.1.2 Windows installer was verified locally before publishing.
+This describes the current local update; publication waits for local acceptance.
 
 ## Locations
 
-On Windows the host asks for a dedicated storage directory before creating a
-WebView or starting the Python backend. The suggested location is a per-user
-directory on an available fixed non-system volume. Choosing the system volume
-requires explicit confirmation. An unavailable selected location is an error,
-not permission to fall back to `%APPDATA%` or system `%TEMP%`.
+Startup does not copy or migrate existing user data. A previously selected
+directory is reused; an already-used non-system directory can be recovered when
+its locator is missing. Otherwise recognized legacy data is used in place.
+Fresh profiles use a dedicated directory on an available fixed non-system volume
+where possible. Choosing the system volume manually requires confirmation.
+An unavailable selected location is an error, not permission to create an empty
+replacement profile or fall back to system `%TEMP%`.
 
 The selected root contains:
 
@@ -19,8 +21,10 @@ The selected root contains:
 - `window-state.json`: window position/size persistence.
 
 Only the small locator lives in `HKCU\Software\MaxGameStudio\Storage`, value
-`LocationV1`. Settings → Paths → Unified app storage shows the location, usage,
-pending changes and the separately protected administrator directory.
+`LocationV1`. Settings → Paths → Data storage location shows the actual data,
+logs, cache, WebView, League profile and temporary paths, pending changes and
+the separately protected administrator directory. Legacy components may remain
+in different directories; the displayed paths are authoritative.
 
 Administrator League sessions and profiles remain under
 `<selected volume>:\MaxGameStudioAdminRuntime`, protected for Administrators and
@@ -30,32 +34,27 @@ its verified bytes and ancestor directory handles stay locked until the elevated
 supervisor exits. The host itself remains unelevated. Never solve a launch error
 by weakening those ACLs or elevating the entire host.
 
-## Migration and recovery
+## Manual location changes and recovery
 
 A change made in Settings is scheduled for the next start and can be cancelled.
-Close all workspaces and the host first. Migration refuses a live backend or
-another host/workspace, nested roots, a nonempty target, or reparse-point paths.
-The only legacy exception is a direct `data/cache` or `data/trash` directory
-junction whose real target is on the selected local non-system volume. Its
-target must contain no further links; migration copies it as an ordinary
-directory, rechecks the alias before promotion and leaves the old link intact.
-It copies to a restricted staging directory on the selected volume, verifies
-content hashes and rechecks source/process state before promoting the directory.
-The registry location switches only after success. Originals are not deleted.
+It switches the locator only: no copying, moving or deleting ordinary user data.
+An empty directory starts with new settings; a recognized existing data directory
+uses its own settings. Unknown nonempty directories are rejected. The old location
+is retained and can be selected again, including its original legacy component paths.
 
-On initial migration, recognized legacy configuration/database payload takes
-precedence over empty or metadata-only directories. Older Electron profiles are
-preserved offline; no old executable is launched to export preferences. An
-existing exported UI-state file is copied, but unexported ancient Electron
-preferences may need manual recovery. The `.storage-migration-v1.json` marker
-records source directories and a copy manifest. It is local recovery metadata,
-not a release artifact or upload payload.
+If a requested target becomes unavailable or unsafe before restart, the change
+is cancelled and the original location is revalidated and reused. Settings shows
+the failure reason and lets the user select a location again. No data is copied
+or deleted. If the original location or a known component is also unavailable,
+startup still fails closed instead of creating an empty replacement profile.
 
-If a scheduled copy fails, the native dialog can cancel it and continue with the
-original root. After a successful switch, do not overwrite newer files with an
-old snapshot. Close all processes and preserve both versions before any manual
-recovery. Keep source backups until the new location passes real usage checks;
-copying alone does not reclaim the originals' disk space.
+Old queued migration requests are cancelled, never reinterpreted as permission
+to switch to an empty profile. An existing `.storage-migration-v1.json` marker
+can identify previously migrated data, but normal runtime writes do not trigger
+recopying or invalidate that data. Known components that disappear fail closed.
+Keep both locations when recovering manually; switching does not merge settings
+or reclaim disk space. The old copy utility remains for historical tests, but
+startup no longer invokes it.
 
 The protected League profile has a separate privileged copy path: when moving
 the data volume with the installation path unchanged, it copies and verifies
@@ -80,14 +79,14 @@ old protected profile is deliberately not guessed.
 
 ## Verification
 
-Use temporary fixtures for migration and failure injection; never point test
+Use temporary fixtures for location selection and failure injection; never point test
 fixtures at a user's real game CFG or profile. Run migration/temp/installer
 pytest tests, frontend storage UI tests, full frontend build, Rust unit tests and
 Clippy. Compile the actual NSIS installer. Finally verify ordinary-user startup,
-profile migration, selected-volume file writes, UAC cancellation/success,
+in-place profile reuse, selected-volume file writes, UAC cancellation/success,
 protected-runtime launch and return to the host on the local machine.
 
-For 3.1.2, installed-process checks verified the actual WebView profile path on
+Earlier 3.1.2 installed-process checks verified the actual WebView profile path on
 the chosen non-system volume, an unelevated host with an elevated League child,
 ordinary parallel mode, and backend/WebView teardown and restoration in memory
 mode. The current Tauri WindowConfig conversion drops the data-directory field;
@@ -95,4 +94,5 @@ startup windows therefore use the explicit native builder setter, just like
 restored windows. Configuration-only assertions do not replace this process test.
 Interactive UAC cancellation was not re-exercised on the acceptance machine
 because its existing Windows policy automatically approved elevation; the test
-did not change that policy.
+did not change that policy. These earlier checks do not replace acceptance of
+the current switch-only storage and prewarmed handoff update.

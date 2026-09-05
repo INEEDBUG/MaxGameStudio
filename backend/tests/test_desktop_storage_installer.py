@@ -11,14 +11,17 @@ def _macro_body(hook: str, name: str) -> str:
     return hook[start:end]
 
 
-def test_installer_defers_storage_migration_to_first_launch_bootstrap():
+def test_installer_and_startup_never_automatically_copy_user_data():
     hook = HOOK_PATH.read_text(encoding="utf-8")
     postinstall = _macro_body(hook, "NSIS_HOOK_POSTINSTALL")
 
     assert "desktop_data_migration.py" not in postinstall
     assert "--appdata" not in postinstall
-    assert "first-launch native storage bootstrap" in postinstall
-    assert "canonical non-system storage root" in postinstall
+    assert "Neither installation nor startup copies user data" in postinstall
+    native = (REPO_ROOT / "frontend/src-tauri/src/desktop_storage.rs").read_text(encoding="utf-8")
+    assert "desktop_storage_migration.py" not in native
+    assert "fn migration(" not in native
+    assert '"switch-only-v2"' in native
 
 
 def test_installer_keeps_different_directory_electron_recovery_copy():

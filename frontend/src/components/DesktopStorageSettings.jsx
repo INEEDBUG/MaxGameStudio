@@ -82,9 +82,9 @@ export default function DesktopStorageSettings({ search = false }) {
         <div className="flex min-w-0 items-start gap-2">
           <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-cs2-accent" aria-hidden="true" />
           <div>
-            <h3 className="text-xs font-semibold text-cs2-text-secondary">应用统一存储 / Unified app storage</h3>
+            <h3 className="text-xs font-semibold text-cs2-text-secondary">数据存储位置 / Data storage location</h3>
             <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-cs2-text-muted">
-              数据、后端日志、缓存、WebView 与英雄联盟临时文件由此根目录控制；Windows 系统组件和游戏 CFG 不在此范围。管理员工作台的受保护 profile 位于同一卷上的独立受保护路径。
+              这里仅显示应用数据、日志、缓存、WebView、英雄联盟运行时和临时文件的实际位置。应用不会在启动时自动搬运旧数据；使用“更改存储位置”后，新的目录在重启后生效。
             </p>
           </div>
         </div>
@@ -101,11 +101,20 @@ export default function DesktopStorageSettings({ search = false }) {
       </div>
       <div className="mt-3 space-y-1.5 rounded-md border border-cs2-border/60 bg-cs2-bg-input/40 p-2.5">
         <PathLine label="普通数据根目录（不含管理员目录）" path={storage?.root} bytes={storage?.bytes} />
+        {storage?.paths ? <>
+          <PathLine label={storage.mode === "legacy_in_place" ? "数据（旧位置）" : "数据"} path={storage.paths.data} />
+          <PathLine label={storage.mode === "legacy_in_place" ? "日志（旧位置）" : "日志"} path={storage.paths.logs} />
+          <PathLine label={storage.mode === "legacy_in_place" ? "缓存（旧位置）" : "缓存"} path={storage.paths.cache} />
+          <PathLine label={storage.mode === "legacy_in_place" ? "WebView（旧位置）" : "WebView"} path={storage.paths.webview} />
+          <PathLine label={storage.mode === "legacy_in_place" ? "英雄联盟运行时（旧位置）" : "英雄联盟运行时"} path={storage.paths.league_runtime} />
+          <PathLine label={storage.mode === "legacy_in_place" ? "临时文件（旧位置）" : "临时文件"} path={storage.paths.temp} />
+        </> : null}
         {storage?.protected_root ? <PathLine label="管理员受保护目录（按需创建）" path={storage.protected_root} /> : null}
         {pending ? <PathLine label="待切换目录" path={storage.pending} bytes={storage.pending_bytes} /> : null}
         {storage?.previous ? <PathLine label="保留的原目录" path={storage.previous} bytes={storage.previous_bytes} /> : null}
       </div>
-      {pending ? <p className="mt-2 text-[11px] text-cs2-amber-on-surface">已安排下一次启动复制并校验。请关闭英雄联盟工作台和 MaxGameStudio，再重新启动应用；原目录会保留用于恢复，但不要盲目复制回旧目录，以免覆盖更新后的数据。</p> : null}
+      {storage?.last_switch_error ? <div role="alert" className="mt-2 break-words rounded-md border border-cs2-border bg-cs2-amber-surface px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{storage.last_switch_error}。可以再次点击“更改存储位置”重试。</div> : null}
+      {pending ? <p className="mt-2 text-[11px] text-cs2-amber-on-surface">已安排重启后切换目录。不会自动复制旧数据：原目录保持不变，选择空目录将使用全新设置；选择已有数据目录则继续使用其中的数据。</p> : null}
       {storage?.system_drive ? <p className="mt-2 text-[11px] text-cs2-amber-on-surface">当前目录位于系统盘；建议选择固定非系统盘以避免 C 盘空间和权限问题。</p> : null}
       {error ? <p role="alert" className="mt-2 text-[11px] text-cs2-text-error">{error}</p> : null}
       {!storage && !error ? <p className="mt-2 text-[11px] text-cs2-text-muted">正在读取存储状态…</p> : null}

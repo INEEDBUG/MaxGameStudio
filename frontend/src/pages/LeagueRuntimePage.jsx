@@ -16,6 +16,8 @@ import {
 } from "../utils/leagueStartupPreference.js";
 
 const MODES = LEAGUE_STARTUP_MODES.map(({ id }) => id);
+// Shared across route remounts: an old cleanup must run before a new prepare.
+let prewarmQueue = Promise.resolve();
 
 function formatWorkingSet(bytes) {
   if (bytes === null || bytes === undefined || bytes === "") return "--";
@@ -39,6 +41,13 @@ export default function LeagueRuntimePage() {
   const [loading, setLoading] = useState(isDesktopApp);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
+  const [prewarmReady, setPrewarmReady] = useState(false);
+  const prewarmRetries = useRef(0);
+  const enqueuePrewarm = useCallback((operation) => {
+    const next = prewarmQueue.catch(() => {}).then(operation);
+    prewarmQueue = next.catch(() => {});
+    return next;
+  }, []);
   const refresh = useCallback(async () => {
     if (!isDesktopApp || !desktopBridge?.getLeagueRuntimeStatus) {
       setLoading(false);
@@ -49,6 +58,7 @@ export default function LeagueRuntimePage() {
     try {
       const nextStatus = await desktopBridge.getLeagueRuntimeStatus();
       setStatus(nextStatus);
+      setPrewarmReady(nextStatus?.prewarm_ready === true);
       if (nextStatus?.last_error) setError(String(nextStatus.last_error));
     }
     catch (cause) { setError(cause?.message || String(cause)); }
@@ -56,22 +66,71 @@ export default function LeagueRuntimePage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  const currentActive = statusValue(status, "active");
+  const statusReady = status !== null;
+
+  useEffect(() => {
+    if (!isDesktopApp || !statusReady || !desktopBridge?.prepareLeagueRuntime || !desktopBridge?.cancelLeaguePrewarm) return undefined;
+    let activeEffect = true;
+    prewarmRetries.current = 0;
+    const prepare = () => {
+      if (administrator || currentActive === true) return Promise.resolve();
+      return enqueuePrewarm(() => desktopBridge.prepareLeagueRuntime())
+        .then((result) => { if (activeEffect && result?.prewarm_ready === true) setPrewarmReady(true); })
+        .catch(() => {});
+    };
+    void prepare();
+    return () => {
+      activeEffect = false;
+      void enqueuePrewarm(() => desktopBridge.cancelLeaguePrewarm()).catch(() => {});
+    };
+  }, [administrator, currentActive, enqueuePrewarm, statusReady]);
+
+  useEffect(() => {
+    // Parallel mode keeps this page mounted: continue observing child exit so
+    // the ordinary prewarm effect can prepare the next launch automatically.
+    if (!isDesktopApp || !statusReady || !desktopBridge?.getLeagueRuntimeStatus) return undefined;
+    let disposed = false;
+    let pending = false;
+    const timer = window.setInterval(() => {
+      if (pending) return;
+      pending = true;
+      void desktopBridge.getLeagueRuntimeStatus().then(async (nextStatus) => {
+        if (disposed) return;
+        setStatus(nextStatus);
+        setPrewarmReady(nextStatus?.prewarm_ready === true);
+        if (nextStatus?.last_error) setError(String(nextStatus.last_error));
+        // One recovery per route/launch lifecycle; never create a crash loop.
+        if (!administrator && !launching && nextStatus?.active === false
+          && nextStatus?.prewarm_exited === true && prewarmRetries.current < 1) {
+          prewarmRetries.current += 1;
+          await enqueuePrewarm(() => disposed ? undefined : desktopBridge.prepareLeagueRuntime());
+        }
+      }).catch(() => {}).finally(() => { pending = false; });
+    }, 1000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [administrator, enqueuePrewarm, launching, statusReady]);
 
   const launch = useCallback(async (selectedMode) => {
     if (!isDesktopApp || !desktopBridge?.launchLeagueRuntime || !MODES.includes(selectedMode)) return;
+    const previousPreference = readLeagueStartupPreference();
     setLaunching(true);
     setError("");
     try {
+      // The warm handoff may retire this renderer before the IPC promise settles.
+      writeLeagueStartupPreference(selectedMode, remember, globalThis.localStorage, { administrator });
       const sessionId = leagueClientSessionId(getLeagueLabStatusSnapshot()) || "*";
       const result = await launchLeagueRuntimeCoordinated(selectedMode, { force: true, sessionId, administrator });
       if (result?.reason === "in-flight" && (result.mode !== selectedMode || result.administrator !== administrator)) {
         throw new Error(t("leagueRuntime.launchInFlight"));
       }
-      if (result?.launched === true) {
-        writeLeagueStartupPreference(selectedMode, remember, globalThis.localStorage, { administrator });
-      }
       await refresh();
     } catch (cause) {
+      if (previousPreference) {
+        writeLeagueStartupPreference(previousPreference.mode, previousPreference.remembered, globalThis.localStorage, { administrator: previousPreference.administrator });
+      } else {
+        clearLeagueStartupPreference();
+      }
       const message = cause?.message || String(cause);
       setError(message.includes("UAC_CANCELLED") ? t("leagueRuntime.adminCancelled") : message);
     }
@@ -114,6 +173,7 @@ export default function LeagueRuntimePage() {
         <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cs2-accent/15 text-cs2-accent"><Rocket className="h-5 w-5" aria-hidden="true" /></span><div><h2 id="league-runtime-mode-title" className="font-semibold text-cs2-text-primary">{t("leagueRuntime.chooseMode")}</h2><p className="mt-1 text-xs leading-5 text-cs2-text-muted">{t("leagueRuntime.explicitLaunch")}</p></div></div>
         <div className="mt-5 grid gap-3 md:grid-cols-3" role="radiogroup" aria-label={t("leagueRuntime.chooseMode")}>{MODES.map((item) => <button key={item} type="button" role="radio" aria-checked={mode === item} onClick={() => setMode(item)} disabled={launching || !isDesktopApp || !runtimeAvailable} className={`rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${mode === item ? "border-cs2-accent bg-cs2-accent/10" : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-accent/50"}`}><span className="flex items-center justify-between text-sm font-semibold text-cs2-text-primary">{modeLabels[item][0]}{mode === item ? <Check className="h-4 w-4 text-cs2-accent" aria-hidden="true" /> : null}</span><span className="mt-2 block text-xs leading-5 text-cs2-text-secondary">{modeLabels[item][1]}</span></button>)}</div>
         {mode === "parallel" ? <div role="note" className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-cs2-text-primary"><AlertTriangle className="mr-2 inline h-4 w-4 text-amber-500" aria-hidden="true" />{t("leagueRuntime.parallelMemoryWarning", { memory: expectedMemoryMb })}</div> : null}
+        {!administrator ? <p className="mt-4 text-xs leading-5 text-cs2-text-muted">{t("leagueRuntime.prewarmHint")} {prewarmReady ? t("leagueRuntime.prewarmReady") : t("leagueRuntime.prewarmPreparing")}</p> : <p className="mt-4 text-xs leading-5 text-cs2-text-muted">{t("leagueRuntime.prewarmAdministratorHint")}</p>}
         <div className="mt-4 flex flex-wrap items-end justify-between gap-3"><div className="flex flex-col gap-3"><label className="inline-flex items-center gap-2 text-xs text-cs2-text-secondary"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={launching || !isDesktopApp} className="accent-cs2-accent" />{t("leagueRuntime.remember")}</label><div><label className="inline-flex items-center gap-2 text-xs text-cs2-text-secondary"><input type="checkbox" checked={administrator} onChange={(event) => setAdministrator(event.target.checked)} disabled={launching || !isDesktopApp || mode === "ask" || (!administratorAvailable && !administrator)} className="accent-cs2-accent" />{t("leagueRuntime.administrator")}</label><p className="mt-1 max-w-xl pl-5 text-[11px] leading-4 text-cs2-text-muted">{administratorAvailable ? t("leagueRuntime.administratorHint") : t("leagueRuntime.administratorUnavailable")}</p></div></div><div className="flex gap-2"><button type="button" onClick={clearPreference} disabled={launching} className="inline-flex items-center gap-1 rounded-xl border border-cs2-border px-3 py-2 text-xs text-cs2-text-secondary disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{t("leagueRuntime.clear")}</button><button type="button" onClick={() => void launch(mode)} disabled={launching || mode === "ask" || !isDesktopApp || !runtimeAvailable || (administrator && !administratorAvailable)} className="inline-flex items-center gap-2 rounded-xl bg-cs2-accent px-4 py-2 text-xs font-bold text-cs2-text-on-accent disabled:cursor-not-allowed disabled:opacity-50">{launching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Rocket className="h-4 w-4" aria-hidden="true" />}{launching ? t("leagueRuntime.launching") : t("leagueRuntime.launch")}</button></div></div>
       </section>
       <section className="mt-5 grid gap-4 md:grid-cols-2" aria-label={t("leagueRuntime.statusTitle")}>

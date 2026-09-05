@@ -34,7 +34,32 @@ describe("DesktopStorageSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "更改存储位置" }));
     await waitFor(() => expect(bridge.chooseDesktopStorage).toHaveBeenCalledOnce());
     expect(await screen.findByText(/E:\\MaxGameStudioData/)).toBeTruthy();
-    expect(screen.getByText(/下一次启动复制并校验/)).toBeTruthy();
+    expect(screen.getByText(/不会自动复制旧数据/)).toBeTruthy();
+  });
+
+  test("shows legacy in-place paths without implying automatic migration", async () => {
+    bridge.getDesktopStorage.mockResolvedValue({
+      mode: "legacy_in_place",
+      root: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent",
+      paths: {
+        data: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent\\data",
+        logs: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent\\data\\logs",
+        cache: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent\\data\\cache",
+        webview: "C:\\Users\\Tester\\AppData\\Local\\com.cs2insightagent.app",
+        league_runtime: "C:\\Users\\Tester\\AppData\\Roaming\\MaxGameStudio\\league-runtime",
+        temp: "C:\\Users\\Tester\\AppData\\Local\\Temp\\MaxGameStudio",
+      },
+    });
+    render(<DesktopStorageSettings />);
+    expect(await screen.findByText(/WebView（旧位置）/)).toBeTruthy();
+    expect(screen.getByText(/不会在启动时自动搬运旧数据/)).toBeTruthy();
+    expect(screen.getByText(/C:\\Users\\Tester\\AppData\\Local\\com.cs2insightagent.app/)).toBeTruthy();
+  });
+
+  test("does not request a directory change without clicking the button", async () => {
+    render(<DesktopStorageSettings />);
+    await screen.findByText(/D:\\MaxGameStudioData/);
+    expect(bridge.chooseDesktopStorage).not.toHaveBeenCalled();
   });
 
   test("does not invent a size when backend bytes are null", async () => {
@@ -52,6 +77,18 @@ describe("DesktopStorageSettings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "取消待处理更改" }));
     await waitFor(() => expect(bridge.cancelDesktopStorageChange).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("button", { name: "取消待处理更改" })).toBeNull());
+  });
+
+  test("shows a failed switch warning and clears it after a successful retry", async () => {
+    bridge.getDesktopStorage.mockResolvedValue({ root: "D:\\Data", last_switch_error: "目标目录不可用" });
+    bridge.chooseDesktopStorage.mockResolvedValue({ root: "E:\\Data", last_switch_error: null, pending: null });
+    render(<DesktopStorageSettings />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("目标目录不可用");
+    expect(screen.getByRole("alert").textContent).toContain("再次点击");
+    fireEvent.click(screen.getByRole("button", { name: "更改存储位置" }));
+    await waitFor(() => expect(bridge.chooseDesktopStorage).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   test("reports cancel errors without crashing", async () => {

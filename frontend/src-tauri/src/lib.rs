@@ -788,7 +788,7 @@ fn backend_session_token(state: State<'_, BackendProcess>) -> String {
 fn read_legacy_ui_state() -> Result<Option<String>, String> {
     #[cfg(windows)]
     {
-        let state_file = desktop_storage::root()?.join("data/desktop-ui-state-v1.json");
+        let state_file = desktop_storage::directory("data")?.join("desktop-ui-state-v1.json");
         if !state_file.is_file() {
             return Ok(None);
         }
@@ -804,7 +804,7 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
 fn writable_data_root(_app: &AppHandle, _root: &Path, _python: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        let data_root = desktop_storage::root()?.join("data");
+        let data_root = desktop_storage::directory("data")?;
         fs::create_dir_all(data_root.join("logs"))
             .map_err(|error| format!("无法创建应用数据目录 {}：{error}", data_root.display()))?;
         Ok(data_root)
@@ -1144,6 +1144,8 @@ pub fn run() {
             sync_league_cd_timer,
             set_league_content_protection,
             league_runtime::get_league_runtime_status,
+            league_runtime::prepare_league_runtime,
+            league_runtime::cancel_league_prewarm,
             league_runtime::launch_league_runtime,
             league_runtime::stop_league_runtime
         ])

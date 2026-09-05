@@ -6,8 +6,8 @@
 ;   * The exact legacy Tauri entry "CS2 Ultimate Insight Studio" is retired
 ;     only from its registered install directory; "MaxGameStudio" is ignored.
 ;   * A legacy Electron install in a DIFFERENT directory is retained as a
-;     recovery source. Storage migration belongs to the next application start,
-;     after selecting the data volume, not to the installer.
+;     recovery source. Startup reuses existing data in place without copying;
+;     users may explicitly select a different data location in Settings.
 ;   * A legacy Electron install in the SAME directory must be uninstalled
 ;     BEFORE files are copied: electron-builder's uninstaller deletes the
 ;     whole install directory and would otherwise wipe the freshly installed
@@ -842,11 +842,9 @@ FunctionEnd
   ; file copy at install time instead of surfacing as a backend startup dialog.
   Call CS2_ValidateBundledRuntime
 
-  ; User-data and renderer-state migration is deliberately deferred to the
-  ; first-launch native storage bootstrap.  It must select and validate the
-  ; canonical non-system storage root before touching legacy sources.  Since
-  ; this installer no longer proves that migration, retain any different-dir
-  ; Electron installation as a recoverable fallback.
+  ; Neither installation nor startup copies user data. Native storage bootstrap
+  ; reuses existing data in place; users explicitly switch locations in Settings.
+  ; Retain any different-dir Electron installation as a recoverable fallback.
   StrCpy $CS2LegacyTauriScope "differentdir"
   Call CS2_RemoveLegacyTauri
 

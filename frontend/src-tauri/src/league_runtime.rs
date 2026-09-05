@@ -6,7 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     thread,
     time::Duration,
@@ -55,6 +55,42 @@ const ADMIN_LAUNCHER_SCRIPT: &str = include_str!("league_admin_launcher.ps1");
 struct ManagedLeagueRuntime {
     process: ManagedRuntimeProcess,
     shutdown_signal: PathBuf,
+    prewarm_signals: Option<Arc<PrewarmSignals>>,
+}
+
+struct PrewarmedRuntime {
+    runtime: ManagedLeagueRuntime,
+}
+
+// Only ordinary, non-elevated children use these short-lived local signals.
+// A fresh random session prevents stale acknowledgements from earlier launches.
+struct PrewarmSignals {
+    ready: PathBuf,
+    activate: PathBuf,
+    shown: PathBuf,
+}
+
+impl PrewarmSignals {
+    fn create(profile: &Path) -> Result<(String, Arc<Self>), String> {
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes).map_err(|e| format!("无法创建预热会话：{e}"))?;
+        let nonce: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let marker = |extension| profile.join(format!("prewarm-{nonce}.{extension}"));
+        let signals = Arc::new(Self {
+            ready: marker("ready"),
+            activate: marker("activate"),
+            shown: marker("shown"),
+        });
+        Ok((nonce, signals))
+    }
+}
+
+impl Drop for PrewarmSignals {
+    fn drop(&mut self) {
+        for path in [&self.ready, &self.activate, &self.shown] {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 enum ManagedRuntimeProcess {
@@ -102,10 +138,12 @@ impl Drop for ElevatedRuntimeProcess {
 
 pub(crate) struct LeagueRuntimeProcess {
     child: Mutex<Option<ManagedLeagueRuntime>>,
+    prewarm: Mutex<Option<PrewarmedRuntime>>,
     active: AtomicBool,
     administrator: AtomicBool,
     mode: AtomicU8,
     restoring: AtomicBool,
+    handing_off: AtomicBool,
     suppress_restore: AtomicBool,
     last_error: Mutex<Option<String>>,
 }
@@ -114,10 +152,12 @@ impl Default for LeagueRuntimeProcess {
     fn default() -> Self {
         Self {
             child: Mutex::new(None),
+            prewarm: Mutex::new(None),
             active: AtomicBool::new(false),
             administrator: AtomicBool::new(false),
             mode: AtomicU8::new(MODE_ASK),
             restoring: AtomicBool::new(false),
+            handing_off: AtomicBool::new(false),
             suppress_restore: AtomicBool::new(false),
             last_error: Mutex::new(None),
         }
@@ -803,6 +843,69 @@ fn launch_runtime_process(
         .map_err(|error| format!("无法启动内置英雄联盟工作台：{error}"))
 }
 
+fn spawn_prewarmed(app: &AppHandle) -> Result<PrewarmedRuntime, String> {
+    let executable = runtime_executable(app)?;
+    let profile = runtime_user_data_dir(app)?;
+    let shutdown_signal = runtime_shutdown_signal(&profile);
+    let _ = fs::remove_file(&shutdown_signal);
+    let mut arguments = runtime_arguments(&profile, &shutdown_signal, std::process::id());
+    arguments.push("--maxgamestudio-prewarm".into());
+    let (nonce, signals) = PrewarmSignals::create(&profile)?;
+    arguments.push(format!("--maxgamestudio-prewarm-session={nonce}"));
+    let process = launch_runtime_process(&executable, &arguments, false)?;
+    Ok(PrewarmedRuntime {
+        runtime: ManagedLeagueRuntime {
+            process,
+            shutdown_signal,
+            prewarm_signals: Some(signals),
+        },
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_league_runtime(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<LeagueRuntimeProcess>();
+        let mut warm = state.prewarm.lock().map_err(|_| "预热状态不可用")?;
+        if state.active.load(Ordering::SeqCst) || state.suppress_restore.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        discard_exited_prewarm(&mut warm);
+        if warm.is_none() {
+            *warm = Some(spawn_prewarmed(&app)?);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn discard_exited_prewarm(warm: &mut Option<PrewarmedRuntime>) {
+    if warm
+        .as_mut()
+        .is_some_and(|warm| warm.runtime.process.has_exited().unwrap_or(true))
+    {
+        warm.take();
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn cancel_league_prewarm(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || cancel_prewarm(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn cancel_prewarm(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<LeagueRuntimeProcess>();
+    let mut warm = state.prewarm.lock().map_err(|_| "预热状态不可用")?;
+    if let Some(warm) = warm.as_mut() {
+        warm.runtime.request_exit()?;
+    }
+    warm.take();
+    Ok(())
+}
+
 fn manifest_value(app: &AppHandle) -> Option<Value> {
     let path = runtime_root(app)
         .ok()?
@@ -811,32 +914,137 @@ fn manifest_value(app: &AppHandle) -> Option<Value> {
 }
 
 #[cfg(windows)]
-fn process_tree_working_set_bytes(root_pid: u32) -> Option<u64> {
-    use std::os::windows::process::CommandExt;
-
-    let script = concat!(
-        "$root=__ROOT_PID__;",
-        "$rows=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId;",
-        "$ids=[System.Collections.Generic.HashSet[uint32]]::new();",
-        "[void]$ids.Add([uint32]$root);",
-        "do{$changed=$false;foreach($row in $rows){",
-        "if($ids.Contains([uint32]$row.ParentProcessId)-and $ids.Add([uint32]$row.ProcessId)){$changed=$true}",
-        "}}while($changed);",
-        "$sum=0L;foreach($id in $ids){try{$sum+=(Get-Process -Id $id -ErrorAction Stop).WorkingSet64}catch{}};",
-        "[Console]::Write($sum)"
-    )
-    .replace("__ROOT_PID__", &root_pid.to_string());
-    let mut command = Command::new("powershell.exe");
-    command
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null());
-    command.creation_flags(CREATE_NO_WINDOW);
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
+fn process_tree_ids(root_pid: u32) -> Option<HashSet<u32>> {
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut row: PROCESSENTRY32W = std::mem::zeroed();
+        row.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut rows = Vec::new();
+        let mut ok = Process32FirstW(snapshot, &mut row);
+        while ok != 0 {
+            rows.push((row.th32ProcessID, row.th32ParentProcessID));
+            ok = Process32NextW(snapshot, &mut row);
+        }
+        CloseHandle(snapshot);
+        let mut ids = HashSet::from([root_pid]);
+        loop {
+            let mut changed = false;
+            for &(pid, parent) in &rows {
+                if ids.contains(&parent) {
+                    changed |= ids.insert(pid);
+                }
+            }
+            if !changed {
+                return Some(ids);
+            }
+        }
     }
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+#[cfg(windows)]
+fn process_tree_working_set_bytes(root_pid: u32) -> Option<u64> {
+    use windows_sys::Win32::System::{
+        ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+        Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
+    };
+    let mut total = 0;
+    let mut measured = false;
+    for pid in process_tree_ids(root_pid)? {
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+            if handle.is_null() {
+                continue;
+            }
+            let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            if GetProcessMemoryInfo(handle, &mut counters, size) != 0 {
+                total += counters.WorkingSetSize as u64;
+                measured = true;
+            }
+            CloseHandle(handle);
+        }
+    }
+    measured.then_some(total)
+}
+
+#[cfg(windows)]
+fn elevated_window_visible(pid: u32) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{HWND, LPARAM},
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+        },
+    };
+    struct Search {
+        ids: HashSet<u32>,
+        found: bool,
+    }
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> i32 {
+        let search = &mut *(data as *mut Search);
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if search.ids.contains(&pid) && IsWindowVisible(hwnd) != 0 {
+            let mut title = [0u16; 256];
+            let count = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32);
+            let title = String::from_utf16_lossy(&title[..count.max(0) as usize]);
+            if title.starts_with("MaxGameStudio") && !title.contains("Mini") {
+                search.found = true;
+                return 0;
+            }
+        }
+        1
+    }
+    let Some(ids) = process_tree_ids(pid) else {
+        return false;
+    };
+    let mut search = Search { ids, found: false };
+    unsafe {
+        EnumWindows(Some(visit), &mut search as *mut Search as LPARAM);
+    }
+    search.found
+}
+
+#[cfg(not(windows))]
+fn elevated_window_visible(_pid: u32) -> bool {
+    false
+}
+
+fn wait_for_runtime_visible(app: &AppHandle, shown: Option<&PrewarmSignals>) -> bool {
+    for _ in 0..1500 {
+        let state = app.state::<LeagueRuntimeProcess>();
+        if state.suppress_restore.load(Ordering::SeqCst) {
+            return false;
+        }
+        let Ok(mut child) = state.child.lock() else {
+            return false;
+        };
+        let Some(runtime) = child.as_mut() else {
+            return false;
+        };
+        if runtime.process.has_exited().unwrap_or(true) {
+            return false;
+        }
+        let pid = runtime.process.pid();
+        drop(child);
+        if shown.map_or_else(
+            || elevated_window_visible(pid),
+            |signals| signals.shown.is_file(),
+        ) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    false
 }
 
 #[cfg(not(windows))]
@@ -1224,10 +1432,18 @@ pub(crate) async fn get_league_runtime_status(app: AppHandle) -> Result<Value, S
             .lock()
             .ok()
             .and_then(|error| error.clone());
+        let (prewarm_ready, prewarm_exited) = state.prewarm.lock().ok().map_or((false, false), |mut warm| {
+            warm.as_mut().map_or((false, false), |warm| {
+                let exited = warm.runtime.process.has_exited().unwrap_or(true);
+                (!exited && warm.runtime.prewarm_signals.as_ref().is_some_and(|signals| signals.ready.is_file()), exited)
+            })
+        });
         json!({
             "available": executable.is_some(),
             "administrator_available": executable.as_deref().is_some_and(administrator_launch_ready),
             "active": state.active.load(Ordering::SeqCst),
+            "prewarm_ready": prewarm_ready,
+            "prewarm_exited": prewarm_exited,
             "administrator": state.administrator.load(Ordering::SeqCst),
             "mode": mode_name(state.mode.load(Ordering::SeqCst)),
             "pid": runtime_pid,
@@ -1285,20 +1501,36 @@ pub(crate) async fn launch_league_runtime(
             }
         };
         let shutdown_signal = runtime_shutdown_signal(&user_data_dir);
-        let _ = fs::remove_file(&shutdown_signal);
         let arguments = runtime_arguments(&user_data_dir, &shutdown_signal, std::process::id());
-        let process = match launch_runtime_process(&executable, &arguments, administrator) {
-            Ok(process) => process,
+        let selected_runtime = (|| -> Result<(ManagedLeagueRuntime, Option<Arc<PrewarmSignals>>), String> {
+            let mut warm = state.prewarm.lock().map_err(|_| "预热状态不可用")?;
+            if administrator {
+                if let Some(previous) = warm.as_mut() { previous.runtime.request_exit()?; }
+                warm.take();
+                let _ = fs::remove_file(&shutdown_signal);
+                let process = launch_runtime_process(&executable, &arguments, administrator)?;
+                return Ok((ManagedLeagueRuntime { process, shutdown_signal, prewarm_signals: None }, None));
+            }
+            discard_exited_prewarm(&mut warm);
+            let mut prepared = match warm.take() {
+                Some(prepared) => prepared,
+                None => spawn_prewarmed(&app_for_worker)?,
+            };
+            let signals = prepared.runtime.prewarm_signals.clone().ok_or("工作台预热会话不可用")?;
+            if let Err(error) = OpenOptions::new().write(true).create_new(true).open(&signals.activate) {
+                let _ = prepared.runtime.request_exit();
+                return Err(format!("无法激活工作台：{error}"));
+            }
+            Ok((prepared.runtime, Some(signals)))
+        })();
+        let (mut runtime, shown) = match selected_runtime {
+            Ok(selected) => selected,
             Err(error) => {
                 state.active.store(false, Ordering::SeqCst);
                 state.administrator.store(false, Ordering::SeqCst);
                 state.mode.store(MODE_ASK, Ordering::SeqCst);
                 return Err(error);
             }
-        };
-        let mut runtime = ManagedLeagueRuntime {
-            process,
-            shutdown_signal,
         };
         let mut guard = match state.child.lock() {
             Ok(guard) => guard,
@@ -1349,17 +1581,45 @@ pub(crate) async fn launch_league_runtime(
         *guard = Some(runtime);
         state.administrator.store(administrator, Ordering::SeqCst);
         state.mode.store(mode, Ordering::SeqCst);
+        // Publish handoff ownership under the child lock, before app exit can
+        // take the child and decide that all lifecycle workers are idle.
+        state.handing_off.store(true, Ordering::SeqCst);
         drop(guard);
-
-        if mode == MODE_MEMORY {
-            stop_backend(&app_for_worker);
-        }
 
         let monitor_app = app_for_worker.clone();
         if let Err(error) = thread::Builder::new()
             .name("league-runtime-monitor".to_string())
-            .spawn(move || monitor_runtime(monitor_app))
+            .spawn(move || {
+                // Retire on the actual visible window, not a guessed delay or
+                // backend exit. A failed launch leaves the host accessible.
+                let visible = wait_for_runtime_visible(&monitor_app, shown.as_deref());
+                if mode == MODE_MEMORY && visible {
+                    if let Some(window) = monitor_app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                    close_host_webviews_for_memory_mode(&monitor_app);
+                    stop_backend(&monitor_app);
+                }
+                if !visible {
+                    // No host resources were retired, so exit monitoring must
+                    // not spawn a duplicate backend while reporting failure.
+                    monitor_app.state::<LeagueRuntimeProcess>().mode.store(MODE_PARALLEL, Ordering::SeqCst);
+                    if let Ok(mut error) = monitor_app.state::<LeagueRuntimeProcess>().last_error.lock() {
+                        *error = Some("工作台未能显示，主窗口保持打开，请重试".into());
+                    }
+                    let _ = stop_league_runtime(monitor_app.clone());
+                }
+                monitor_app
+                    .state::<LeagueRuntimeProcess>()
+                    .handing_off
+                    .store(false, Ordering::SeqCst);
+                // This same worker owns cleanup AND exit monitoring. Even an
+                // immediately exiting runtime cannot restore a second backend
+                // while the original backend is still shutting down.
+                monitor_runtime(monitor_app);
+            })
         {
+            state.handing_off.store(false, Ordering::SeqCst);
             let cleanup_result = {
                 let state = app_for_worker.state::<LeagueRuntimeProcess>();
                 let result = match state.child.lock() {
@@ -1381,27 +1641,13 @@ pub(crate) async fn launch_league_runtime(
                 state.active.store(false, Ordering::SeqCst);
                 state.administrator.store(false, Ordering::SeqCst);
                 state.mode.store(MODE_ASK, Ordering::SeqCst);
-                if mode == MODE_MEMORY {
-                    let _ = start_backend(&app_for_worker);
-                }
+                // The worker never started, so the host and backend are intact.
             }
             return Err(match cleanup_result {
                 Ok(()) => format!("无法启动英雄联盟运行时监控线程：{error}"),
                 Err(cleanup_error) => {
                     format!("无法启动英雄联盟运行时监控线程，且清理工作台失败：{cleanup_error}")
                 }
-            });
-        }
-        // Let the Tauri IPC response reach the renderer before destroying the
-        // invoking WebView. Otherwise the JS coordinator can observe a false
-        // rejection and clear its same-session relaunch guard even though the
-        // runtime started successfully. The monitor waits 500 ms before its
-        // first exit check, so this handoff still completes before restoration.
-        if mode == MODE_MEMORY {
-            let close_app = app_for_worker.clone();
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(150));
-                close_host_webviews_for_memory_mode(&close_app);
             });
         }
         Ok(())
@@ -1426,6 +1672,7 @@ pub(crate) fn stop_league_runtime(app: AppHandle) -> Result<(), String> {
 pub(crate) fn shutdown_league_runtime(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<LeagueRuntimeProcess>();
     state.suppress_restore.store(true, Ordering::SeqCst);
+    cancel_prewarm(app)?;
     state.active.store(false, Ordering::SeqCst);
     state.administrator.store(false, Ordering::SeqCst);
     state.mode.store(MODE_ASK, Ordering::SeqCst);
@@ -1448,15 +1695,12 @@ pub(crate) fn suppress_runtime_restore(app: &AppHandle) {
 }
 
 pub(crate) fn wait_for_restore_idle(app: &AppHandle) {
-    // start_backend has a bounded 12-second readiness loop. Give an in-flight
-    // restore enough time to observe AppLifecycle::quitting and unwind before
-    // the final backend reap and process exit.
-    for _ in 0..130 {
-        if !app
-            .state::<LeagueRuntimeProcess>()
-            .restoring
-            .load(Ordering::SeqCst)
-        {
+    // Also wait for the handoff worker: it may already own the backend child,
+    // so another stop_backend call cannot reap it. Preserve the existing
+    // graceful cleanup budget (HTTP timeout + 18s), not just restore's 12s.
+    for _ in 0..230 {
+        let state = app.state::<LeagueRuntimeProcess>();
+        if !state.restoring.load(Ordering::SeqCst) && !state.handing_off.load(Ordering::SeqCst) {
             return;
         }
         thread::sleep(Duration::from_millis(100));
@@ -1465,6 +1709,26 @@ pub(crate) fn wait_for_restore_idle(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prewarm_signals_are_unique_and_cleanup_only_their_session() {
+        let root = std::env::temp_dir().join(format!("mgs-prewarm-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let (nonce, first) = super::PrewarmSignals::create(&root).unwrap();
+        let (_, second) = super::PrewarmSignals::create(&root).unwrap();
+        assert_eq!(nonce.len(), 32);
+        assert!(nonce.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first.ready, second.ready);
+        for path in [&first.ready, &first.activate, &first.shown, &second.ready] {
+            std::fs::write(path, b"").unwrap();
+        }
+        let first_path = first.ready.clone();
+        drop(first);
+        assert!(!first_path.exists());
+        assert!(second.ready.exists());
+        drop(second);
+        std::fs::remove_dir(root).unwrap();
+    }
+
     use super::{
         mode_name, parse_mode, runtime_arguments, runtime_user_data_argument, sha256_file,
         verify_runtime_integrity_against, MODE_MEMORY, MODE_PARALLEL,
@@ -1491,6 +1755,29 @@ mod tests {
         assert_eq!(mode_name(MODE_PARALLEL), "parallel");
         assert!(parse_mode("ask").is_err());
         assert!(parse_mode("unknown").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn exited_prewarm_is_discarded_so_prepare_can_rebuild_it() {
+        use std::os::windows::process::CommandExt;
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", "exit", "0"])
+            .creation_flags(crate::CREATE_NO_WINDOW)
+            .spawn()
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let mut warm = Some(super::PrewarmedRuntime {
+            runtime: super::ManagedLeagueRuntime {
+                process: super::ManagedRuntimeProcess::Direct(child),
+                shutdown_signal: PathBuf::new(),
+                prewarm_signals: None,
+            },
+        });
+        super::discard_exited_prewarm(&mut warm);
+        assert!(warm.is_none());
+        super::discard_exited_prewarm(&mut warm);
+        assert!(warm.is_none());
     }
 
     #[test]
@@ -1800,13 +2087,13 @@ mod tests {
             .find("if mode == MODE_MEMORY")
             .expect("memory mode should guard host WebView destruction");
         let close_worker = launch
-            .find("thread::sleep(Duration::from_millis(150))")
-            .expect("host close should be deferred");
+            .find("wait_for_runtime_visible(&monitor_app, shown.as_deref())")
+            .expect("host close must wait for actual visibility");
         let close_call = launch
-            .find("close_host_webviews_for_memory_mode(&close_app)")
+            .find("close_host_webviews_for_memory_mode(&monitor_app)")
             .expect("deferred worker should close the host WebViews");
-        assert!(memory_guard < close_worker);
-        assert!(close_worker < close_call);
+        assert!(close_worker < memory_guard);
+        assert!(memory_guard < close_call);
         assert!(!launch.contains("close_host_webviews_for_parallel_mode"));
     }
 
@@ -1819,7 +2106,7 @@ mod tests {
             .map(|(body, _)| body)
             .expect("launch command should exist");
         let process = launch
-            .find("let process = match launch_runtime_process")
+            .find("let selected_runtime =")
             .expect("runtime process should be spawned");
         let guard = launch
             .find("let mut guard = match state.child.lock()")
@@ -1828,12 +2115,58 @@ mod tests {
             .find("*guard = Some(runtime)")
             .expect("spawned runtime should be registered");
         let backend_stop = launch
-            .find("stop_backend(&app_for_worker)")
+            .find("stop_backend(&monitor_app)")
             .expect("memory mode should stop the backend");
         assert!(process < guard);
         assert!(guard < registration);
         assert!(registration < backend_stop);
         assert!(launch[guard..registration].contains("suppress_restore"));
+    }
+
+    #[test]
+    fn handoff_releases_streaming_clients_before_backend_shutdown_and_restore() {
+        let source = include_str!("league_runtime.rs");
+        let launch = source
+            .split_once("pub(crate) async fn launch_league_runtime")
+            .unwrap()
+            .1
+            .split_once("pub(crate) fn stop_league_runtime")
+            .unwrap()
+            .0;
+        let worker = launch.find(".spawn(move || {").unwrap();
+        let retire = launch
+            .find("close_host_webviews_for_memory_mode(&monitor_app)")
+            .unwrap();
+        let stop = launch.find("stop_backend(&monitor_app)").unwrap();
+        let monitor = launch.find("monitor_runtime(monitor_app)").unwrap();
+        assert!(worker < retire && retire < stop && stop < monitor);
+        assert!(launch.find("window.hide()").unwrap() < retire);
+        assert!(!launch.contains("from_millis(150)"));
+        assert!(!launch.contains("stop_backend(&app_for_worker)"));
+        assert!(
+            !launch.contains("thread::spawn("),
+            "no detached late retirement may destroy a restored window"
+        );
+        assert!(
+            !launch.contains("start_backend(&app_for_worker)"),
+            "spawn failure leaves the original backend intact"
+        );
+    }
+
+    #[test]
+    fn app_exit_waits_for_handoff_ownership_to_be_released() {
+        let source = include_str!("league_runtime.rs");
+        let wait = source
+            .split_once("pub(crate) fn wait_for_restore_idle")
+            .unwrap()
+            .1
+            .split_once("#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(wait.contains("!state.restoring.load(Ordering::SeqCst)"));
+        assert!(wait.contains("!state.handing_off.load(Ordering::SeqCst)"));
+        let state = super::LeagueRuntimeProcess::default();
+        assert!(!state.handing_off.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

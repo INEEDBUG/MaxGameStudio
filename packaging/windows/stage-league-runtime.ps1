@@ -922,6 +922,11 @@ try {
     }
     Apply-MaxGameStudioTheme $source $leagueWorkbenchIcon
     Apply-EmbeddedUiPruning $source
+    $prewarmHelper = Join-Path $repoRoot "packaging\windows\stage-league-prewarm.ps1"
+    if (-not (Test-Path -LiteralPath $prewarmHelper -PathType Leaf)) {
+      throw "League prewarm staging helper is missing: $prewarmHelper"
+    }
+    & $prewarmHelper -SourceRoot $source
     if (Test-Path -LiteralPath $platformPath) {
       $platformText = Get-Content -LiteralPath $platformPath -Raw -Encoding utf8
       $lifecyclePattern = "return platform === 'win32' && arch === 'x64'"

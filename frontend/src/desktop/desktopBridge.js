@@ -35,6 +35,8 @@ export const desktopBridge = isDesktopApp
       quitApp: () => invoke("quit_app"),
       onCloseChoiceRequested: (callback) => listen("desktop-close-choice-requested", callback),
       getLeagueRuntimeStatus: () => invoke("get_league_runtime_status"),
+      prepareLeagueRuntime: () => invoke("prepare_league_runtime"),
+      cancelLeaguePrewarm: () => invoke("cancel_league_prewarm"),
       // Keep the frontend call site optional while always satisfying the
       // native command's required boolean argument.
       launchLeagueRuntime: (mode, options = {}) => invoke("launch_league_runtime", {

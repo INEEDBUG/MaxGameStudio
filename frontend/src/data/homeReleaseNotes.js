@@ -10,13 +10,15 @@ export const HOME_RELEASE_NOTES = {
       "修复部分电脑以管理员权限启动英雄联盟工作台时提示“拒绝访问”的问题。",
     ],
     added: [
-      "首次启动可选择数据存放位置，优先推荐非系统盘；以后可在设置的路径页面调整。",
-      "支持查看当前和待切换目录，切换前可以取消；下次启动时会复制并校验数据。",
+      "启动时优先复用已有数据位置，不会自动迁移、复制或删除旧数据；新安装可使用推荐的非系统盘位置。",
+      "设置中显示数据、日志、缓存、WebView、英雄联盟运行时和临时文件的实际位置；可手动切换目录，空目录从新设置开始。",
+      "普通模式会预热英雄联盟工作台（不连接客户端、不运行自动化）；管理员模式需要点击 UAC，不进行普通预热。节省内存模式退出后恢复主程序，后台并行模式保留宿主。",
     ],
     optimized: [
-      "应用数据、缓存、日志和临时文件统一使用所选位置；磁盘不可用时会提示，不会偷偷改存 C 盘。",
-      "升级保留原安装位置。迁移后旧文件暂时保留用于恢复，因此不会立即释放原目录占用的空间。",
+      "设置会如实显示已有数据的位置；磁盘不可用时会提示，不会偷偷改存 C 盘。",
+      "切换失败会取消本次切换并继续使用原目录；原目录也不可用时会停止启动并明确提示。",
       "Windows 系统记录和游戏自身的配置文件不在迁移范围内。",
+      "首次或未预热启动英雄联盟工作台仍可能需要数秒，不保证 1 秒内打开。",
     ],
   },
   en: {
@@ -24,13 +26,15 @@ export const HOME_RELEASE_NOTES = {
       "Fixes Access denied errors when launching the League workspace with administrator privileges on some PCs.",
     ],
     added: [
-      "Choose where app data is stored on first launch; a non-system drive is recommended. Change it later in Settings > Paths.",
-      "View or cancel a pending storage change before data is copied and verified on the next startup.",
+      "Reuse an existing data location at startup; the app does not automatically migrate, copy, or delete old data. New installs can use the recommended non-system drive.",
+      "Settings shows the actual paths for data, logs, cache, WebView, League runtime, and temporary files. You can switch manually; an empty target starts with fresh settings.",
+      "Standard mode prewarms the League workspace without connecting to the client or running automation. Administrator mode requires UAC and skips prewarming; memory-saving mode restores the host, while parallel mode keeps it running.",
     ],
     optimized: [
-      "App data, caches, logs and temporary files follow the selected location. An unavailable drive causes a visible error, not a silent fallback to C:.",
-      "Upgrades preserve the installation location. Migration retains old files for recovery, so their disk space is not reclaimed immediately.",
+      "Settings reports where existing data is actually stored. An unavailable drive causes a visible error, not a silent fallback to C:.",
+      "A failed switch is cancelled and the usable original location remains active; if the original location is also unavailable, startup stops with an explicit error.",
       "Windows system records and game-owned configuration files are not relocated.",
+      "Starting the League workspace for the first time or before prewarming finishes can still take several seconds; opening within one second is not guaranteed.",
     ],
   },
 };
