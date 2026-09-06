@@ -1,29 +1,27 @@
 {
-  "version": "3.1.2",
+  "version": "3.1.3",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-09-05T14:55:22.760Z",
+  "pub_date": "2026-09-06T21:08:14.125Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2s1MFN4U0dJUFFyZjFtd1dEbzZKUjdYQmJIYXlqYXE1UlV4V2gxRXhZd21xdmRWZE1XeFF2ME5aSGw5NXVKd3RMaVYwS2FwZWtSaHNWaXd6bmZreEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjIwMTE2CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuMl94NjQtc2V0dXAuZXhlCm5wTGltZGhFV3NkS09BUWkyb0kydzRuTGRHOGxXR3FKT3ZoN1BkN25iUUh1OFNmOEZPL2oxUVRuSE1mMVNGRlkvbzJaOGd4dzBNT1hHT0lvVlE0TENBPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.2/MaxGameStudio_3.1.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2wxeHl0dnBwRWxLYm41UjJuaTF3MzZjcklhcHYrQ25hN1hHSFIvSkp1SG1tN2hEL0Y3allUOFpvdUkvUzhFMEUzL0dwOWdFRVkvWVY0S09TWXREV1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NzI4ODg3CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuM194NjQtc2V0dXAuZXhlCkdmaGlIVEFQakRBbGdDYTBEeHE0QUJsNWo3VFFSa0wybXpFdGgvOTVEeWd6Ums2L3dheFB4ODRZY2VidDM0M3luYm5iNTlVSUtFVkFwZEtqVnFvRkFBPT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.3/MaxGameStudio_3.1.3_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.1.2",
+    "version": "3.1.3",
     "fixed": [
-      "修复部分电脑以管理员权限启动英雄联盟工作台时提示“拒绝访问”的问题。"
+      "英雄联盟工作台关闭时可选择隐藏到系统托盘，不再缩到任务栏；点击托盘图标可恢复窗口。"
     ],
     "added": [
-      "启动时优先复用已有数据位置，不会自动迁移、复制或删除旧数据；新安装可使用推荐的非系统盘位置。",
-      "设置显示数据、日志、缓存、WebView、英雄联盟运行时和临时文件的实际位置；可手动切换目录，空目录从新设置开始。",
-      "普通模式预热英雄联盟工作台但不连接客户端或运行自动化；管理员模式需要 UAC，不进行普通预热。"
+      "新增独立 RESG 数据窗口，仅在海克斯大乱斗中跟随当前选择或换选的英雄，开关与 OP.GG 相互独立。",
+      "RESG 窗口可切换全部数据与常用精选，并自动记住选择；精选展示各品质热门海克斯和各出装阶段的前 3 项。"
     ],
     "optimized": [
-      "设置会如实显示已有数据的位置；磁盘不可用时会提示，不会偷偷改存 C 盘。",
-      "切换失败会取消本次切换并继续使用原目录；原目录也不可用时会停止启动并明确提示。",
-      "Windows 系统记录和游戏自身的配置文件不在迁移范围内。",
-      "节省内存模式在工作台显示后隐藏主窗口；后台并行模式保留主窗口。首次或未预热启动仍可能需要数秒，不保证 1 秒内打开。"
+      "海克斯按场次、装备组合按采用率排序，保留胜率和样本量，不把场次冒充选取率。",
+      "保留完整数据入口，支持深浅色主题；网站数据不适配时回退到原页面。",
+      "手动关闭 RESG 后不会因换英雄反复弹出；普通大乱斗及其他模式不会启用该窗口。"
     ]
   }
 }
