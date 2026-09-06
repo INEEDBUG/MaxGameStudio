@@ -717,33 +717,22 @@ try {
     $mainWindowPath = Join-Path $source "src\main\shards\window-manager\main-window\window.ts"
     $windowLineBreak = [Environment]::NewLine
     $closeStrategyAnchor = "    const s = this._nextCloseAction || this.settings.closeAction"
-    $embeddedCloseMinimize = @(
-      "    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1' && s === 'minimize-to-tray') {"
-      "      event.preventDefault()"
-      "      this._window?.minimize()"
-      "      this._nextCloseAction = null"
-      "      return"
-      "    }"
-    ) -join $windowLineBreak
-    $patchedCloseStrategyAnchor = $closeStrategyAnchor + $windowLineBreak + $embeddedCloseMinimize
-    Replace-TextExactlyOnce $mainWindowPath $closeStrategyAnchor $patchedCloseStrategyAnchor
     $patchedWindowText = Get-Content -LiteralPath $mainWindowPath -Raw -Encoding utf8
-    if (-not $patchedWindowText.Contains($embeddedCloseMinimize)) {
-      throw "Embedded close minimization was not applied to main window handleClose."
+    foreach ($closeContract in @(
+        $closeStrategyAnchor,
+        "    if (s === 'minimize-to-tray' || process.platform === 'darwin') {",
+        "      this._window?.hide()"
+      )) {
+      if (-not $patchedWindowText.Contains($closeContract)) {
+        throw "Embedded close strategy contract is missing '$closeContract'."
+      }
     }
-    $trueCloseIndex = $patchedWindowText.IndexOf('    if (this._trueClose || this._context.shared.global.isReadyToQuit) {')
-    $closeStrategyIndex = $patchedWindowText.IndexOf($closeStrategyAnchor)
-    $embeddedMinimizeIndex = $patchedWindowText.IndexOf("    if (process.env.MAXGAMESTUDIO_EMBEDDED === '1' && s === 'minimize-to-tray') {")
-    if ($trueCloseIndex -lt 0 -or $closeStrategyIndex -le $trueCloseIndex -or $embeddedMinimizeIndex -le $closeStrategyIndex) {
-      throw "Embedded close minimization order is unsafe: close strategy must be resolved first."
+    if ($patchedWindowText.Contains("process.env.MAXGAMESTUDIO_EMBEDDED === '1' && s === 'minimize-to-tray'") -or
+        $patchedWindowText.Contains('this._window?.minimize()')) {
+      throw "Embedded close strategy must hide to the system tray, not minimize to the taskbar."
     }
-    if ($patchedWindowText.Contains("if (process.env.MAXGAMESTUDIO_EMBEDDED === '1') {")) {
-      throw "Embedded close path must not bypass the close strategy."
-    }
-    # Keep the runtime's existing `ask` and `quit` branches intact. In
-    # embedded mode the `minimize-to-tray` strategy is deliberately mapped to
-    # BrowserWindow.minimize(), because the embedded tray is disabled and the
-    # taskbar must remain a reliable restore path.
+    # Keep the runtime's existing `ask` and `quit` branches intact. The
+    # persisted minimize-to-tray value now uses the upstream tray lifecycle.
     $shellEnglishPath = Join-Path $source "src\shared\i18n\en\renderer\shell.yaml"
     $shellChinesePath = Join-Path $source "src\shared\i18n\zh-CN\renderer\shell.yaml"
     $settingsEnglishPath = Join-Path $source "src\shared\i18n\en\renderer\settings.yaml"
@@ -756,7 +745,7 @@ try {
     # Keep this staging script ASCII-only for Windows PowerShell 5.1. Build
     # the Chinese labels from code points instead of embedding them literally.
     $zhCloseLeagueWorkspace = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
-    $zhMinimizeLeagueWorkspace = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
+    $zhHideToSystemTray = & $makeUnicodeText @(0x9690, 0x85CF, 0x5230, 0x7CFB, 0x7EDF, 0x6258, 0x76D8)
     $zhReturnToMaxGameStudio = (& $makeUnicodeText @(0x8FD4, 0x56DE)) + ' MaxGameStudio'
     $zhLeagueWorkspaceCloseAction = & $makeUnicodeText @(0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x5173, 0x95ED, 0x884C, 0x4E3A)
     $zhCloseLeagueWorkspaceDescription = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x65F6, 0x6267, 0x884C, 0x7684, 0x64CD, 0x4F5C)
@@ -768,24 +757,24 @@ try {
     $zhMainWindowCloseDescription = & $makeUnicodeText @(0x5F53, 0x5173, 0x95ED, 0x4E3B, 0x7A97, 0x53E3, 0x65F6, 0x6240, 0x6267, 0x884C, 0x7684, 0x884C, 0x4E3A)
     $zhAskEveryTime = & $makeUnicodeText @(0x6BCF, 0x6B21, 0x8BE2, 0x95EE)
     Replace-TextExactlyOnce $shellEnglishPath "    title: Quit `$t(common:appName)" "    title: Close League Workspace"
-    Replace-TextExactlyOnce $shellEnglishPath "      minimize-to-tray: Minimize to tray" "      minimize-to-tray: Minimize League Workspace"
+    Replace-TextExactlyOnce $shellEnglishPath "      minimize-to-tray: Minimize to tray" "      minimize-to-tray: Hide to system tray"
     Replace-TextExactlyOnce $shellEnglishPath "      quit: Quit" "      quit: Return to MaxGameStudio"
     Replace-TextExactlyOnce $shellChinesePath ("    title: " + $zhQuitCommonAppName) ("    title: " + $zhCloseLeagueWorkspace)
-    Replace-TextExactlyOnce $shellChinesePath ("      minimize-to-tray: " + $zhMinimizeToTray) ("      minimize-to-tray: " + $zhMinimizeLeagueWorkspace)
+    Replace-TextExactlyOnce $shellChinesePath ("      minimize-to-tray: " + $zhMinimizeToTray) ("      minimize-to-tray: " + $zhHideToSystemTray)
     Replace-TextExactlyOnce $shellChinesePath ("      quit: " + $zhQuitApplication) ("      quit: " + $zhReturnToMaxGameStudio)
     Replace-TextExactlyOnce $settingsEnglishPath "        label: Main Window Close Action" "        label: League Workspace Close Action"
     Replace-TextExactlyOnce $settingsEnglishPath "        description: The action to be executed when the main window is closed" "        description: The action to take when closing the League workspace"
-    Replace-TextExactlyOnce $settingsEnglishPath "          minimize-to-tray: Minimize to tray" "          minimize-to-tray: Minimize League Workspace"
+    Replace-TextExactlyOnce $settingsEnglishPath "          minimize-to-tray: Minimize to tray" "          minimize-to-tray: Hide to system tray"
     Replace-TextExactlyOnce $settingsEnglishPath "          quit: Quit" "          quit: Return to MaxGameStudio"
     Replace-TextExactlyOnce $settingsChinesePath ("        label: " + $zhMainWindowCloseAction) ("        label: " + $zhLeagueWorkspaceCloseAction)
     Replace-TextExactlyOnce $settingsChinesePath ("        description: " + $zhMainWindowCloseDescription) ("        description: " + $zhCloseLeagueWorkspaceDescription)
-    Replace-TextExactlyOnce $settingsChinesePath ("          minimize-to-tray: " + $zhMinimizeToTraySettings) ("          minimize-to-tray: " + $zhMinimizeLeagueWorkspace)
+    Replace-TextExactlyOnce $settingsChinesePath ("          minimize-to-tray: " + $zhMinimizeToTraySettings) ("          minimize-to-tray: " + $zhHideToSystemTray)
     Replace-TextExactlyOnce $settingsChinesePath ("          quit: " + $zhQuitApplication) ("          quit: " + $zhReturnToMaxGameStudio)
     $closeCopyContracts = @(
-      @{ Path = $shellEnglishPath; Values = @('Close League Workspace', 'Minimize League Workspace', 'Return to MaxGameStudio') }
-      @{ Path = $settingsEnglishPath; Values = @('League Workspace Close Action', 'Minimize League Workspace', 'Return to MaxGameStudio', 'Ask every time') }
-      @{ Path = $shellChinesePath; Values = @($zhCloseLeagueWorkspace, $zhMinimizeLeagueWorkspace, $zhReturnToMaxGameStudio) }
-      @{ Path = $settingsChinesePath; Values = @($zhLeagueWorkspaceCloseAction, $zhCloseLeagueWorkspaceDescription, $zhMinimizeLeagueWorkspace, $zhReturnToMaxGameStudio, $zhAskEveryTime) }
+      @{ Path = $shellEnglishPath; Values = @('Close League Workspace', 'Hide to system tray', 'Return to MaxGameStudio') }
+      @{ Path = $settingsEnglishPath; Values = @('League Workspace Close Action', 'Hide to system tray', 'Return to MaxGameStudio', 'Ask every time') }
+      @{ Path = $shellChinesePath; Values = @($zhCloseLeagueWorkspace, $zhHideToSystemTray, $zhReturnToMaxGameStudio) }
+      @{ Path = $settingsChinesePath; Values = @($zhLeagueWorkspaceCloseAction, $zhCloseLeagueWorkspaceDescription, $zhHideToSystemTray, $zhReturnToMaxGameStudio, $zhAskEveryTime) }
     )
     foreach ($contract in $closeCopyContracts) {
       $closeCopyText = Get-Content -LiteralPath $contract.Path -Raw -Encoding utf8
@@ -857,11 +846,49 @@ try {
     $bootstrapPath = Join-Path $source "src\main\bootstrap\index.ts"
     Replace-TextExactlyOnce $bootstrapPath "import { StatisticsMain } from '@main/shards/statistics'" ""
     Replace-TextExactlyOnce $bootstrapPath "    manager.use(StatisticsMain)" ""
-    Replace-TextExactlyOnce $bootstrapPath "    manager.use(TrayMain)" (@(
-      "    if (process.env.MAXGAMESTUDIO_EMBEDDED !== '1') {"
-      "      manager.use(TrayMain)"
-      "    }"
+    # Keep the upstream tray shard registered in embedded mode. Its init is
+    # gated below by the prewarm activation barrier, so no tray icon appears
+    # before the host has released the workbench.
+    $trayMainPath = Join-Path $source "src\main\shards\tray\index.ts"
+    $trayMainText = Get-Content -LiteralPath $trayMainPath -Raw -Encoding utf8
+    if (-not $trayMainText.Contains("import { onActivated } from '@main/mgs-prewarm'")) {
+      $firstTrayImport = [regex]::Match($trayMainText, '(?m)^import .*$')
+      if (-not $firstTrayImport.Success) { throw "Tray shard has no import anchor." }
+      $trayMainText = $trayMainText.Insert($firstTrayImport.Index, "import { onActivated } from '@main/mgs-prewarm'" + [Environment]::NewLine)
+      [IO.File]::WriteAllText($trayMainPath, $trayMainText, [Text.UTF8Encoding]::new($false))
+    }
+    Replace-TextExactlyOnce $trayMainPath "  private readonly _stateWatcher: TrayStateWatcher" (@(
+      "  private readonly _stateWatcher: TrayStateWatcher"
+      "  private _disposed = false"
     ) -join [Environment]::NewLine)
+    $trayInitOld = @(
+      "  async onInit() {"
+      "    this._menuController.build()"
+      "    this._stateWatcher.watch()"
+      "  }"
+    ) -join [Environment]::NewLine
+    $trayInitNew = @(
+      "  async onInit() {"
+      "    onActivated(() => {"
+      "      if (this._disposed) return"
+      "      this._menuController.build()"
+      "      this._stateWatcher.watch()"
+      "    })"
+      "  }"
+    ) -join [Environment]::NewLine
+    Replace-TextExactlyOnce $trayMainPath $trayInitOld $trayInitNew
+    $trayDisposeOld = @(
+      "  async onDispose() {"
+      "    this._menuController.destroy()"
+      "  }"
+    ) -join [Environment]::NewLine
+    $trayDisposeNew = @(
+      "  async onDispose() {"
+      "    this._disposed = true"
+      "    this._menuController.destroy()"
+      "  }"
+    ) -join [Environment]::NewLine
+    Replace-TextExactlyOnce $trayMainPath $trayDisposeOld $trayDisposeNew
     $bootstrapProtocolOld = @(
       "    if (process.defaultApp) {"
       "      const appPath = path.resolve(process.argv[1])"
@@ -884,7 +911,9 @@ try {
     $patchedBootstrapText = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding utf8
     if (-not $patchedBootstrapText.Contains("process.env.MAXGAMESTUDIO_EMBEDDED !== '1'") -or
         -not $patchedBootstrapText.Contains($bootstrapProtocolNew) -or
-        -not $patchedBootstrapText.Contains("manager.use(TrayMain)")) {
+        -not $patchedBootstrapText.Contains("manager.use(TrayMain)") -or
+        -not (Get-Content -LiteralPath $trayMainPath -Raw -Encoding utf8).Contains("onActivated(() => {") -or
+        -not (Get-Content -LiteralPath $trayMainPath -Raw -Encoding utf8).Contains("if (this._disposed) return")) {
       throw "Embedded protocol and tray guards were not applied to bootstrap."
     }
     $commonConstantsPath = Join-Path $source "src\shared\constants\common.ts"
@@ -927,6 +956,7 @@ try {
       throw "League prewarm staging helper is missing: $prewarmHelper"
     }
     & $prewarmHelper -SourceRoot $source
+    & (Join-Path $repoRoot 'packaging\windows\league-resg\stage.ps1') -SourceRoot $source
     if (Test-Path -LiteralPath $platformPath) {
       $platformText = Get-Content -LiteralPath $platformPath -Raw -Encoding utf8
       $lifecyclePattern = "return platform === 'win32' && arch === 'x64'"

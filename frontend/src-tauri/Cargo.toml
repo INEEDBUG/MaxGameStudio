@@ -1,6 +1,6 @@
 [package]
 name = "cs2-insight-agent-desktop"
-version = "3.1.2"
+version = "3.1.3"
 description = "Lightweight Windows desktop shell for MaxGameStudio"
 authors = ["MaxGameStudio contributors"]
 edition = "2021"
