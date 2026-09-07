@@ -41,7 +41,7 @@ def test_fresh_install_default_preserves_explicit_and_registered_paths():
     body = hook.split("Function MGS_SelectFreshInstallDrive", 1)[1].split("FunctionEnd", 1)[0]
     assert "MUI_CUSTOMFUNCTION_GUIINIT" in hook
     assert body.index("ReadRegStr") < body.index("GetDriveTypeW")
-    assert body.index('${GetOptions} $CMDLINE "/D="') < body.index("GetDriveTypeW")
+    assert body.index('GetCommandLineW') < body.index('${GetOptions} $1 "/D="') < body.index("GetDriveTypeW")
     assert 'StrCpy $3 $WINDIR 2' in body
     assert 'IntCmp $0 3' in body
     assert 'Fresh silent installations require an explicit /D=' in hook

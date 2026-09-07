@@ -38,7 +38,43 @@ Var CS2LegacyTauriUninsExe ; parsed legacy Tauri uninstaller executable path
 ; MUI calls this after Tauri's .onInit has restored the registered install
 ; location, but before displaying the directory page. Keep /D and upgrades.
 !define MUI_CUSTOMFUNCTION_GUIINIT MGS_SelectFreshInstallDrive
+; Older updater clients do not pass their executable directory to NSIS.
+; Never let /UPDATE silently fall back to a fresh-install directory. Resolve
+; again at the file-copy boundary (also reached by /S, without GUIINIT).
+Function MGS_ResolveUpdateDirectory
+  Push $0
+  Push $1
+  ClearErrors
+  ${GetOptions} $CMDLINE "/UPDATE" $0
+  IfErrors mgs_update_path_done
+  ; NSIS removes /D from $CMDLINE after setting $INSTDIR. Use the original
+  ; Windows command line to preserve an intentional explicit destination.
+  System::Call 'kernel32::GetCommandLineW() w.r1'
+  ClearErrors
+  ${GetOptions} $1 "/D=" $0
+  IfErrors 0 mgs_update_path_done
+  ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
+  StrCmp $0 "" 0 mgs_update_path_validate
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio" "InstallLocation"
+  ; Tauri stores InstallLocation surrounded by quotes.
+  StrCpy $1 $0 1
+  StrCmp $1 '$\"' 0 mgs_update_path_validate
+  StrCpy $0 $0 -1 1
+  mgs_update_path_validate:
+    StrCmp $0 "" mgs_update_path_missing
+    IfFileExists "$0\cs2-insight-agent-desktop.exe" 0 mgs_update_path_missing
+    StrCpy $INSTDIR $0
+    Goto mgs_update_path_done
+  mgs_update_path_missing:
+    StrCpy $R7 "无法确认原安装目录，已停止更新，未复制程序文件。请手动运行安装包并选择原 MaxGameStudio 安装目录。"
+    Call CS2_AbortMigrationInstall
+  mgs_update_path_done:
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Function MGS_SelectFreshInstallDrive
+  Call MGS_ResolveUpdateDirectory
   Push $0
   Push $1
   Push $2
@@ -47,8 +83,9 @@ Function MGS_SelectFreshInstallDrive
   StrCmp $0 "" 0 mgs_drive_done
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio" "InstallLocation"
   StrCmp $0 "" 0 mgs_drive_done
+  System::Call 'kernel32::GetCommandLineW() w.r1'
   ClearErrors
-  ${GetOptions} $CMDLINE "/D=" $0
+  ${GetOptions} $1 "/D=" $0
   IfErrors +2 0
     Goto mgs_drive_done
   StrCmp $INSTDIR "$LOCALAPPDATA\MaxGameStudio" 0 mgs_drive_done
@@ -768,13 +805,18 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  Call MGS_ResolveUpdateDirectory
   ; A silent fresh installation has no directory page or GUI-init callback.
   ; Require an explicit /D instead of silently choosing the system disk.
   IfSilent 0 mgs_silent_path_done
+  ClearErrors
+  ${GetOptions} $CMDLINE "/UPDATE" $0
+  IfErrors 0 mgs_silent_path_done
   ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
   StrCmp $0 "" 0 mgs_silent_path_done
+  System::Call 'kernel32::GetCommandLineW() w.r1'
   ClearErrors
-  ${GetOptions} $CMDLINE "/D=" $0
+  ${GetOptions} $1 "/D=" $0
   IfErrors 0 mgs_silent_path_done
   StrCpy $R7 "Fresh silent installations require an explicit /D= installation directory. No application files were copied."
   Call CS2_AbortMigrationInstall

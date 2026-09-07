@@ -214,6 +214,14 @@ jobs:
           $updaterSignature = Get-ChildItem "frontend/src-tauri/target/release/bundle/nsis" -Filter "*.exe.sig" -File | Select-Object -First 1
           if (-not $updaterSignature) { throw "Signed Tauri updater artifact was not created" }
 
+      - name: Verify native installer directory selection
+        shell: pwsh
+        run: |
+          $env:MGS_TEST_MAKENSIS = Join-Path $env:LOCALAPPDATA "tauri/NSIS/makensis.exe"
+          if (-not (Test-Path -LiteralPath $env:MGS_TEST_MAKENSIS)) { throw "NSIS compiler missing; native installer tests must not be skipped" }
+          node --test frontend/scripts/installer-path.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Native installer directory tests failed" }
+
       - name: Verify bundled Python runtime
         shell: pwsh
         run: |
@@ -346,4 +354,7 @@ jobs:
           name: MaxGameStudio-${{ inputs.version }}
           retention-days: 14
           if-no-files-found: error
-          path: frontend/src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            frontend/src-tauri/target/release/bundle/nsis/*.exe
+            frontend/src-tauri/target/release/bundle/nsis/*.exe.sig
+            frontend/src-tauri/target/release/nsis/x64/installer.nsi
