@@ -1,0 +1,33 @@
+name: Verify packaged Windows upgrade
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Release Windows candidate run ID (version 3.1.4)
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download completed candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        run: |
+          if ($env:CANDIDATE_RUN_ID -notmatch '^\d+$') { throw 'Invalid candidate run ID' }
+          $run = gh run view $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or $run.workflowName -ne 'Release Windows') { throw 'Candidate is not a successful manual Release Windows build.' }
+          gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name MaxGameStudio-3.1.4 --dir candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate download failed' }
+      - name: Verify non-default-directory upgrade
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem candidate -Recurse -Filter MaxGameStudio_3.1.4_x64-setup.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one candidate installer' }
+          ./packaging/windows/tests/verify-packaged-upgrade.ps1 -Installer $installers[0].FullName
