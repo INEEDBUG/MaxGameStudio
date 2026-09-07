@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 // Native NSIS behavior, not a JavaScript reimplementation. Production registry
 // literals are remapped to an isolated disposable key before compilation.
 const compiler = process.env.MGS_TEST_MAKENSIS;
-const hook = readFileSync(new URL('../src-tauri/windows/upgrade-hooks.nsh', import.meta.url), 'utf8');
+const hook = readFileSync(new URL('../../../frontend/src-tauri/windows/upgrade-hooks.nsh', import.meta.url), 'utf8');
 for (const scenario of ['registered', 'uninstall-fallback', 'missing-registration', 'stale-registration', 'explicit', 'fresh-explicit']) {
   test(`updater install path: ${scenario}`, { skip: !compiler || process.platform !== 'win32' }, () => {
     const root = mkdtempSync(join(tmpdir(), 'mgs-installer-path-'));

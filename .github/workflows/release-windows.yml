@@ -219,7 +219,7 @@ jobs:
         run: |
           $env:MGS_TEST_MAKENSIS = Join-Path $env:LOCALAPPDATA "tauri/NSIS/makensis.exe"
           if (-not (Test-Path -LiteralPath $env:MGS_TEST_MAKENSIS)) { throw "NSIS compiler missing; native installer tests must not be skipped" }
-          node --test frontend/scripts/installer-path.test.mjs
+          node --test packaging/windows/tests/installer-path.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "Native installer directory tests failed" }
 
       - name: Verify bundled Python runtime
