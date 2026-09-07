@@ -1,27 +1,27 @@
 {
-  "version": "3.1.3",
+  "version": "3.1.4",
   "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
-  "pub_date": "2026-09-06T21:08:14.125Z",
+  "pub_date": "2026-09-07T19:12:16.229Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2wxeHl0dnBwRWxLYm41UjJuaTF3MzZjcklhcHYrQ25hN1hHSFIvSkp1SG1tN2hEL0Y3allUOFpvdUkvUzhFMEUzL0dwOWdFRVkvWVY0S09TWXREV1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NzI4ODg3CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuM194NjQtc2V0dXAuZXhlCkdmaGlIVEFQakRBbGdDYTBEeHE0QUJsNWo3VFFSa0wybXpFdGgvOTVEeWd6Ums2L3dheFB4ODRZY2VidDM0M3luYm5iNTlVSUtFVkFwZEtqVnFvRkFBPT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.3/MaxGameStudio_3.1.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3Q5YVdoaUREdklYNmMzTHh5NC9ndW1mL0V4Rm1sNVlBVGxGU2lTQlQ1Y1VIYlpYU0J5T2VpOERHRE8wSE5kam9nbW5nTEtTeG5EbTY0Tm9McTBpQ1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODA4MzI5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuNF94NjQtc2V0dXAuZXhlCld2TnpNbWgzSVc4Y1NXZldJaHd6WVM4OXNERHpXNDNXV3BMTmVNTitTNWFVSXVLKzRhU1NyZnNnTlBKbkR2SUUwUHNDSWZPc3lIZmtaTS9lZWRxUkJ3PT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.1.3",
+    "version": "3.1.4",
     "fixed": [
-      "英雄联盟工作台关闭时可选择隐藏到系统托盘，不再缩到任务栏；点击托盘图标可恢复窗口。"
+      "后端启动失败不再关闭整个软件，可返回首页或英雄联盟。"
     ],
     "added": [
-      "新增独立 RESG 数据窗口，仅在海克斯大乱斗中跟随当前选择或换选的英雄，开关与 OP.GG 相互独立。",
-      "RESG 窗口可切换全部数据与常用精选，并自动记住选择；精选展示各品质热门海克斯和各出装阶段的前 3 项。"
+      "RESG 数据窗口新增可记忆的置顶开关，窗口管理中的设置同步生效。",
+      "首页可直接检查更新，无需启动 Python 后端。"
     ],
     "optimized": [
-      "海克斯按场次、装备组合按采用率排序，保留胜率和样本量，不把场次冒充选取率。",
-      "保留完整数据入口，支持深浅色主题；网站数据不适配时回退到原页面。",
-      "手动关闭 RESG 后不会因换英雄反复弹出；普通大乱斗及其他模式不会启用该窗口。"
+      "后端改为按需启动：首页与英雄联盟入口不再等待 Python，依赖后端的页面首次使用时才启动服务。",
+      "从英雄联盟返回主程序不再等待后端启动，切换页面不会中断已有后台任务。",
+      "保留 GitHub 更新与签名校验，改善超时和取消安装提示；不接入付费国内加速服务。"
     ]
   }
 }
