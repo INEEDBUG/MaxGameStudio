@@ -31,7 +31,7 @@ export default function LeagueRuntimeAutoManager() {
       if (disposed || !status) return;
       const sessionId = leagueClientSessionId(status);
       if (!sessionId) {
-        if (status.connected === false && status.client_window_detected !== true && disconnectTimer === null) {
+        if (status.connected === false && status.client_process_detected !== true && status.client_window_detected !== true && disconnectTimer === null) {
           disconnectTimer = window.setTimeout(() => {
             disconnectTimer = null;
             failedSessionId = "";

@@ -58,6 +58,7 @@ vi.mock('electron', async () => {
     visible = false
     destroyed = false
     options: any
+    alwaysOnTop = false
     constructor(options: any) {
       super()
       this.options = options
@@ -76,6 +77,9 @@ vi.mock('electron', async () => {
       return false
     }
     restore() {}
+    setAlwaysOnTop(value: boolean) {
+      this.alwaysOnTop = value
+    }
     setTitle() {}
     loadURL(url: string) {
       return this.webContents.loadURL(url)
@@ -202,6 +206,22 @@ describe('RESG window behavior', () => {
     expect(saved.get('displayMode')).toBe('all')
     expect(controller.getSnapshot()).toMatchObject({ status: 'ready', displayMode: 'all' })
     await expect(invoke('setDisplayMode', 'unknown')).rejects.toThrow()
+  })
+  it('persists always-on-top, applies it live, and reapplies it after reopen', async () => {
+    await invoke('setEnabled', true)
+    await vi.advanceTimersByTimeAsync(400)
+    const first = fake.windows[0]
+    expect(first.alwaysOnTop).toBe(false)
+    await invoke('setAlwaysOnTop', true)
+    expect(saved.get('alwaysOnTop')).toBe(true)
+    expect(first.alwaysOnTop).toBe(true)
+    await invoke('close')
+    await invoke('show')
+    const reopened = fake.windows[1]
+    expect(reopened.alwaysOnTop).toBe(true)
+    await invoke('setAlwaysOnTop', false)
+    expect(reopened.alwaysOnTop).toBe(false)
+    expect(controller.getSnapshot().alwaysOnTop).toBe(false)
   })
   it('applies the latest view choice during navigation and retains it on reopen', async () => {
     await invoke('setEnabled', true)

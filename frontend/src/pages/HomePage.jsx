@@ -38,7 +38,7 @@ function FeedbackCard({ icon: Icon, title, description, label, tone, onClick }) 
   );
 }
 
-export default function HomePage() {
+export default function HomePage({ onCheckUpdates }) {
   const t = useT();
   const locale = useLocaleStore((state) => state.effectiveLocale);
   const language = locale === "zh-HK" || locale === "zh-TW" || locale === "zh" ? "zh" : "en";
@@ -68,6 +68,10 @@ export default function HomePage() {
       </section>
 
       <section className="mt-5 rounded-2xl border border-cs2-border/70 bg-cs2-bg-card p-5 sm:p-6" aria-labelledby="home-release-title">
+        {onCheckUpdates && <details className="mb-4 rounded-lg border border-cs2-border p-3 text-xs text-cs2-text-primary">
+          <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-cs2-accent">{t("settings.checkUpdateBtn")}</summary>
+          <button type="button" onClick={onCheckUpdates} className="mt-2 rounded-md border border-cs2-border px-3 py-2 hover:border-cs2-accent focus-visible:ring-2 focus-visible:ring-cs2-accent">{t("settings.checkUpdateBtn")}</button>
+        </details>}
         <div className="flex items-center gap-2"><Github className="h-4 w-4 text-cs2-accent" aria-hidden="true" /><h2 id="home-release-title" className="text-base font-bold text-cs2-text-primary">{t("home.releaseTitle", { version: HOME_RELEASE_VERSION })}</h2></div>
         <div role="note" className="mt-4 rounded-xl border border-cs2-accent/35 bg-cs2-accent/10 px-4 py-3 text-xs leading-5 text-cs2-text-primary">{t("home.stableReleaseNotice", { stableVersion: HOME_RELEASE_VERSION, supersededVersion: SUPERSEDED_LOCAL_CANDIDATE_VERSION })}</div>
         <div className="mt-5 grid gap-5 md:grid-cols-3">

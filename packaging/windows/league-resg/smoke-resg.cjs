@@ -143,6 +143,9 @@ app.whenReady().then(async () => {
     results.push('disabled: no remote renderer')
     await call('setEnabled', true)
     await ready()
+    await call('setAlwaysOnTop', true)
+    assert.equal(controller.getSnapshot().alwaysOnTop, true)
+    results.push('always-on-top setting applies to the live native window')
     for (const [id, name] of [
       [63, '复仇焰魂'],
       [223, '河流之王'],
@@ -263,6 +266,8 @@ app.whenReady().then(async () => {
     results.push('manual close destroys renderer and suppresses swap popup')
     await call('show')
     await ready()
+    assert.equal(controller.getSnapshot().alwaysOnTop, true)
+    results.push('always-on-top setting survives RESG close and reopen')
     const reopenedContents = remote()
     runInAction(() => {
       data.gameflow.session.gameData.queue.gameMode = 'ARAM'

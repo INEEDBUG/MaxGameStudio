@@ -60,6 +60,9 @@ $enResg = @'
       autoShow:
         label: Auto Show
         description: Automatically show RESG when Hextech ARAM champion data is available.
+      alwaysOnTop:
+        label: Keep on top
+        description: Keep the RESG window above other windows.
       status:
         label: Status
         description: RESG is limited to Hextech ARAM.
@@ -83,6 +86,9 @@ $zhResg = @'
       autoShow:
         label: 自动弹出
         description: Hextech ARAM 有可用英雄数据时自动显示 RESG。
+      alwaysOnTop:
+        label: 始终置顶
+        description: 让 RESG 窗口保持在其他窗口上方。
       status:
         label: 状态
         description: RESG 仅支持海克斯大乱斗。

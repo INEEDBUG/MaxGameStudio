@@ -32,6 +32,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 type ResgSnapshot = {
   enabled: boolean
   autoShow: boolean
+  alwaysOnTop: boolean
   visible: boolean
   available: boolean
   championId: number
@@ -47,6 +48,7 @@ const busy = ref(false)
 const snapshot = reactive<ResgSnapshot>({
   enabled: false,
   autoShow: true,
+  alwaysOnTop: false,
   visible: false,
   available: false,
   championId: 0,
@@ -118,4 +120,5 @@ onMounted(async () => {
 .resg-button-outer:hover .resg-button-inner {
   background-color: color-mix(in srgb, var(--la-color-text-primary) 15%, transparent);
 }
+
 </style>

@@ -9,7 +9,7 @@ let launchInFlight = null;
 export function leagueClientSessionId(status) {
   if (!status || typeof status !== "object") return "";
   const pid = Number(status.client_pid);
-  if (status.connected === true && Number.isInteger(pid) && pid > 0) return `pid:${pid}`;
+  if ((status.connected === true || status.client_process_detected === true) && Number.isInteger(pid) && pid > 0) return `pid:${pid}`;
   if (status.client_window_detected === true) return "window";
   return "";
 }

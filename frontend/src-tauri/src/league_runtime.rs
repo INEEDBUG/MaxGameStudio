@@ -37,7 +37,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::{start_backend, stop_backend, CREATE_NO_WINDOW};
+use crate::{stop_backend, CREATE_NO_WINDOW};
 
 const MODE_ASK: u8 = 0;
 const MODE_MEMORY: u8 = 1;
@@ -1317,11 +1317,8 @@ fn restore_host(app: AppHandle, memory_mode: bool) {
     state.administrator.store(false, Ordering::SeqCst);
     state.mode.store(MODE_ASK, Ordering::SeqCst);
 
-    let backend_result = if memory_mode {
-        start_backend(&app)
-    } else {
-        Ok(())
-    };
+    // Restoring the shell is independent of Python; a service route can
+    // request it later. Never delay the home window behind backend startup.
     let window_result = if memory_mode && !state.suppress_restore.load(Ordering::SeqCst) {
         create_main_window(&app)
     } else {
@@ -1333,12 +1330,6 @@ fn restore_host(app: AppHandle, memory_mode: bool) {
         return;
     }
 
-    if let Err(error) = backend_result {
-        if let Ok(mut last_error) = state.last_error.lock() {
-            *last_error = Some(error.clone());
-        }
-        let _ = app.emit("league-runtime-restore-error", error);
-    }
     if let Err(error) = window_result {
         if let Ok(mut last_error) = state.last_error.lock() {
             *last_error = Some(error.clone());

@@ -8,7 +8,7 @@ vi.mock("../desktop/desktopBridge.js", () => ({ isDesktopApp: true }));
 vi.mock("../utils/leagueStartupPreference.js", () => ({ readLeagueStartupPreference: mocks.readPreference }));
 vi.mock("../utils/leagueRuntimeLaunchCoordinator.js", () => ({
   clearHandledLeagueSession: vi.fn(),
-  leagueClientSessionId: (status) => status?.connected && status?.client_pid ? `pid:${status.client_pid}` : "",
+  leagueClientSessionId: (status) => (status?.connected || status?.client_process_detected) && status?.client_pid ? `pid:${status.client_pid}` : "",
   launchLeagueRuntimeCoordinated: mocks.launch,
 }));
 vi.mock("../utils/leagueLabStatusSubscription.js", () => ({ subscribeLeagueLabStatus: mocks.subscribe }));
@@ -72,5 +72,17 @@ describe("LeagueRuntimeAutoManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Leave League" }));
     act(() => listener({ connected: true, client_pid: 44 }));
     await waitFor(() => expect(mocks.launch).toHaveBeenCalledWith("memory", { sessionId: "pid:44" }));
+  });
+
+  test("does not clear a handled session while the client process remains detected", async () => {
+    vi.useFakeTimers();
+    let listener;
+    const clear = (await import("../utils/leagueRuntimeLaunchCoordinator.js")).clearHandledLeagueSession;
+    mocks.subscribe.mockImplementation((next) => { listener = next; return vi.fn(); });
+    render(<MemoryRouter initialEntries={["/settings"]}><LeagueRuntimeAutoManager /></MemoryRouter>);
+    act(() => listener({ connected: false, client_process_detected: true, client_pid: 46 }));
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(clear).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

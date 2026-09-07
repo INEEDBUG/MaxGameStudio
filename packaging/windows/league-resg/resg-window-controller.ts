@@ -18,6 +18,7 @@ import {
 class ResgSettings {
   enabled = false
   autoShow = true
+  alwaysOnTop = false
   displayMode: ResgDisplayMode = 'all'
   bounds: { x: number; y: number; width: number; height: number } | null = null
   constructor() {
@@ -45,6 +46,7 @@ export class ResgWindowController {
       {
         enabled: { default: false, schema: z.boolean() },
         autoShow: { default: true, schema: z.boolean() },
+        alwaysOnTop: { default: false, schema: z.boolean() },
         displayMode: { default: 'all', schema: z.enum(['all', 'compact']) },
         bounds: {
           default: null,
@@ -66,6 +68,7 @@ export class ResgWindowController {
     return {
       enabled: this.settings.enabled,
       autoShow: this.settings.autoShow,
+      alwaysOnTop: this.settings.alwaysOnTop,
       displayMode: this.settings.displayMode,
       displayFallback: this._displayFallback,
       visible: this._window?.isVisible() ?? false,
@@ -100,6 +103,10 @@ export class ResgWindowController {
     })
     bind('setAutoShow', async (value) => {
       await this._service.set('autoShow', z.boolean().parse(value))
+      return this.getSnapshot()
+    })
+    bind('setAlwaysOnTop', async (value) => {
+      await this.setAlwaysOnTop(z.boolean().parse(value))
       return this.getSnapshot()
     })
     bind('setDisplayMode', async (value) => {
@@ -172,6 +179,7 @@ export class ResgWindowController {
     this._autoShown = true
     if (this._window) {
       if (this._window.isMinimized()) this._window.restore()
+      this._window.setAlwaysOnTop(this.settings.alwaysOnTop)
       focus ? this._window.show() : this._window.showInactive()
       return this._publish()
     }
@@ -204,6 +212,7 @@ export class ResgWindowController {
         partition: 'mgs-resg-shell'
       }
     }))
+    win.setAlwaysOnTop(this.settings.alwaysOnTop)
     const view = (this._view = new WebContentsView({
       webPreferences: {
         sandbox: true,
@@ -249,6 +258,10 @@ export class ResgWindowController {
       }
       if (url === 'mgs-resg:browser')
         void shell.openExternal(RESG_HOME).catch(() => this._fail('page-unavailable'))
+      if (url === 'mgs-resg:toggle-pin')
+        void this.setAlwaysOnTop(!this.settings.alwaysOnTop).catch(() => {
+          this._context.logger.warn('RESG always-on-top preference was not saved')
+        })
     })
     const resize = () => {
       const [width, height] = win.getContentSize()
@@ -289,6 +302,14 @@ export class ResgWindowController {
     this._publish()
     // While navigating, the latest preference is applied before revealing the hero.
     this._scheduleDisplay()
+  }
+
+  async setAlwaysOnTop(value: boolean) {
+    await this._service.set('alwaysOnTop', z.boolean().parse(value))
+    if (this._window && !this._window.isDestroyed()) {
+      this._window.setAlwaysOnTop(this.settings.alwaysOnTop)
+    }
+    this._publish()
   }
 
   private _scheduleDisplay() {
@@ -459,9 +480,10 @@ export class ResgWindowController {
       <style>body{margin:0;font:14px system-ui;background:${dark ? '#111' : '#fff'};color:${dark ? '#eee' : '#172033'}}
       header{height:42px;box-sizing:border-box;padding:10px;display:flex;gap:14px;align-items:center}
       span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}a{color:${dark ? '#fbbf24' : '#1d4ed8'}}
-      a:focus-visible{outline:2px solid currentColor;outline-offset:3px}p{margin:32px;line-height:1.6}</style>
+      a:focus-visible{outline:2px solid currentColor;outline-offset:3px}a[aria-pressed=true]{font-weight:700;color:${dark ? '#111' : '#fff'};background:${dark ? '#fbbf24' : '#2563eb'};padding:4px 7px;border-radius:4px}p{margin:32px;line-height:1.6}</style>
       <header><span role="status">${escape(title)}</span><a href="mgs-resg:retry">${english ? 'Retry' : '重试'}</a>
-      <a href="mgs-resg:browser">${english ? 'Browser' : '浏览器'}</a></header>
+      <a href="mgs-resg:browser">${english ? 'Browser' : '浏览器'}</a>
+      <a href="mgs-resg:toggle-pin" aria-pressed="${this.settings.alwaysOnTop}">${this.settings.alwaysOnTop ? english ? 'On top' : '始终置顶' : english ? 'Keep on top' : '置顶'}</a></header>
       <nav aria-label="${english ? 'Data display' : '数据展示'}">
       <a href="mgs-resg:display-all" aria-current="${this.settings.displayMode === 'all'}">${english ? 'All data' : '全部数据'}</a>
       <a href="mgs-resg:display-compact" aria-current="${this.settings.displayMode === 'compact'}">${english ? 'Popular picks' : '常用精选'}</a>

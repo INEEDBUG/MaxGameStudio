@@ -438,7 +438,9 @@ export default function SettingsPage() {
         const { data } = await API.get("config");
         if (!cancelled) {
           setConfig(data);
-          void desktopBridge?.setCloseAction(normalizeDesktopCloseAction(data.close_action, data.close_to_tray));
+          const closeAction = normalizeDesktopCloseAction(window.localStorage.getItem("maxgamestudio.close.action") || data.close_action, data.close_to_tray);
+          setConfig({ ...data, close_action: closeAction });
+          void desktopBridge?.setCloseAction(closeAction);
         }
       } catch (e) {
         if (!cancelled) console.error("Failed to load config:", e);

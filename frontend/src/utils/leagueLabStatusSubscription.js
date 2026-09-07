@@ -1,10 +1,13 @@
 import { fetchLeagueLabStatus } from "../api/leagueLabApi";
+import { invoke } from "@tauri-apps/api/core";
+import { isDesktopApp } from "../desktop/desktopBridge.js";
 
 // League's desktop helpers all need the same small status snapshot. Keeping
 // one poller here prevents the Mini, shortcut, and auxiliary managers from
 // opening four independent request loops while preserving the Mini's 1.5 s
-// freshness requirement.
-const POLL_INTERVAL_MS = 1500;
+// freshness requirement. Native process enumeration is cheap, but use a
+// slightly wider desktop interval to avoid needless ToolHelp snapshots.
+const POLL_INTERVAL_MS = isDesktopApp ? 3000 : 1500;
 
 let snapshot = null;
 let pollTimer = null;
@@ -25,7 +28,10 @@ function notify(next) {
 async function poll() {
   const currentGeneration = generation;
   if (inFlight?.generation === currentGeneration) return inFlight.promise;
-  const promise = fetchLeagueLabStatus()
+  const statusRequest = isDesktopApp
+    ? invoke("detect_league_client")
+    : fetchLeagueLabStatus();
+  const promise = statusRequest
     .then((next) => {
       if (currentGeneration !== generation || listeners.size === 0) return null;
       snapshot = next;

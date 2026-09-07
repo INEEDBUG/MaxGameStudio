@@ -26,7 +26,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
   const isAvailable = status === "available";
   const isUpdating = status === "downloading" || status === "installing";
   const forceLocked =
-    isUpdating ||
+    isUpdating || status === "cancelling" ||
     (isForce && isAvailable);
 
   let body = null;
@@ -74,6 +74,8 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
     );
   } else if (status === "installing") {
     body = <p className="text-sm text-zinc-300">{t("dialog.updateInstalling")}</p>;
+  } else if (status === "cancelling") {
+    body = <p className="text-sm text-zinc-300">{t("dialog.updateCancelling")}</p>;
   } else if (status === "cancelled") {
     body = <p className="text-sm text-zinc-300">{t("dialog.updateCancelled")}</p>;
   }
@@ -113,7 +115,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
               ) : null}
             </p>
           ) : null}
-          <p className="mt-1 text-[10px] text-zinc-500">{t("dialog.updateViaCloudflare")}</p>
+          <p className="mt-1 text-[10px] text-zinc-500">{t("dialog.updateViaCloudflare")} · GitHub</p>
         </div>
         <div className="max-h-[45vh] overflow-y-auto px-4 py-3">
           {body}
@@ -143,6 +145,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
           ) : null}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-4 py-2">
+          {status === "downloading" && !isForce && <button type="button" title={t("dialog.updateStopHint")} onClick={() => onCancel?.()} className="min-h-9 rounded-md border border-white/20 px-3 text-xs text-white focus-visible:ring-2 focus-visible:ring-cs2-orange">{t("dialog.updateStop")}</button>}
           {isAvailable ? (
             <>
               {!isForce ? (

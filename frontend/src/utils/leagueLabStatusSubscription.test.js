@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchLeagueLabStatus } from "../api/leagueLabApi";
 import { getLeagueLabStatusSnapshot, subscribeLeagueLabStatus } from "./leagueLabStatusSubscription";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("../desktop/desktopBridge.js", () => ({ isDesktopApp: false }));
+
 vi.mock("../api/leagueLabApi", () => ({
   fetchLeagueLabStatus: vi.fn(),
 }));
@@ -63,6 +66,23 @@ describe("leagueLabStatusSubscription", () => {
 
     expect(listener).toHaveBeenLastCalledWith(null);
     expect(getLeagueLabStatusSnapshot()).toBeNull();
+    unsubscribe();
+  });
+
+  it("uses native process detection in the desktop app", async () => {
+    vi.resetModules();
+    vi.doMock("../desktop/desktopBridge.js", () => ({ isDesktopApp: true }));
+    const { invoke } = await import("@tauri-apps/api/core");
+    invoke.mockResolvedValue({ connected: true, client_window_detected: true, client_pid: 4321 });
+    const { subscribeLeagueLabStatus: subscribeDesktop } = await import("./leagueLabStatusSubscription");
+    const listener = vi.fn();
+    const unsubscribe = subscribeDesktop(listener);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledWith("detect_league_client");
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ client_pid: 4321 }));
+    expect(fetchLeagueLabStatus).not.toHaveBeenCalled();
     unsubscribe();
   });
 });

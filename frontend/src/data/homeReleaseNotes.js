@@ -1,33 +1,15 @@
-// Bundled offline notes; keep in sync with docs/update-notes/v3.1.3.json.
-export const HOME_RELEASE_VERSION = "3.1.3";
+// Bundled offline notes; keep in sync with docs/update-notes/v3.1.4.json.
+export const HOME_RELEASE_VERSION = "3.1.4";
 export const SUPERSEDED_LOCAL_CANDIDATE_VERSION = "3.0.6";
 export const HOME_RELEASE_NOTES = {
-  "zh": {
-    "fixed": [
-      "英雄联盟工作台关闭时可选择隐藏到系统托盘，不再缩到任务栏；点击托盘图标可恢复窗口。"
-    ],
-    "added": [
-      "新增独立 RESG 数据窗口，仅在海克斯大乱斗中跟随当前选择或换选的英雄，开关与 OP.GG 相互独立。",
-      "RESG 窗口可切换全部数据与常用精选，并自动记住选择；精选展示各品质热门海克斯和各出装阶段的前 3 项。"
-    ],
-    "optimized": [
-      "海克斯按场次、装备组合按采用率排序，保留胜率和样本量，不把场次冒充选取率。",
-      "保留完整数据入口，支持深浅色主题；网站数据不适配时回退到原页面。",
-      "手动关闭 RESG 后不会因换英雄反复弹出；普通大乱斗及其他模式不会启用该窗口。"
-    ]
+  zh: {
+    fixed: ["后端启动失败不再关闭整个软件，可返回首页或英雄联盟。"],
+    added: ["RESG 数据窗口新增可记忆的置顶开关，窗口管理中的设置同步生效。", "首页可直接检查更新，无需启动 Python 后端。"],
+    optimized: ["后端改为按需启动：首页与英雄联盟入口不再等待 Python，依赖后端的页面首次使用时才启动服务。", "从英雄联盟返回主程序不再等待后端启动，切换页面不会中断已有后台任务。", "保留 GitHub 更新与签名校验，改善超时和取消安装提示；不接入付费国内加速服务。"],
   },
-  "en": {
-    "fixed": [
-      "Closing the League workspace can hide it to the system tray instead of the taskbar. Click its tray icon to restore it."
-    ],
-    "added": [
-      "An independent RESG window follows champion selections and swaps in Hextech ARAM only. OP.GG remains independently configurable.",
-      "Switch between All data and remembered Popular picks, showing up to three augments per tier and three combinations per build stage."
-    ],
-    "optimized": [
-      "Augments are ranked by sample count and equipment by adoption rate. Win rates and sample sizes remain visible; no pick percentages are invented.",
-      "Supports light and dark compact views, with the original page available as a fallback.",
-      "Manually closing RESG suppresses repeated swap popups. Ordinary ARAM and other game modes do not enable it."
-    ]
-  }
+  en: {
+    fixed: ["Backend startup failures no longer close the application. Home and League remain available."],
+    added: ["RESG has a remembered Keep on top toggle, synchronized with window settings.", "Check updates directly from Home without starting Python."],
+    optimized: ["Python starts on demand for service-dependent pages, not on Home or League entry.", "Returning from League no longer waits for Python; navigation does not interrupt existing backend jobs.", "GitHub updates retain signature verification with improved timeout and cancellation handling. No paid domestic acceleration service is added."],
+  },
 };

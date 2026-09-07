@@ -53,6 +53,25 @@ describe("normalizeUpdateMode", () => {
   });
 });
 
+it("cancelling a GitHub download prevents installation and closes the resource", async () => {
+  let finish;
+  const update = makeUpdate({ download: vi.fn(() => new Promise((resolve) => { finish = resolve; })) });
+  updaterMocks.check.mockResolvedValue(update);
+  const states = [];
+  const controller = createDesktopUpdateCheck((state) => states.push(state));
+  const run = controller.start();
+  await vi.waitFor(() => expect(states.at(-1)?.status).toBe("available"));
+  controller.confirm();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  controller.cancel();
+  expect(states.at(-1)?.status).toBe("cancelling");
+  finish();
+  await run;
+  expect(update.install).not.toHaveBeenCalled();
+  expect(update.close).toHaveBeenCalledOnce();
+  expect(states.at(-1)?.status).toBe("cancelled");
+});
+
 describe("normalizeUserReleaseNotes", () => {
   it("keeps only non-empty plain-language entries", () => {
     expect(normalizeUserReleaseNotes({ fixed: [" 修复崩溃 ", ""], added: null })).toEqual({

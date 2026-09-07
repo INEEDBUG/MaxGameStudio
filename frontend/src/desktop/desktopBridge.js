@@ -27,9 +27,13 @@ export const desktopBridge = isDesktopApp
         };
       },
       getVersion,
+      ensureBackend: () => invoke("ensure_backend"),
       setCloseToTray: (enabled) => invoke("set_close_to_tray", { enabled: Boolean(enabled) }),
       getCloseToTray: () => invoke("get_close_to_tray"),
-      setCloseAction: (action) => invoke("set_close_action", { action }),
+      async setCloseAction(action) {
+        await invoke("set_close_action", { action });
+        try { window.localStorage.setItem("maxgamestudio.close.action", action); } catch { /* unavailable storage */ }
+      },
       getCloseAction: () => invoke("get_close_action"),
       hideToTray: () => invoke("hide_to_tray"),
       quitApp: () => invoke("quit_app"),

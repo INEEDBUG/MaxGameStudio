@@ -23,6 +23,7 @@ describe("League runtime launch coordinator", () => {
 
   test("derives a non-sensitive client session key and supports window-only detection", () => {
     expect(leagueClientSessionId({ connected: true, client_pid: 1234 })).toBe("pid:1234");
+    expect(leagueClientSessionId({ connected: false, client_process_detected: true, client_pid: 1235 })).toBe("pid:1235");
     expect(leagueClientSessionId({ connected: false, client_window_detected: true })).toBe("window");
     expect(leagueClientSessionId({ connected: false, client_window_detected: false })).toBe("");
   });

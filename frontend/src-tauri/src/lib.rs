@@ -19,10 +19,10 @@ use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 mod desktop_storage;
+mod league_client_detection;
 mod league_runtime;
 
 pub fn desktop_logs_dir() -> Option<PathBuf> {
@@ -624,6 +624,7 @@ async fn sync_league_ongoing(
 }
 
 struct BackendProcess {
+    operation: Mutex<()>,
     child: Mutex<Option<ManagedBackend>>,
     session_token: String,
 }
@@ -739,6 +740,7 @@ fn request_app_exit(handle: &AppHandle) {
 impl BackendProcess {
     fn new() -> Result<Self, String> {
         Ok(Self {
+            operation: Mutex::new(()),
             child: Mutex::new(None),
             session_token: new_session_token()?,
         })
@@ -782,6 +784,17 @@ fn new_session_token() -> Result<String, String> {
 #[tauri::command]
 fn backend_session_token(state: State<'_, BackendProcess>) -> String {
     state.session_token.clone()
+}
+
+#[tauri::command]
+fn read_shell_preferences() -> serde_json::Value {
+    let config = desktop_storage::directory("data")
+        .ok()
+        .and_then(|root| fs::read(root.join("cs2-insight.config.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .unwrap_or_default();
+    // Only return non-sensitive shell settings, never the complete config.
+    serde_json::json!({"locale": config["locale"], "close_action": config["close_action"], "close_to_tray": config["close_to_tray"]})
 }
 
 #[tauri::command]
@@ -862,7 +875,19 @@ fn append_desktop_log(logs_dir: &Path, message: &str) {
     }
 }
 
+#[tauri::command]
+async fn ensure_backend(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || start_backend(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<BackendProcess>();
+    let _operation = state
+        .operation
+        .lock()
+        .map_err(|_| "后端生命周期锁已损坏".to_string())?;
     if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
         return Err("MaxGameStudio 正在退出，已取消后端启动".to_string());
     }
@@ -1020,6 +1045,9 @@ pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
 
 pub(crate) fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
+    let Ok(_operation) = state.operation.lock() else {
+        return;
+    };
     let session_token = state.session_token.clone();
     let Ok(mut guard) = state.child.lock() else {
         return;
@@ -1125,6 +1153,9 @@ pub fn run() {
             desktop_storage::cancel_desktop_storage_change,
             read_legacy_ui_state,
             backend_session_token,
+            read_shell_preferences,
+            ensure_backend,
+            league_client_detection::detect_league_client,
             set_close_to_tray,
             get_close_to_tray,
             set_close_action,
@@ -1182,33 +1213,8 @@ pub fn run() {
             }
             tray.build(app)?;
 
-            // Start the backend on a worker thread so the window (and its
-            // "connecting to backend" splash) appears immediately instead of
-            // after the Python process answers HTTP.
-            let handle = app.handle().clone();
-            thread::spawn(move || {
-                if let Err(error) = start_backend(&handle) {
-                    // Closing during startup deliberately cancels readiness.
-                    // The exit path owns cleanup; do not show a failure dialog
-                    // for that normal cancellation or issue a competing exit.
-                    if handle
-                        .state::<AppLifecycle>()
-                        .quitting
-                        .load(Ordering::SeqCst)
-                    {
-                        return;
-                    }
-                    handle
-                        .dialog()
-                        .message(format!(
-                            "{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。"
-                        ))
-                        .title("MaxGameStudio — 后端启动失败")
-                        .kind(MessageDialogKind::Error)
-                        .blocking_show();
-                    handle.exit(1);
-                }
-            });
+            // Python is started only by ensure_backend when a service route
+            // is opened. A failure must not close the independent shell.
             Ok(())
         })
         .build(context)
@@ -1490,13 +1496,23 @@ mod tests {
     #[test]
     fn cancelling_startup_does_not_show_backend_failure() {
         let source = include_str!("lib.rs");
-        let (_, handler) = source
-            .split_once("if let Err(error) = start_backend(&handle) {")
-            .unwrap();
-        let (before_dialog, _) = handler.split_once(".dialog()").unwrap();
-        let compact: String = before_dialog.split_whitespace().collect();
-        assert!(compact
-            .contains("ifhandle.state::<AppLifecycle>().quitting.load(Ordering::SeqCst){return;}"));
+        let setup = source
+            .split_once(".setup(|app|")
+            .unwrap()
+            .1
+            .split_once(".build(context)")
+            .unwrap()
+            .0;
+        assert!(!setup.contains("start_backend("));
+        let command = source
+            .split_once("async fn ensure_backend")
+            .unwrap()
+            .1
+            .split_once("pub(crate) fn start_backend")
+            .unwrap()
+            .0;
+        assert!(!command.contains(".exit("));
+        assert!(!command.contains(".dialog("));
     }
 
     #[test]

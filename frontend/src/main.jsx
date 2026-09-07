@@ -8,6 +8,14 @@ async function configureDesktopSession() {
     import("./api/api.js"),
   ]);
   setDesktopSessionToken(await invoke("backend_session_token"));
+  const [{ useLocaleStore }, { normalizeDesktopCloseAction }] = await Promise.all([
+    import("./i18n/localeStore.js"), import("./utils/desktopCloseAction.js"),
+  ]);
+  const prefs = await invoke("read_shell_preferences");
+  if (prefs?.locale) useLocaleStore.getState().hydrate(prefs.locale);
+  let savedAction = null;
+  try { savedAction = window.localStorage.getItem("maxgamestudio.close.action"); } catch { /* optional */ }
+  await invoke("set_close_action", { action: normalizeDesktopCloseAction(savedAction || prefs?.close_action, prefs?.close_to_tray) });
 }
 
 function showBootFailure(error) {

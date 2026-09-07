@@ -1,6 +1,6 @@
-import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
+import { boundedUpdateCheck } from "./updateSourceCheck";
 
 /** Tauri 桌面壳注入 IPC 对象；浏览器 / Vite dev 页面无此对象。 */
 export function isTauriDesktop() {
@@ -80,18 +80,9 @@ export function createDesktopUpdateCheck(
     emit({ status: "checking", update_mode: "normal" });
 
     let update = null;
-    let checkTimer = null;
     try {
       const timeoutMs = Math.max(1000, Number(checkTimeoutMs) || 8000);
-      update = await Promise.race([
-        check(),
-        new Promise((_, reject) => {
-          checkTimer = window.setTimeout(
-            () => reject(new Error(`检查更新超时（${Math.round(timeoutMs / 1000)} 秒）`)),
-            timeoutMs,
-          );
-        }),
-      ]);
+      update = await boundedUpdateCheck(timeoutMs);
     } catch (error) {
       emit({
         status: "error",
@@ -100,10 +91,9 @@ export function createDesktopUpdateCheck(
         update_mode: "normal",
       });
       return;
-    } finally {
-      if (checkTimer !== null) window.clearTimeout(checkTimer);
     }
     if (cancelled) {
+      await update?.close().catch(() => {});
       emit({ status: "cancelled", update_mode: "normal" });
       return;
     }
@@ -159,8 +149,11 @@ export function createDesktopUpdateCheck(
     startedDownload = true;
     let total = 0;
     let received = 0;
-    try {
+    const download = async () => {
+      total = 0;
+      received = 0;
       await update.download((event) => {
+        if (cancelled) return;
         if (event.event === "Started") {
           total = Number(event.data?.contentLength) || 0;
           emit({ status: "downloading", ...base, progress: { percent: 0 } });
@@ -172,14 +165,24 @@ export function createDesktopUpdateCheck(
             progress: { percent: total > 0 ? (received / total) * 100 : NaN },
           });
         }
-      });
+      }, { timeout: 600000 });
+    };
+    try {
+      await download();
     } catch (error) {
+      await update.close().catch(() => {});
       emit({
         status: "error",
         ...base,
         error_stage: "download",
         error: String(error?.message || error),
       });
+      return;
+    }
+
+    if (cancelled) {
+      await update.close().catch(() => {});
+      emit({ status: "cancelled", ...base });
       return;
     }
 
@@ -191,6 +194,7 @@ export function createDesktopUpdateCheck(
       // 其他平台或测试环境若返回，则显式重启以载入新版本。
       await relaunch();
     } catch (error) {
+      await update.close().catch(() => {});
       emit({
         status: "error",
         ...base,
@@ -215,6 +219,10 @@ export function createDesktopUpdateCheck(
     },
     cancel: () => {
       cancelled = true;
+      if (startedDownload) {
+        emit({ status: "cancelling", update_mode: updateMode });
+        return true;
+      }
       // Internal replacement checks may cancel a force-update controller; this
       // does not expose a user-visible skip path for the force update itself.
       return resolveChoice("cancel", true);

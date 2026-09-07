@@ -27,6 +27,19 @@
       />
     </SettingsRow>
     <SettingsRow
+      :label="t('settings.multiWindow.resgWindow.alwaysOnTop.label')"
+      :label-description="t('settings.multiWindow.resgWindow.alwaysOnTop.description')"
+      :label-width="400"
+    >
+      <NSwitch
+        size="small"
+        :value="snapshot.alwaysOnTop"
+        :loading="busy"
+        :disabled="busy"
+        @update:value="(value) => updateAlwaysOnTop(value)"
+      />
+    </SettingsRow>
+    <SettingsRow
       :label="t('settings.multiWindow.resgWindow.status.label')"
       :label-description="t('settings.multiWindow.resgWindow.status.description')"
       :label-width="400"
@@ -92,6 +105,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 type ResgSnapshot = {
   enabled: boolean
   autoShow: boolean
+  alwaysOnTop: boolean
   visible: boolean
   available: boolean
   championId: number
@@ -109,6 +123,7 @@ let requestId = 0
 const snapshot = reactive<ResgSnapshot>({
   enabled: false,
   autoShow: true,
+  alwaysOnTop: false,
   visible: false,
   available: false,
   championId: 0,
@@ -141,6 +156,7 @@ const call = async (name: string, ...args: unknown[]) => {
 
 const updateEnabled = (value: boolean) => call('setEnabled', value)
 const updateAutoShow = (value: boolean) => call('setAutoShow', value)
+const updateAlwaysOnTop = (value: boolean) => call('setAlwaysOnTop', value)
 const retry = () => call('retry')
 const show = () => call('show')
 const close = () => call('close')

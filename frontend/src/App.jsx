@@ -50,6 +50,7 @@ import {
   shouldCheckAppUpdates,
 } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
+import { routeNeedsBackend } from "./utils/backendDemand";
 import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
 import { Loader2 } from "lucide-react";
 import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
@@ -141,14 +142,13 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const [backendWaitMs, setBackendWaitMs] = useState(0);
   const [backendConnectError, setBackendConnectError] = useState("");
+  const backendRequired = routeNeedsBackend(location.pathname);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [closeDialogRemember, setCloseDialogRemember] = useState(false);
   const [closeDialogBusy, setCloseDialogBusy] = useState(false);
-  /** 后端就绪后的启动流程：先检查更新，再拉取首页配置检查 */
-  const [startupInitDone, setStartupInitDone] = useState(false);
-  const [startupInitPhase, setStartupInitPhase] = useState(/** @type {"update" | "config" | null} */ (null));
+  // Compatibility for pages reading shell initialization: only service routes wait.
+  const startupInitDone = backendReady;
   const [initialQuickCheckStatus, setInitialQuickCheckStatus] = useState(null);
-  const startupInitStartedRef = useRef(false);
   const startupUpdateWaitRef = useRef(/** @type {(() => void) | null} */ (null));
   const [aiMode, setAiMode] = useState(false);
 
@@ -593,6 +593,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let es = null;
+    if (!backendReady) return undefined;
     let debounce = null;
     const scheduleRefresh = () => {
       if (cancelled) return;
@@ -630,7 +631,7 @@ export default function App() {
         /* ignore */
       }
     };
-  }, [refreshDemoLibrary]);
+  }, [refreshDemoLibrary, backendReady]);
 
   const handleLibraryPageJump = useCallback(() => {
     const raw = libraryJumpDraft.trim();
@@ -1044,15 +1045,22 @@ export default function App() {
   }, [applyCommonParamsFromConfigData]);
 
   useEffect(() => {
+    if (!backendRequired || backendReady) return undefined;
     let cancelled = false;
     const initialize = async () => {
+      setBackendConnectError("");
+      try { await desktopBridge?.ensureBackend(); }
+      catch (error) {
+        if (!cancelled) setBackendConnectError(String(error?.message || error));
+        return;
+      }
       let attempts = 0;
       while (!cancelled) {
         try {
           const { data } = await API.get("config");
           if (cancelled) return;
           useLocaleStore.getState().hydrate(data.locale);
-          const closeAction = normalizeDesktopCloseAction(data.close_action, data.close_to_tray);
+          const closeAction = normalizeDesktopCloseAction(window.localStorage.getItem("maxgamestudio.close.action") || data.close_action, data.close_to_tray);
           await desktopBridge?.setCloseAction(closeAction);
           if (data.obs) {
             const rawPw = data.obs.password ?? "";
@@ -1098,6 +1106,7 @@ export default function App() {
           attempts += 1;
           if (!cancelled && attempts >= 40) {
             setBackendConnectError(String(error?.message || "Backend connection failed"));
+            return;
           }
           await new Promise((resolve) => setTimeout(resolve, attempts < 40 ? 200 : 1000));
         }
@@ -1108,16 +1117,16 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [applyCommonParamsFromConfigData]);
+  }, [applyCommonParamsFromConfigData, backendRequired, backendReady]);
 
   useEffect(() => {
-    if (backendReady) return undefined;
+    if (backendReady || !backendRequired) return undefined;
     const startedAt = performance.now();
     const timer = window.setInterval(() => {
       setBackendWaitMs(performance.now() - startedAt);
     }, 200);
     return () => window.clearInterval(timer);
-  }, [backendReady]);
+  }, [backendReady, backendRequired]);
 
   useEffect(() => {
     if (!desktopBridge) return undefined;
@@ -1145,7 +1154,7 @@ export default function App() {
       if (closeDialogRemember) {
         await desktopBridge.setCloseAction(action);
         try {
-          await API.put("config", desktopCloseActionPayload(action));
+          if (backendReady) await API.put("config", desktopCloseActionPayload(action));
         } catch (error) {
           // Closing the app must still work if persistence briefly fails.
           console.error("Failed to remember desktop close choice", error);
@@ -1161,7 +1170,7 @@ export default function App() {
     } finally {
       setCloseDialogBusy(false);
     }
-  }, [closeDialogBusy, closeDialogRemember]);
+  }, [closeDialogBusy, closeDialogRemember, backendReady]);
 
   const refreshConfigBackupStatus = useCallback(async () => {
     setConfigBackupLoading(true);
@@ -1184,19 +1193,20 @@ export default function App() {
   }, [t]);
 
   useEffect(() => {
+    if (!backendReady) return;
     void refreshConfigBackupStatus();
-  }, [refreshConfigBackupStatus]);
+  }, [refreshConfigBackupStatus, backendReady]);
 
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
   useEffect(() => {
     // 后端就绪后再拉库，避免启动阶段请求失败导致进 Demo 库需手动回车刷新
-    if (!startupInitDone) return;
+    if (!backendReady) return;
     void refreshDemoLibrary(libraryPage, { manageLoading: false });
-  }, [refreshDemoLibrary, libraryPage, startupInitDone]);
+  }, [refreshDemoLibrary, libraryPage, backendReady]);
 
   useEffect(() => {
-    if (!startupInitDone) return;
+    if (!backendReady) return;
     const timer = window.setTimeout(() => {
       const next = librarySearchInput.trim();
       if (next === librarySearchQ) return;
@@ -1205,7 +1215,7 @@ export default function App() {
       void refreshDemoLibraryRef.current(1, { manageLoading: false, searchQ: next });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [librarySearchInput, librarySearchQ, startupInitDone]);
+  }, [librarySearchInput, librarySearchQ, backendReady]);
 
   const hasLibraryAdvancedFilters = useMemo(() => {
     const f = libraryAdvFilters;
@@ -2925,7 +2935,7 @@ export default function App() {
   const markUpdateChecked = useCallback(async () => {
     const checkedAt = new Date().toISOString();
     try {
-      await API.put("config", { last_update_check_at: checkedAt });
+      window.localStorage.setItem("maxgamestudio.update.last_check", checkedAt);
     } catch {
       // ignore persistence failures
     }
@@ -2939,7 +2949,7 @@ export default function App() {
     // 自动安装开始后不可关闭弹窗；force 更新在确认阶段也不可跳过。
     if (
       st === "downloading" ||
-      st === "installing" ||
+      st === "installing" || st === "cancelling" ||
       ((isForce || isAutoInstall) && st === "available" && !awaitingChoice)
     ) {
       return;
@@ -3160,47 +3170,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!backendReady || startupInitStartedRef.current) return;
-    startupInitStartedRef.current = true;
-
-    let cancelled = false;
-    const runStartupInit = async () => {
-      try {
-        if ((await shouldCheckAppUpdates())) {
-          setStartupInitPhase("update");
-          await fetchUpdateInfo({ manual: false, awaitDismiss: true });
-          if (cancelled) return;
-        }
-
-        setStartupInitPhase("config");
-        try {
-          const { data } = await API.get("/config/quick-check");
-          if (!cancelled) setInitialQuickCheckStatus(data);
-        } catch {
-          if (!cancelled) setInitialQuickCheckStatus(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setStartupInitPhase(null);
-          setStartupInitDone(true);
-        }
-      }
-    };
-
-    void runStartupInit();
-    return () => {
-      cancelled = true;
-    };
-  }, [backendReady, fetchUpdateInfo]);
+    // Deferred and cancellable on StrictMode remount; never blocks navigation.
+    const timer = window.setTimeout(() => {
+      void fetchUpdateInfo({ manual: false, awaitDismiss: false });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [fetchUpdateInfo]);
 
   useEffect(() => {
-    if (!startupInitDone) return undefined;
+    if (!backendReady) return;
+    let cancelled = false;
+    void API.get("/config/quick-check").then(({ data }) => {
+      if (!cancelled) setInitialQuickCheckStatus(data);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [backendReady]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       if (updateModalOpen) return;
       void fetchUpdateInfo({ manual: false, awaitDismiss: false });
     }, AUTO_UPDATE_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [startupInitDone, updateModalOpen, fetchUpdateInfo]);
+  }, [updateModalOpen, fetchUpdateInfo]);
 
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
@@ -3393,7 +3385,7 @@ export default function App() {
       <div className="app-shell relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
         <LeagueRuntimeAutoManager />
         <CustomTitleBar />
-        <DemoDownloadActivityCenter />
+        {backendReady && <DemoDownloadActivityCenter />}
         <DesktopCloseDialog
           open={closeDialogOpen}
           busy={closeDialogBusy}
@@ -3416,7 +3408,7 @@ export default function App() {
             disabled={batchRecording}
           />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
-            {!isStandalonePreview && (!backendReady ? (
+            {!isStandalonePreview && backendRequired && (!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
                   <div className="relative">
@@ -3436,7 +3428,7 @@ export default function App() {
                       Attempting to connect: {BACKEND_CONNECT_LABEL}
                     </span>
                   </div>
-                  {backendWaitMs >= 8000 && (
+                  {(backendConnectError || backendWaitMs >= 8000) && (
                     <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                       <p className="text-xs leading-5 text-amber-300/90">
                         {backendConnectError || t("app.backendTakingLonger")}
@@ -3452,26 +3444,12 @@ export default function App() {
                   )}
                 </div>
               </div>
-            ) : !startupInitDone ? (
-              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
-                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
-                  <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
-                  <div className="flex flex-col items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight text-dynamic-white">
-                      {startupInitPhase === "config"
-                        ? t("app.startupCheckingConfig")
-                        : t("app.startupCheckingUpdate")}
-                    </h2>
-                    <p className="text-sm text-dynamic-zinc-400">{t("app.startupPleaseWait")}</p>
-                  </div>
-                </div>
-              </div>
             ) : null)}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
+              {(!backendRequired || backendReady) && <Routes>
+                <Route path="/" element={<HomePage onCheckUpdates={() => void fetchUpdateInfo({ manual: true })} />} />
                 <Route path="/cs2" element={<Navigate to="/cs2/guide" replace />} />
                 <Route path="/cs2/guide" element={<GuidePage />} />
                 <Route path="/cs2/library" element={<DemoLibraryPage />} />
@@ -3518,7 +3496,7 @@ export default function App() {
                 <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
                 <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              </Routes>}
               </Suspense>
             </div>
           </main>
