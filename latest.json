@@ -1,17 +1,18 @@
 {
-  "version": "0.0.0",
-  "notes": "Updates temporarily paused while the installer upgrade path is being repaired.",
-  "pub_date": "2026-09-07T19:12:16.229Z",
+  "version": "3.1.4",
+  "notes": "3.1.4 修复安装包：更新前确认原安装目录，避免桌面仍打开旧版。已显示 3.1.4 的用户可从 Release 手动下载安装。",
+  "pub_date": "2026-09-07T21:25:29.543Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3Q5YVdoaUREdklYNmMzTHh5NC9ndW1mL0V4Rm1sNVlBVGxGU2lTQlQ1Y1VIYlpYU0J5T2VpOERHRE8wSE5kam9nbW5nTEtTeG5EbTY0Tm9McTBpQ1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODA4MzI5CWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuNF94NjQtc2V0dXAuZXhlCld2TnpNbWgzSVc4Y1NXZldJaHd6WVM4OXNERHpXNDNXV3BMTmVNTitTNWFVSXVLKzRhU1NyZnNnTlBKbkR2SUUwUHNDSWZPc3lIZmtaTS9lZWRxUkJ3PT0K",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3J1VnNCWXczVjdIcDVYN294Y1c3UFhFMzVkcEFmZjc0ZnVIWUJCdDRqRjlneU5NNXpNaW1BSzB5THJ6SkZxTkxZcW1Bd09LeGJYejJKT0JDYXBjbndVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODE0ODMxCWZpbGU6TWF4R2FtZVN0dWRpb18zLjEuNF94NjQtc2V0dXAuZXhlCnFZa2txaEY0S0ZRMFc5YWU4eGI2SHhOZ25ESlpxckVoU2ZNamk4SnJPTzM5cnJ1WjdWQ1hXMmdldURuOUhzMkdFQTB2b3k1RitVRTM2UlRCSnhERER3PT0K",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe"
     }
   },
   "user_release_notes": {
     "version": "3.1.4",
     "fixed": [
+      "修复更新安装目录保护：复制前重新确认原安装位置，位置无效就停止，避免更新后桌面仍打开旧版。",
       "后端启动失败不再关闭整个软件，可返回首页或英雄联盟。"
     ],
     "added": [
