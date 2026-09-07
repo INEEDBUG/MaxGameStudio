@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_run_id:
-        description: Successful Release Windows candidate run ID (version 3.1.4)
+        description: Candidate run ID, or published-3.1.4 for the original release baseline
         required: true
 permissions:
   contents: read
@@ -20,6 +20,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
         run: |
+          if ($env:CANDIDATE_RUN_ID -eq 'published-3.1.4') {
+            gh release download v3.1.4 --repo $env:GITHUB_REPOSITORY --pattern MaxGameStudio_3.1.4_x64-setup.exe --dir candidate
+            if ($LASTEXITCODE -ne 0) { throw 'Published baseline download failed' }
+            exit 0
+          }
           if ($env:CANDIDATE_RUN_ID -notmatch '^\d+$') { throw 'Invalid candidate run ID' }
           $run = gh run view $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName | ConvertFrom-Json
           if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or $run.workflowName -ne 'Release Windows') { throw 'Candidate is not a successful manual Release Windows build.' }

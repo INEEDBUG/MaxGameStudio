@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
   throw 'Packaged upgrade acceptance is restricted to ephemeral GitHub-hosted runners.'
 }
+Write-Host ("Installer SHA256: " + (Get-FileHash -LiteralPath $Installer).Hash)
 $productKey = 'HKCU:\Software\cs2insightagent\MaxGameStudio'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio'
 if ((Test-Path $productKey) -or (Test-Path $uninstallKey)) { throw 'Runner already contains a product registration; refusing to overwrite it.' }
