@@ -1,6 +1,6 @@
 {
-  "version": "3.1.4",
-  "notes": "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。",
+  "version": "0.0.0",
+  "notes": "Updates temporarily paused while the installer upgrade path is being repaired.",
   "pub_date": "2026-09-07T19:12:16.229Z",
   "update_mode": "normal",
   "platforms": {
