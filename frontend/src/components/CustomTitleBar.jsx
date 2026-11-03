@@ -22,7 +22,7 @@ export default function CustomTitleBar() {
 
   return (
     <div
-      className="z-50 flex h-11 w-full shrink-0 items-center justify-between border-b border-cs2-border-subtle bg-cs2-bg-sidebar/88 text-cs2-text-primary backdrop-blur-2xl"
+      className="mgs-glass-titlebar z-50 flex h-11 w-full shrink-0 items-center justify-between border-b border-cs2-border-subtle text-cs2-text-primary"
       data-tauri-drag-region
       data-testid="custom-titlebar"
     >

@@ -84,6 +84,7 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
     final_round_end_tick: finalRoundEndTick,
     server_name: matchMeta?.server_name || "",
     all_players: matchMeta?.all_players || [],
+    ...(queueItem.appearance ? {appearance: JSON.parse(JSON.stringify(queueItem.appearance))} : {}),
   };
 }
 

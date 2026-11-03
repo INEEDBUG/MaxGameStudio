@@ -22,6 +22,25 @@ describe("SidebarNav", () => {
     window.localStorage.clear();
   });
 
+  test("groups CS tools and exposes a lightweight workspace landing", () => {
+    const { container } = render(<MemoryRouter initialEntries={["/cs2"]}><SidebarNav /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: "csWorkspace.title" }).getAttribute("href")).toBe("/cs2");
+    for (const section of ["analysis", "production", "tools"]) {
+      expect(screen.getByRole("group", { name: `csWorkspace.${section}.title` })).toBeTruthy();
+    }
+    expect(container.querySelector("aside").className).not.toContain("backdrop-blur");
+  });
+
+  test("disabled recording links cannot be activated with keyboard clicks", () => {
+    render(<MemoryRouter initialEntries={["/cs2"]}><SidebarNav disabled /></MemoryRouter>);
+    const queue = screen.getByRole("link", { name: "nav.recordQueue 0" });
+    expect(queue.getAttribute("aria-disabled")).toBe("true");
+    expect(queue.tabIndex).toBe(-1);
+    fireEvent.click(queue);
+    expect(queue.getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("link", { name: "csWorkspace.title" }).getAttribute("aria-current")).toBe("page");
+  });
+
   test("keeps the official demo downloader reachable after onboarding", () => {
     render(
       <MemoryRouter>

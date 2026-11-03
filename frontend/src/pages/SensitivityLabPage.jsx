@@ -198,7 +198,7 @@ export default function SensitivityLabPage() {
         </header>
 
         <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-          <section ref={setupRef} className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
+          <section ref={setupRef} className="mgs-readable-content mgs-glass-card rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
             <div className="flex items-center gap-2">
               <Mouse className="h-5 w-5 text-cs2-orange" />
               <h2 className="text-base font-bold text-cs2-text-primary">{t("training.setupTitle")}</h2>
@@ -292,7 +292,7 @@ export default function SensitivityLabPage() {
             </button>
           </section>
 
-          <section className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
+          <section className="mgs-readable-content mgs-glass-card rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
             <div className="flex items-center gap-2">
               <Gauge className="h-5 w-5 text-cs2-accent" />
               <h2 className="text-base font-bold text-cs2-text-primary">{t("training.howTitle")}</h2>
@@ -322,11 +322,11 @@ export default function SensitivityLabPage() {
         </div>
 
         {result && (
-          <section ref={resultRef} className="scroll-mt-5 rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.10] to-cs2-bg-card p-5">
+          <section ref={resultRef} className="mgs-readable-content scroll-mt-5 rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.10] to-cs2-bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">{t("training.resultTitle")}</div>
-                <div className="mt-2 font-mono text-5xl font-bold tracking-tight text-white">{result.recommended_sensitivity}</div>
+                <div className="mt-2 font-mono text-5xl font-bold tracking-tight text-cs2-text-primary">{result.recommended_sensitivity}</div>
                 <div className="mt-1 text-xs text-cs2-text-muted">CS2 sensitivity</div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -395,7 +395,7 @@ export default function SensitivityLabPage() {
         )}
 
         {history.length > 0 && (
-          <section className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
+          <section className="mgs-glass-card rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
             <div className="flex items-center gap-2"><History className="h-4 w-4 text-cs2-text-muted" /><h2 className="text-sm font-bold text-cs2-text-primary">{t("training.historyTitle")}</h2></div>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-left text-xs">

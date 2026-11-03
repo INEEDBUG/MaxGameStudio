@@ -51,9 +51,8 @@ export default function HomePage({ onCheckUpdates }) {
   ];
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-5 py-7 sm:px-8" aria-labelledby="home-title">
-      <section className="relative overflow-hidden rounded-3xl border border-cs2-border/70 bg-cs2-bg-card p-6 shadow-[var(--cs2-shadow-md)] sm:p-8">
-        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-cs2-accent/10 blur-3xl" />
+    <section className="mx-auto min-h-0 w-full max-w-6xl flex-1 overflow-y-auto px-5 py-7 sm:px-8" aria-labelledby="home-title">
+      <section className="mgs-glass-card mgs-home-surface relative overflow-hidden rounded-3xl border border-cs2-border/70 bg-cs2-bg-card p-6 shadow-[var(--cs2-shadow-md)] sm:p-8">
         <div className="relative flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-cs2-accent">MaxGameStudio</p>
@@ -67,7 +66,7 @@ export default function HomePage({ onCheckUpdates }) {
         </div>
       </section>
 
-      <section className="mt-5 rounded-2xl border border-cs2-border/70 bg-cs2-bg-card p-5 sm:p-6" aria-labelledby="home-release-title">
+      <section className="mgs-glass-card mt-5 rounded-2xl border border-cs2-border/70 bg-cs2-bg-card p-5 sm:p-6" aria-labelledby="home-release-title">
         {onCheckUpdates && <details className="mb-4 rounded-lg border border-cs2-border p-3 text-xs text-cs2-text-primary">
           <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-cs2-accent">{t("settings.checkUpdateBtn")}</summary>
           <button type="button" onClick={onCheckUpdates} className="mt-2 rounded-md border border-cs2-border px-3 py-2 hover:border-cs2-accent focus-visible:ring-2 focus-visible:ring-cs2-accent">{t("settings.checkUpdateBtn")}</button>
@@ -90,6 +89,6 @@ export default function HomePage({ onCheckUpdates }) {
           <button type="button" onClick={() => openExternal(REPO)} className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-cs2-border px-3.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent"><Sparkles className="h-4 w-4" aria-hidden="true" />{t("home.viewRepository")}</button>
         </div>
       </section>
-    </main>
+    </section>
   );
 }

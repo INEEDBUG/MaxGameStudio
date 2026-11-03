@@ -149,7 +149,7 @@ export default function MagneticInputLabPage() {
 
         {!activeTest && phase !== "result" && (
           <div className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
-            <section className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
+            <section className="mgs-readable-content mgs-glass-card rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
               <div className="flex items-center gap-2"><Keyboard className="h-5 w-5 text-violet-300" /><h2 className="font-bold text-cs2-text-primary">{t("inputLab.setupTitle")}</h2></div>
               <label className="mt-4 block"><span className="mb-1.5 block text-xs font-semibold text-cs2-text-secondary">{t("inputLab.keyboardName")}</span><input value={setup.keyboard_name} onChange={(event) => setSetup((value) => ({ ...value, keyboard_name: event.target.value }))} className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2.5 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent" /></label>
               <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -163,7 +163,7 @@ export default function MagneticInputLabPage() {
               {error && <div className="mt-3 rounded-lg border border-cs2-fail/30 bg-cs2-fail/10 px-3 py-2 text-xs text-cs2-fail">{error}</div>}
               <button type="button" onClick={begin} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-400 px-4 py-3 text-sm font-bold text-black transition-transform duration-150 active:scale-[0.98]"><Activity className="h-4 w-4" />{t("inputLab.start")}</button>
             </section>
-            <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-5">
+            <section className="mgs-readable-content rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-5">
               <div className="flex items-center gap-2 text-amber-200"><AlertTriangle className="h-5 w-5" /><h2 className="font-bold">{t("inputLab.limitTitle")}</h2></div>
               <p className="mt-3 text-xs leading-6 text-amber-100/80">{t("inputLab.limitBody")}</p>
               <div className="mt-4 space-y-2 text-xs text-cs2-text-secondary"><p>• {t("inputLab.measure1")}</p><p>• {t("inputLab.measure2")}</p><p>• {t("inputLab.measure3")}</p></div>
@@ -172,9 +172,9 @@ export default function MagneticInputLabPage() {
         )}
 
         {activeTest && (
-          <section className="rounded-2xl border border-violet-400/30 bg-cs2-bg-card p-6 text-center">
+          <section className="mgs-readable-content rounded-2xl border border-violet-400/30 bg-cs2-bg-card p-6 text-center">
             <div className="text-xs font-bold uppercase tracking-[0.2em] text-violet-300">{phase === "countdown" ? t("inputLab.getReady") : phase === "analyzing" ? t("inputLab.analyzing") : t("inputLab.recording")}</div>
-            <div className="mt-2 font-mono text-6xl font-bold tabular-nums text-white">{phase === "analyzing" ? "…" : phase === "countdown" ? Math.max(1, Math.ceil(displayMs / 1000)) : setup.duration_ms === 0 ? `∞ · ${(displayMs / 1000).toFixed(1)}s` : `${(displayMs / 1000).toFixed(1)}s`}</div>
+            <div className="mt-2 font-mono text-6xl font-bold tabular-nums text-cs2-text-primary">{phase === "analyzing" ? "…" : phase === "countdown" ? Math.max(1, Math.ceil(displayMs / 1000)) : setup.duration_ms === 0 ? `∞ · ${(displayMs / 1000).toFixed(1)}s` : `${(displayMs / 1000).toFixed(1)}s`}</div>
             <div className="mx-auto mt-7 grid max-w-2xl grid-cols-4 gap-3 sm:grid-cols-7">
               {TRACKED_CODES.map((code) => <div key={code} className={`flex h-16 items-center justify-center rounded-xl border font-mono text-sm font-bold transition-[transform,background-color,border-color] duration-100 ${pressed.has(code) ? "scale-[0.96] border-violet-300 bg-violet-400 text-black" : "border-cs2-border bg-black/20 text-cs2-text-secondary"}`}>{KEY_LABELS[code]}</div>)}
             </div>
@@ -187,8 +187,8 @@ export default function MagneticInputLabPage() {
         )}
 
         {phase === "result" && result && (
-          <section className="rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.10] to-cs2-bg-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-emerald-300"><ShieldCheck className="h-4 w-4" />{t("inputLab.resultTitle")}</div><div className="mt-2 font-mono text-5xl font-bold text-white">{result.stability_score}<span className="text-xl text-cs2-text-muted">/100</span></div></div><button type="button" onClick={() => setPhase("setup")} className="flex items-center gap-2 rounded-lg border border-cs2-border px-3 py-2 text-xs font-bold text-cs2-text-secondary active:scale-[0.97]"><RotateCcw className="h-4 w-4" />{t("inputLab.testAgain")}</button></div>
+          <section className="mgs-readable-content rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.10] to-cs2-bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-emerald-300"><ShieldCheck className="h-4 w-4" />{t("inputLab.resultTitle")}</div><div className="mt-2 font-mono text-5xl font-bold text-cs2-text-primary">{result.stability_score}<span className="text-xl text-cs2-text-muted">/100</span></div></div><button type="button" onClick={() => setPhase("setup")} className="flex items-center gap-2 rounded-lg border border-cs2-border px-3 py-2 text-xs font-bold text-cs2-text-secondary active:scale-[0.97]"><RotateCcw className="h-4 w-4" />{t("inputLab.testAgain")}</button></div>
             <div className="mt-5 grid gap-3 sm:grid-cols-5">{[[t("inputLab.totalPresses"), result.total_presses],[t("inputLab.pps"), result.presses_per_second],[t("inputLab.hold"), `${result.mean_hold_ms} ms`],[t("inputLab.transition"), result.mean_transition_ms == null ? "—" : `${result.mean_transition_ms} ms`],[t("inputLab.chatter"), result.chatter_count]].map(([label,value]) => <div key={label} className="rounded-xl border border-white/10 bg-black/15 px-3 py-3"><div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{label}</div><div className="mt-1 font-mono text-lg font-bold text-cs2-text-primary">{value}</div></div>)}</div>
             <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
               <div className="rounded-xl border border-violet-300/20 bg-violet-300/[0.06] p-4">
@@ -211,7 +211,7 @@ export default function MagneticInputLabPage() {
           </section>
         )}
 
-        {history.length > 0 && <section className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5"><div className="flex items-center gap-2"><History className="h-4 w-4 text-cs2-text-muted" /><h2 className="text-sm font-bold text-cs2-text-primary">{t("inputLab.history")}</h2></div><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{history.map((item) => <div key={item.id} className="rounded-xl border border-cs2-border-subtle bg-black/10 p-3"><div className="flex items-center justify-between"><span className="truncate text-xs font-semibold text-cs2-text-primary">{item.keyboard_name}</span><span className="font-mono text-sm font-bold text-emerald-300">{item.stability_score}</span></div><div className="mt-1 text-[11px] text-cs2-text-muted">{item.actuation_mm} mm · RT {item.rapid_trigger_press_mm}/{item.rapid_trigger_release_mm} mm</div></div>)}</div></section>}
+        {history.length > 0 && <section className="mgs-glass-card rounded-2xl border border-cs2-border bg-cs2-bg-card p-5"><div className="flex items-center gap-2"><History className="h-4 w-4 text-cs2-text-muted" /><h2 className="text-sm font-bold text-cs2-text-primary">{t("inputLab.history")}</h2></div><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{history.map((item) => <div key={item.id} className="rounded-xl border border-cs2-border-subtle bg-black/10 p-3"><div className="flex items-center justify-between"><span className="truncate text-xs font-semibold text-cs2-text-primary">{item.keyboard_name}</span><span className="font-mono text-sm font-bold text-emerald-300">{item.stability_score}</span></div><div className="mt-1 text-[11px] text-cs2-text-muted">{item.actuation_mm} mm · RT {item.rapid_trigger_press_mm}/{item.rapid_trigger_release_mm} mm</div></div>)}</div></section>}
       </div>
     </div>
   );

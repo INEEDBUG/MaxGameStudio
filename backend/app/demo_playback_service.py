@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import shutil
 import subprocess
@@ -228,9 +229,16 @@ class DemoPlaybackService:
         dem_path: Path,
         config_like: Any,
         pov_options: Optional[DemoPlaybackPovOptions] = None,
+        *,
+        verified_demo_sha256: Optional[str] = None,
     ) -> dict[str, Any]:
         options = pov_options or DemoPlaybackPovOptions()
         dem_path = Path(dem_path)
+        def verify_file(path):
+            with path.open('rb') as stream:
+                actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+            if actual != verified_demo_sha256:
+                raise ValueError('Verified appearance Demo changed before playback')
 
         with self._lock:
             if self._active is not None:
@@ -259,17 +267,30 @@ class DemoPlaybackService:
                         raise DemoPlaybackCs2RunningError("CS2 is already running")
                     pov_manager.restore()
 
-                compat = ensure_demo_compatible(dem_path)
+                # Appearance artifacts are immutable and were independently
+                # verified. Compatibility repair mutates its input, so it must
+                # never run on this branch (nor on the original evidence).
+                if verified_demo_sha256 is not None:
+                    if (len(verified_demo_sha256) != 64
+                            or any(char not in '0123456789abcdef' for char in verified_demo_sha256)):
+                        raise ValueError('Invalid verified appearance hash')
+                    verify_file(dem_path)
+                    compat = None
+                else:
+                    compat = ensure_demo_compatible(dem_path)
                 shutil.copy2(dem_path, copied_demo)
-                logger.info(
-                    "Direct playback compatibility ready: cached=%s outcome=%s "
-                    "removed_type138=%d removed_win_panel=%d source=%s",
-                    compat.cached,
-                    compat.report.outcome,
-                    compat.report.removed_messages,
-                    getattr(compat.report, "removed_win_panel_events", 0),
-                    dem_path,
-                )
+                if verified_demo_sha256 is not None:
+                    verify_file(copied_demo)
+                if compat is not None:
+                    logger.info(
+                        "Direct playback compatibility ready: cached=%s outcome=%s "
+                        "removed_type138=%d removed_win_panel=%d source=%s",
+                        compat.cached,
+                        compat.report.outcome,
+                        compat.report.removed_messages,
+                        getattr(compat.report, "removed_win_panel_events", 0),
+                        dem_path,
+                    )
 
                 if copied_cfg is not None:
                     copied_cfg.parent.mkdir(parents=True, exist_ok=True)
@@ -316,6 +337,8 @@ class DemoPlaybackService:
                     )
 
                 logger.info("Launch CS2 direct playback: cwd=%s cmd=%s", game_root, " ".join(argv))
+                if verified_demo_sha256 is not None:
+                    verify_file(copied_demo)
                 process = subprocess.Popen(
                     argv,
                     cwd=str(game_root),

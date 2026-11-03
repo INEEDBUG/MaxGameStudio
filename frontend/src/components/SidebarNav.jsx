@@ -136,6 +136,9 @@ function NavItem({ to, icon: Icon, children, end = false, disabled = false, badg
     <NavLink
       to={to}
       end={end}
+      aria-disabled={disabled || undefined}
+      tabIndex={disabled ? -1 : undefined}
+      onClick={disabled ? (event) => event.preventDefault() : undefined}
       className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle} ${disabled ? "pointer-events-none opacity-40" : ""}`}
     >
       <Icon className={`h-4 w-4 shrink-0 ${iconClass}`} />
@@ -227,7 +230,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
   const toggleGroup = (groupId) => setExpandedGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
 
   return (
-    <aside className="relative z-[60] flex w-56 shrink-0 flex-col border-r border-cs2-border-subtle bg-cs2-bg-sidebar/88 px-2.5 pb-2.5 backdrop-blur-2xl">
+    <aside className="mgs-glass-nav relative z-[60] flex w-56 shrink-0 flex-col border-r border-cs2-border-subtle px-2.5 pb-2.5">
       <div className="flex items-center gap-2.5 px-1.5 py-4">
         <img src="/cs2-ultimate-insight-logo.png" alt={t("nav.brand")} width={42} height={42} decoding="async" className="h-10 w-10 shrink-0 object-contain drop-shadow-sm" />
         <div className="min-w-0">
@@ -244,16 +247,26 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
       <nav className="scrollbar-hover flex flex-1 flex-col gap-0.5 overflow-y-auto" aria-label={t("nav.mainNav")} onPointerDownCapture={suspendReplayPlayback}>
         <NavItem to="/" end icon={Home}>{t("nav.home")}</NavItem>
         <SidebarGroup id="cs2" label={t("nav.sectionCs2")} icon={Gamepad2} active={activeGroup === "cs2"} expanded={Boolean(expandedGroups.cs2)} onToggle={() => toggleGroup("cs2")}>
-          <NavItem to="/cs2/guide" end icon={BookOpen}>{t("nav.guide")}</NavItem>
+          <NavItem to="/cs2" end icon={Gamepad2}>{t("csWorkspace.title")}</NavItem>
+          <div role="group" aria-label={t("csWorkspace.analysis.title")}>
+          <div className="cs-sidebar-group-label">{t("csWorkspace.analysis.title")}</div>
           <NavItem to="/cs2/library" icon={Library}>{t("nav.demoLibrary")}</NavItem>
           <NavItem to="/cs2/match-history" icon={Download}>{t("nav.officialDemos")}</NavItem>
           <NavItem to="/cs2/analysis" icon={BarChart3}>{t("nav.analysis")}</NavItem>
+          </div>
+          <div role="group" aria-label={t("csWorkspace.production.title")}>
+          <div className="cs-sidebar-group-label">{t("csWorkspace.production.title")}</div>
           <NavItem to="/cs2/queue" icon={Package} disabled={disabled} badge={queueLength}>{t("nav.recordQueue")}</NavItem>
           <NavItem to="/cs2/recorded-videos" icon={Video} disabled={disabled}>{t("nav.recordedVideos")}</NavItem>
           <NavItem to="/cs2/montage" icon={Clapperboard} disabled={disabled}>{t("nav.montage")}</NavItem>
           <NavItem to="/cs2/lite-cut" icon={Clapperboard} disabled={disabled}>LiteCut</NavItem>
+          </div>
+          <div role="group" aria-label={t("csWorkspace.tools.title")}>
+          <div className="cs-sidebar-group-label">{t("csWorkspace.tools.title")}</div>
           <NavItem to="/cs2/params" icon={SlidersHorizontal} disabled={disabled}>{t("nav.recordParams")}</NavItem>
           <NavItem to="/cs2/player-game-config" icon={Settings} disabled={disabled}>{t("nav.playerConfig")}</NavItem>
+          <NavItem to="/cs2/guide" end icon={BookOpen}>{t("nav.guide")}</NavItem>
+          </div>
         </SidebarGroup>
         <SidebarGroup id="valorant" label={t("nav.sectionValorant")} icon={Gamepad2} active={activeGroup === "valorant"} expanded={Boolean(expandedGroups.valorant)} onToggle={() => toggleGroup("valorant")}>
           <NavItem to="/valorant/stretch" icon={Crosshair}>{t("nav.valorantStretch")}</NavItem>

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import * as factory from './recordingRequestFactory';
 
 import {
   DEFAULT_RECORDING_OPTIONS,
@@ -20,6 +21,21 @@ const matchMeta = {
   total_rounds: 24,
   demo_end_tick: 177_914,
 };
+
+test.each(Object.entries(factory).filter(([name])=>name.startsWith('build')))('%s keeps independent queue appearance snapshot',(_,build)=>{
+  const appearance={expected_demo_sha256:'a'.repeat(64),scope:'match',replacements:[{slot_id:'owned:usp',preset_id:'usp-kill-confirmed',wear:.01,seed:0}]};
+  const result=build({round:1,kill_ticks:[200],start_tick:100,end_tick:500,freeze_to_death_round_windows:[]},{...queueItem,appearance},matchMeta);
+  expect(result.demo.appearance).toEqual(appearance);
+  appearance.replacements[0].seed=42;
+  expect(result.demo.appearance.replacements[0].seed).toBe(0);
+});
+
+test('queued skin profile is carried to recording without changing the source Demo',()=>{
+  const appearance={expected_demo_sha256:'a'.repeat(64),scope:'match',replacements:[{slot_id:'owned:usp',preset_id:'usp-kill-confirmed',wear:.01,seed:0}]};
+  const result=buildHighlightRecordingRequest({round:1,kill_ticks:[200]}, {...queueItem,appearance},matchMeta);
+  expect(result.demo.appearance).toEqual(appearance);
+  expect(result.demo.demo_path).toBe('C:/demo/source.dem');
+});
 
 
 describe("recording demo EOF metadata", () => {

@@ -198,6 +198,7 @@ def build_v3_recorded_clip_meta(
         "target_steam_id": target_steamid64,
         "steamid": target_steamid64,
         "demo_path": dto.demo.demo_path if dto.demo else None,
+        "recording_appearance": result.get("recording_appearance"),
         "timeline_event_id": timeline_event_id,
         "timeline_source": timeline_source,
         "timeline_record_kind": timeline_record_kind,
@@ -416,6 +417,14 @@ async def ai_director_preview(dto: RecordingRequestDTO) -> dict:
         "blocks": blocks_out,
         "preview_lines": preview_lines,
         "estimated_segments": len(segments),
+        # Reuse these exact segments; exporting must not call the model again
+        # or grant permission to launch/record a Cosmetic Studio session.
+        "cosmetic_plan": {
+            "demo_path": req.demo_path, "tick_rate": req.tick_rate,
+            "active_segments": [{"target_steamid64": s.target_steamid64,
+                "start_tick": s.start_tick, "end_tick": s.end_tick,
+                "disabled": s.disabled} for s in segments],
+        },
         "victim_pov_count": victim_count,
         "victim_pov_blocks": victim_blocks,
         "victim_pov_eligible_count": victim_eligible,
@@ -434,6 +443,8 @@ async def execute_recording(
     Build a RecordingPlan and execute it using OBS + CS2.
     Returns execution result summary.
     """
+    if dto.demo.appearance is not None:
+        raise HTTPException(422, detail='自选外观必须通过录制队列准备，未用原皮肤代替。')
     try:
         plan = build_plan(dto)
     except NormalizationError as e:
@@ -579,6 +590,19 @@ async def execute_recording_queue(
     req: QueueRecordingRequest,
     _runtime_session: None = Depends(runtime_session_dependency),
 ) -> list[dict]:
+    global _queue_abort_event
+    if not req.requests:
+        return []
+    if _queue_abort_event is not None:
+        raise HTTPException(409, error_detail("RECORDING_ALREADY_RUNNING"))
+    _queue_abort_event = asyncio.Event()
+    try:
+        return await _execute_recording_queue_reserved(req)
+    finally:
+        _queue_abort_event = None
+
+
+async def _execute_recording_queue_reserved(req: QueueRecordingRequest) -> list[dict]:
     """
     [RecordingV3] Execute a batch of RecordingRequestDTOs through the new
     build_plan → RecordingExecutor pipeline.
@@ -591,6 +615,7 @@ async def execute_recording_queue(
     from pathlib import Path
     from ..obs_director import OBSDirector, CS2AlreadyRunningError, CS2NotReadyError, RecordingWarmupExtras
     from ..cs2_config_backup import is_cs2_running, is_restore_required
+    global _queue_abort_event
 
     def _resolve_demo_path(p: str) -> Path:
         raw = (p or "").strip()
@@ -633,6 +658,27 @@ async def execute_recording_queue(
         raise HTTPException(409, error_detail("RECORDING_CS2_RUNNING"))
     if is_restore_required():
         raise HTTPException(409, error_detail("RECORDING_CONFIG_RESTORE_REQUIRED"))
+
+    # Prepare skins before connecting to or modifying OBS. Keep the original
+    # DTO for statistics/provenance; only the playback DTO uses the copy.
+    prepared_requests = []
+    for dto in req.requests:
+        try:
+            source = _resolve_demo_path(dto.demo.demo_path or dto.demo.demo_filename)
+            prepared_requests.append(dto.model_copy(update={"demo":dto.demo.model_copy(update={"demo_path":str(source)})}))
+        except HTTPException:
+            if dto.demo.appearance is not None: raise
+            prepared_requests.append(dto)
+    appearance_receipts = {}
+    if any(dto.demo.appearance is not None for dto in prepared_requests):
+        from .queue_appearance import prepare_queue_appearances
+        try:
+            prepared_requests, appearance_receipts = await prepare_queue_appearances(prepared_requests, _queue_abort_event)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+
+    if _queue_abort_event.is_set():
+        raise HTTPException(409, detail='录制准备已取消。')
 
     # Resolve OBS config (merge request-level obs override with saved config).
     obs_cfg_override = None
@@ -738,11 +784,14 @@ async def execute_recording_queue(
     # Manual upload/library analysis normally performs this once in advance.
     # The queue keeps a fail-safe preflight for older saved queue items; cache
     # hits read only the file metadata and two 64 KiB edge blocks.
+    # Never run the legacy in-place repair against a skin-bound original,
+    # even when the same source also has an unmodified clip in this batch.
+    protected_sources = {r['original_path'] for r in appearance_receipts.values()}
     unique_demo_paths = list(
         dict.fromkeys(
             dto.demo.demo_path
-            for dto in resolved_requests
-            if Path(dto.demo.demo_path).is_file()
+            for dto in prepared_requests
+            if Path(dto.demo.demo_path).is_file() and str(Path(dto.demo.demo_path).resolve()) not in protected_sources
         )
     )
     for demo_path in unique_demo_paths:
@@ -760,6 +809,15 @@ async def execute_recording_queue(
             compat.report.removed_win_panel_events,
             demo_path,
         )
+
+    # A legacy compatibility repair may edit a file in place. Skin variants
+    # cannot retain a stale verification receipt after that transformation.
+    if appearance_receipts:
+        from ..cosmetic_studio.runtime import digest
+        for receipt in appearance_receipts.values():
+            if (digest(Path(receipt['original_path'])) != receipt['original_sha256']
+                    or digest(Path(receipt['playback_path'])) != receipt['playback_sha256']):
+                raise HTTPException(422, detail='兼容性处理改变了外观副本，请重新生成；未开始录制。')
 
     # Build warmup extras from request warmup dict.
     # Merge pov_hud fields into warmup_extras so execute_plan_queue sees them.
@@ -790,12 +848,9 @@ async def execute_recording_queue(
         logger.info("[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s",
                     warmup_extras.pov_radar_mode, warmup_extras.pov_teamcounter_numeric)
 
-    global _queue_abort_event
-    if _queue_abort_event is not None:
-        raise HTTPException(409, error_detail("RECORDING_ALREADY_RUNNING"))
-
-    abort_ev = asyncio.Event()
-    _queue_abort_event = abort_ev
+    abort_ev = _queue_abort_event
+    if abort_ev.is_set():
+        raise HTTPException(409, detail='录制准备已取消。')
 
     # Build fade controller from the first request's options merged with AppConfig.
     first_options = resolved_requests[0].options if resolved_requests else RecordingOptions()
@@ -824,7 +879,10 @@ async def execute_recording_queue(
     )
 
     try:
-        results = await director.execute_plan_queue(resolved_requests, warmup=warmup_extras, fade_controller=fade_ctrl)
+        results = await director.execute_plan_queue(prepared_requests, warmup=warmup_extras, fade_controller=fade_ctrl)
+        for result in results:
+            receipt = appearance_receipts.get(result.get('request_id'))
+            if receipt: result['recording_appearance'] = receipt
     except CS2AlreadyRunningError as e:
         raise HTTPException(409, error_detail("RECORDING_CS2_RUNNING")) from e
     except CS2NotReadyError as e:
@@ -832,9 +890,6 @@ async def execute_recording_queue(
     except Exception as e:
         logger.exception("[RecordingV3] execute_plan_queue failed")
         raise HTTPException(500, error_detail("RECORDING_FAILED", err=str(e))) from e
-    finally:
-        _queue_abort_event = None
-
     # Persist successful recordings to recorded_clips for the montage workbench.
     try:
         await _persist_v3_results(resolved_requests, results)

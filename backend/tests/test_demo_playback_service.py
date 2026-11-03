@@ -201,3 +201,29 @@ def test_pov_launch_failure_rolls_back_files(monkeypatch, tmp_path: Path):
     assert manager.restored == 1
     assert list((tmp_path / "game" / "csgo").glob("_insight_preview_*")) == []
     assert service._active is None
+
+
+def test_verified_appearance_copy_bypasses_source_repair_and_checks_the_copied_bytes(monkeypatch, tmp_path):
+    import hashlib
+    cfg, demo, _ = _paths(tmp_path)
+    expected = hashlib.sha256(demo.read_bytes()).hexdigest()
+    monkeypatch.setattr(playback, 'ensure_demo_compatible', lambda _: pytest.fail('Must not repair immutable appearance artifact'))
+    calls = []
+    monkeypatch.setattr(playback.subprocess, 'Popen', lambda argv, **kwargs: (calls.append(argv), _FakeProcess())[1])
+    service = playback.DemoPlaybackService()
+    service.launch(demo, cfg, verified_demo_sha256=expected)
+    assert demo.read_bytes() == b'demo'
+    assert '-insecure' in calls[0]
+    assert service._active.copied_demo.read_bytes() == b'demo'
+
+
+def test_verified_appearance_changed_during_copy_stops_before_starting_game(monkeypatch, tmp_path):
+    import hashlib
+    cfg, demo, game_root = _paths(tmp_path)
+    expected = hashlib.sha256(demo.read_bytes()).hexdigest()
+    monkeypatch.setattr(playback.shutil, 'copy2', lambda src, dst: Path(dst).write_bytes(b'tampered'))
+    monkeypatch.setattr(playback.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('No game on hash mismatch'))
+    service = playback.DemoPlaybackService()
+    with pytest.raises(ValueError, match='changed'):
+        service.launch(demo, cfg, verified_demo_sha256=expected)
+    assert list((game_root / 'csgo').glob('_insight_preview_*')) == []

@@ -190,6 +190,18 @@ export const useRecordingQueue = create((set, get) => ({
     set({ queue: [] });
   },
 
+  updateItemAppearance(id, profile, allMatching = false) {
+    set((s) => {
+      const target = s.queue.find(q => q.id === id);
+      if (!target) return s;
+      return {queue: s.queue.map(q => {
+        const matches = q.id === id || (allMatching && target.demoPath && target.targetSteamId
+          && q.demoPath === target.demoPath && String(q.targetSteamId) === String(target.targetSteamId));
+        return matches ? {...q, appearance: profile ? JSON.parse(JSON.stringify(profile)) : null} : q;
+      })};
+    });
+  },
+
   /**
    * 合并单片段剪辑节奏；可传部分字段。支持的键：
    * pre_first_sec, post_last_sec, max_gap_sec

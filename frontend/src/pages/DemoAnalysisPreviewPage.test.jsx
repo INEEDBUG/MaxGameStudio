@@ -6,6 +6,10 @@ import DemoAnalysisPreviewPage from "./DemoAnalysisPreviewPage";
 import API from "../api/api";
 import { useReplayStore } from "../stores/replayStore";
 
+vi.mock('../components/analysis/cosmetics/CosmeticLoadoutView.jsx', () => ({
+  default: ({ demoPath, selectedXuid }) => <section aria-label="当前 Demo 饰品">{demoPath} · 玩家 {selectedXuid}</section>,
+}));
+
 vi.mock("../api/api", () => ({
   getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
   getDemoUtilityMaskUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/utility-mask/${mapName}${layer ? `?layer=${layer}` : ""}`),
@@ -201,6 +205,12 @@ function renderPage(shell) {
 }
 
 describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
+  test('opens cosmetics inside the existing analysis context without a second upload', async () => {
+    renderPage(buildShell({ currentActivePlayer: 'ZywOo' }));
+    fireEvent.click(screen.getByRole('button', { name: '饰品' }));
+    const panel = await screen.findByRole('region', { name: '当前 Demo 饰品' });
+    expect(panel.textContent).toBe('C:/demos/one.dem · 玩家 1');
+  });
   beforeEach(() => {
     useReplayStore.setState({ entries: {}, activeKey: null });
     sessionStorage.clear();
@@ -315,12 +325,12 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText(/DAK|analysis-kit|数据包/i)).toBeNull();
   });
 
-  test("keeps all seven analysis workspaces backed by parsed match data", async () => {
+  test("keeps existing analysis workspaces and adds cosmetics in the same Demo", async () => {
     const view = renderPage(buildShell());
 
     const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "计分板", "2D 回放", "玩家评价", "回合评价", "热力图", "高光与录制", "经济",
+      "计分板", "2D 回放", "玩家评价", "回合评价", "热力图", "高光与录制", "饰品", "经济",
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));

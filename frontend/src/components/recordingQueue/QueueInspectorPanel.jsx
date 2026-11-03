@@ -1,4 +1,5 @@
 import { Monitor, Settings, Eye } from "lucide-react";
+import QueueAppearancePanel from './QueueAppearancePanel';
 import {
   PacingMicroPanel,
   PovSection,
@@ -43,7 +44,7 @@ function FieldGroup({ icon: Icon, title, children }) {
  *   queue: import("../../stores/recordingQueueStore").RecordingQueueItem[],
  * }} props
  */
-export default function QueueInspectorPanel({ selectedId: _selectedId, selectedItem, queue }) {
+export default function QueueInspectorPanel({ selectedId: _selectedId, selectedItem, queue, recording = false }) {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
@@ -172,6 +173,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
           </div>
         </div>
 
+        <QueueAppearancePanel item={selectedItem} disabled={recording}/>
         {/* Stat 卡 */}
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded border border-cs2-border bg-cs2-bg-input/40 px-2 py-1.5">

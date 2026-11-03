@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -17,6 +17,7 @@ import {
   ListChecks,
   Loader2,
   MapPin,
+  Palette,
   Play,
   RefreshCw,
   Swords,
@@ -46,6 +47,7 @@ import useSessionState from "../hooks/useSessionState";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 
 const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1440px] px-5 sm:px-5";
+const CosmeticLoadoutView = lazy(() => import('../components/analysis/cosmetics/CosmeticLoadoutView.jsx'));
 
 const TABS = [
   { key: "overview", label: "计分板", icon: Activity },
@@ -54,6 +56,7 @@ const TABS = [
   { key: "rounds", label: "回合评价", icon: ListChecks },
   { key: "heatmap", label: "热力图", icon: Flame },
   { key: "highlights", label: "高光与录制", icon: Film },
+  { key: "cosmetics", label: "饰品", icon: Palette },
   { key: "economy", label: "经济", icon: CircleDollarSign },
 ];
 
@@ -698,6 +701,9 @@ export default function DemoAnalysisPreviewPage() {
           {activeTab === "economy" && (
             <EconomyView data={workspace} onOpenRound={openRound} />
           )}
+          {activeTab === "cosmetics" && <Suspense fallback={<p role="status">正在打开饰品…</p>}>
+            <CosmeticLoadoutView demoPath={currentUpload?.path} selectedXuid={String(selectedPlayer?.steam_id64 || selectedPlayer?.steam_id || selectedPlayer?.steamid || '')} />
+          </Suspense>}
         </main>
       </div>
       <DemoPlaybackUi />

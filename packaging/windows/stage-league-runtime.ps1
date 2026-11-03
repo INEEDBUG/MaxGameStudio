@@ -79,6 +79,104 @@ function Replace-TextExactlyOnce([string]$PathValue, [string]$OldValue, [string]
   [IO.File]::WriteAllText($PathValue, $text, [Text.UTF8Encoding]::new($false))
 }
 
+function Add-MaxGameStudioGlassTheme([string]$Css) {
+  # A small static bridge for the bundled League renderer: translucent fills,
+  # hairline highlights, and restrained shadows only. Naive UI keeps ownership
+  # of button labels and semantic state colors.
+  $marker = "/* MaxGameStudio glass bridge: static-only */"
+  if ($Css.Contains($marker)) { return $Css }
+  $bridge = @'
+
+/* MaxGameStudio glass bridge: static-only */
+:root[data-theme='dark'] {
+  --mgs-glass-accent: #f59e0b;
+  --mgs-glass-surface: rgba(24, 24, 27, 0.88);
+  --mgs-glass-raised: rgba(39, 39, 42, 0.78);
+  --mgs-glass-highlight: rgba(255, 255, 255, 0.075);
+  --mgs-glass-border: rgba(245, 158, 11, 0.22);
+  --mgs-glass-shadow: rgba(0, 0, 0, 0.2);
+}
+:root[data-theme='light'] {
+  --mgs-glass-accent: #2563eb;
+  --mgs-glass-surface: rgba(255, 255, 255, 0.92);
+  --mgs-glass-raised: rgba(248, 250, 252, 0.88);
+  --mgs-glass-highlight: rgba(255, 255, 255, 0.88);
+  --mgs-glass-border: rgba(37, 99, 235, 0.2);
+  --mgs-glass-shadow: rgba(30, 64, 175, 0.08);
+}
+:root[data-theme='dark'] .app-sidebar,
+:root[data-theme='light'] .app-sidebar {
+  background-color: var(--mgs-glass-surface);
+  background-image: linear-gradient(180deg, var(--mgs-glass-highlight), transparent 12rem);
+  border-inline-end: 1px solid var(--mgs-glass-border);
+}
+:root[data-theme='dark'] .app-sidebar__head,
+:root[data-theme='light'] .app-sidebar__head {
+  background: linear-gradient(180deg, var(--mgs-glass-highlight), transparent);
+  border-block-end: 1px solid var(--mgs-glass-border);
+}
+:root[data-theme='dark'] .sidebar-menu .menu-item__inner,
+:root[data-theme='light'] .sidebar-menu .menu-item__inner {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+:root[data-theme='dark'] .sidebar-menu .menu-item:hover .menu-item__inner,
+:root[data-theme='light'] .sidebar-menu .menu-item:hover .menu-item__inner {
+  background-color: var(--mgs-glass-raised);
+  border-color: var(--mgs-glass-border);
+}
+:root[data-theme='dark'] .sidebar-menu .n-menu-item-content--selected,
+:root[data-theme='light'] .sidebar-menu .n-menu-item-content--selected {
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 var(--mgs-glass-highlight);
+}
+:root[data-theme='dark'] .n-card,
+:root[data-theme='light'] .n-card,
+:root[data-theme='dark'] .n-popover-shared,
+:root[data-theme='light'] .n-popover-shared {
+  background-color: var(--mgs-glass-surface);
+  box-shadow: inset 0 1px 0 var(--mgs-glass-highlight), 0 8px 24px var(--mgs-glass-shadow);
+}
+:root[data-theme='dark'] .n-tabs-nav,
+:root[data-theme='light'] .n-tabs-nav {
+  background-image: linear-gradient(180deg, var(--mgs-glass-highlight), transparent);
+  border-block-end: 1px solid var(--mgs-glass-border);
+}
+:root[data-theme='dark'] .n-input,
+:root[data-theme='light'] .n-input,
+:root[data-theme='dark'] .n-radio-button,
+:root[data-theme='light'] .n-radio-button { border-radius: 9px; }
+:root[data-theme='dark'] :where(.app-sidebar a, .menu-item, .n-button, .n-input, .n-radio-button, .n-tabs-tab):focus-visible,
+:root[data-theme='light'] :where(.app-sidebar a, .menu-item, .n-button, .n-input, .n-radio-button, .n-tabs-tab):focus-visible {
+  outline: 2px solid var(--mgs-glass-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='dark'] { --mgs-glass-surface: #18181b; --mgs-glass-raised: #27272a; }
+  :root[data-theme='light'] { --mgs-glass-surface: #ffffff; --mgs-glass-raised: #f8fafc; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme] .sidebar-menu .menu-item__inner { transition: none !important; }
+}
+@media (forced-colors: active) {
+  :root[data-theme] .app-sidebar,
+  :root[data-theme] .app-sidebar__head,
+  :root[data-theme] .sidebar-menu .menu-item__inner,
+  :root[data-theme] .n-card,
+  :root[data-theme] .n-popover-shared,
+  :root[data-theme] .n-tabs-nav {
+    background: Canvas;
+    border-color: CanvasText;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  :root[data-theme] :where(.app-sidebar a, .menu-item, .n-button, .n-input, .n-radio-button, .n-tabs-tab):focus-visible { outline-color: Highlight; }
+}
+'@
+  return $Css + $bridge
+}
+
 function Apply-MaxGameStudioTheme([string]$SourceRoot, [string]$LeagueWorkbenchIconPath) {
   # The live pinned renderer routes Naive UI through naive-ui.ts. The split
   # naive-ui-overrides directory is an inactive experiment, so patch only the
@@ -196,8 +294,9 @@ $marker
 :root[data-theme='dark'] .n-tabs-tab--active,
 :root[data-theme='light'] .n-tabs-tab--active { color: var(--mgs-accent); }
 "@
-    [IO.File]::WriteAllText($themeCss, $css, [Text.UTF8Encoding]::new($false))
   }
+  $css = Add-MaxGameStudioGlassTheme $css
+  [IO.File]::WriteAllText($themeCss, $css, [Text.UTF8Encoding]::new($false))
   $patchedThemeCss = Get-Content -LiteralPath $themeCss -Raw -Encoding utf8
   if (-not $patchedThemeCss.Contains($marker)) {
     throw "MaxGameStudio theme bridge was not written: $themeCss"
@@ -1096,9 +1195,15 @@ $manifest = [ordered]@{
   Write-Host "Pinned source: $PinnedCommit"
 } finally {
   if ($tempSource -and (Test-Path -LiteralPath $tempSource)) {
+    $resolvedTemp = [IO.Path]::GetFullPath($tempSource)
+    $allowedTemp = [IO.Path]::GetFullPath($buildTempRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedTemp.StartsWith($allowedTemp, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside generated build root.' }
     Remove-Item -LiteralPath $tempSource -Recurse -Force -ErrorAction SilentlyContinue
   }
   if ($tempBuildSource -and (Test-Path -LiteralPath $tempBuildSource)) {
+    $resolvedTemp = [IO.Path]::GetFullPath($tempBuildSource)
+    $allowedTemp = [IO.Path]::GetFullPath($buildTempRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedTemp.StartsWith($allowedTemp, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside generated build root.' }
     Remove-Item -LiteralPath $tempBuildSource -Recurse -Force -ErrorAction SilentlyContinue
   }
 }

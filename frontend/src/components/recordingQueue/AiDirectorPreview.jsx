@@ -50,6 +50,15 @@ export default function AiDirectorPreview({ item, globalPacing }) {
 
   const { status, data, error } = state;
 
+  const exportCosmeticPlan = () => {
+    if (status !== 'ok' || !data?.cosmetic_plan) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data.cosmetic_plan,null,2)],{type:'application/json'}));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'cosmetic-director-plan.json';
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url),1000);
+  };
+
   return (
     <div className="rounded border border-violet-500/25 bg-violet-500/5 p-2">
       <div className="mb-1 flex items-center justify-between gap-2">
@@ -152,6 +161,7 @@ export default function AiDirectorPreview({ item, globalPacing }) {
             <Clapperboard className="h-3 w-3" />
             {t("queue.planPreviewFootnote", { n: data.estimated_segments })}
           </p>
+          {data.cosmetic_plan && <button type="button" disabled={status !== 'ok'} onClick={exportCosmeticPlan} className="mt-2 rounded border border-cs2-border px-2 py-1 text-xs text-cs2-text-primary disabled:opacity-50">导出外观制片计划</button>}
         </>
       ) : null}
     </div>

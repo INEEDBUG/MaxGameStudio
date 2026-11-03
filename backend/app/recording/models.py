@@ -1,7 +1,20 @@
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from ..cosmetic_studio.appearance_models import AppearanceModel, AppearanceReplacement
+
+
+class RecordingAppearance(AppearanceModel):
+    expected_demo_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    replacements: list[AppearanceReplacement] = Field(min_length=1, max_length=128)
+    scope: Literal['item', 'match'] = 'match'
+
+    @model_validator(mode='after')
+    def unique_slots(self):
+        if len({item.slot_id for item in self.replacements}) != len(self.replacements):
+            raise ValueError('录制外观不能重复选择同一装备。')
+        return self
 
 
 class RequestType(str, Enum):
@@ -45,6 +58,7 @@ class DemoContext(BaseModel):
     final_round_end_tick: int
     server_name: str = ""
     all_players: list = []
+    appearance: RecordingAppearance | None = None
 
 
 class TargetPlayer(BaseModel):

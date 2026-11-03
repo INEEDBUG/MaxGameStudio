@@ -2,6 +2,8 @@ import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } fro
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
+import "./styles/csWorkspace.css";
+import "./styles/liquidGlass.css";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
@@ -63,6 +65,7 @@ import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter"
 import LeagueRuntimeAutoManager from "./components/LeagueRuntimeAutoManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
+const CsWorkspacePage = lazy(() => import("./pages/CsWorkspacePage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
 const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
@@ -70,6 +73,7 @@ const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const RecordedVideosPage = lazy(() => import("./pages/RecordedVideosPage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
 const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
+const CosmeticWorkspacePage = lazy(() => import("./pages/CosmeticWorkspacePage"));
 const LiteCutExportPage = lazy(() => import("./pages/liteCut/LiteCutExportPage"));
 const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -3435,7 +3439,9 @@ export default function App() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => window.location.reload()}
+                        // Reload from the asset root: desktop builds use a
+                        // relative Vite base, so reloading /cs2/... loses JS/CSS.
+                        onClick={() => window.location.replace("/")}
                         className="rounded-lg border border-cs2-border bg-white/5 px-4 py-2 text-xs font-semibold text-cs2-text-secondary transition hover:border-cs2-accent/50 hover:text-cs2-text-primary"
                       >
                         {t("app.backendRetryNow")}
@@ -3450,7 +3456,7 @@ export default function App() {
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               {(!backendRequired || backendReady) && <Routes>
                 <Route path="/" element={<HomePage onCheckUpdates={() => void fetchUpdateInfo({ manual: true })} />} />
-                <Route path="/cs2" element={<Navigate to="/cs2/guide" replace />} />
+                <Route path="/cs2" element={<CsWorkspacePage queueLength={queue.length} disabled={batchRecording} />} />
                 <Route path="/cs2/guide" element={<GuidePage />} />
                 <Route path="/cs2/library" element={<DemoLibraryPage />} />
                 <Route path="/cs2/analysis" element={<DemoAnalysisPreviewPage />} />
@@ -3458,6 +3464,8 @@ export default function App() {
                 <Route path="/cs2/recorded-videos" element={<RecordedVideosPage />} />
                 <Route path="/cs2/montage" element={<MontageWorkbenchPage />} />
                 <Route path="/cs2/lite-cut" element={<LiteCutEditorPage />} />
+                <Route path="/cs2/cosmetic-studio" element={<CosmeticWorkspacePage />} />
+                <Route path="/cs2/cosmetic-studio/recording" element={<Navigate to="/cs2/cosmetic-studio" replace />} />
                 <Route path="/cs2/lite-cut/editor" element={<Navigate to="/cs2/lite-cut" replace />} />
                 <Route path="/cs2/lite-cut/text" element={<Navigate to="/cs2/lite-cut" replace />} />
                 <Route path="/cs2/lite-cut/color" element={<Navigate to="/cs2/lite-cut" replace />} />

@@ -248,6 +248,7 @@ export default function RecordingQueuePage() {
             <QueueInspectorPanel
               selectedId={selectedId}
               selectedItem={selectedItem}
+              recording={s.batchRecording}
               queue={queue}
             />
           </div>

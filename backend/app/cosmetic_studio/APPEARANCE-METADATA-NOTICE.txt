@@ -1,0 +1,36 @@
+Appearance display metadata is derived from ByMykel/CSGO-API:
+https://github.com/ByMykel/CSGO-API
+Commit e2644abaf1bb26b871d0e90e7b44b7116feef486
+Source: public/api/zh-CN/skins.json
+This catalogue describes observed finishes only. It does not certify rewrite support.
+Referenced image artwork remains Valve property; image URLs are not a grant of artwork ownership.
+
+MIT License
+
+Copyright (c) 2023 ByMykel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+Stock weapon artwork links: base_weapon_metadata.json uses public/api/en/base_weapons.json
+from the same pinned ByMykel/CSGO-API commit e2644abaf1bb26b871d0e90e7b44b7116feef486.
+Source SHA256: e0a336d26efdc059a5899afced207b03288a1b1c80f1ec3a6df94a606157ede9.
+Metadata license: APPEARANCE-DATA-LICENSE.txt. Valve owns the weapon artwork;
+this catalogue contains external Steam CDN links, not redistributed images.
+Five guns' base artwork uses the original public image-tracker links, pinned to
+ByMykel/counter-strike-image-tracker commit b712499da5008fc732cc08cfe38a5698c694f52f.
+

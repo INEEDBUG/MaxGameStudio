@@ -1,0 +1,103 @@
+/* Shared lightweight material system. No canvas, animated shader, or card blur.
+   Opaque content/data layers keep chart, replay and video colors intact. */
+:root.dark {
+  --cs2-bg-page: #0f1012;
+  --cs2-bg-card: rgba(28,29,32,.94);
+  --cs2-bg-sidebar: #17181b;
+  --cs2-bg-elevated: #25262a;
+  --cs2-accent: #ff8c00;
+  --cs2-accent-light: #ffa500;
+  --cs2-accent-soft: rgba(255,140,0,.12);
+  --cs2-text-on-accent: #17120b;
+  --cs2-text-muted: #96969f;
+  --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,.14);
+  --cs-workspace-cta-bg: #ff8c00;
+  --cs-workspace-eyebrow: #ffa500;
+  --mgs-glass-highlight: rgba(255,255,255,.11);
+  --mgs-glass-edge: rgba(255,255,255,.13);
+  --mgs-glass-tint: rgba(255,140,0,.04);
+  --mgs-glass-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+:root.light {
+  --cs2-bg-page: #f3f5f8;
+  --cs2-bg-card: rgba(255,255,255,.94);
+  --cs2-bg-sidebar: #edf1f6;
+  --cs2-bg-elevated: #ffffff;
+  --cs2-accent: #0065d1;
+  --cs2-accent-light: #0756a5;
+  --cs2-accent-soft: rgba(0,101,209,.10);
+  --cs2-text-on-accent: #ffffff;
+  --cs2-text-muted: #626269;
+  --cs2-shadow-glow-accent: 0 0 16px rgba(0,101,209,.12);
+  --cs-workspace-cta-bg: #0058bc;
+  --cs-workspace-eyebrow: #0756a5;
+  --mgs-glass-highlight: rgba(255,255,255,.90);
+  --mgs-glass-edge: rgba(60,75,100,.16);
+  --mgs-glass-tint: rgba(0,101,209,.025);
+  --mgs-glass-shadow: 0 8px 24px rgba(40,55,75,.05);
+}
+.app-shell {
+  background: radial-gradient(ellipse at 85% 0%, var(--mgs-glass-tint), transparent 38rem), var(--cs2-bg-page);
+}
+.mgs-glass-nav {
+  background: linear-gradient(140deg, color-mix(in srgb, var(--cs2-bg-sidebar) 97%, var(--cs2-accent)), var(--cs2-bg-sidebar));
+  border-color: var(--mgs-glass-edge);
+  box-shadow: inset -1px 0 0 var(--mgs-glass-highlight);
+}
+.mgs-glass-titlebar {
+  background: linear-gradient(110deg, color-mix(in srgb, var(--cs2-bg-sidebar) 94%, transparent), color-mix(in srgb, var(--cs2-bg-elevated) 96%, transparent));
+  border-color: var(--mgs-glass-edge);
+  box-shadow: inset 0 1px 0 var(--mgs-glass-highlight);
+  /* Only this small navigation strip filters its backdrop, never content cards. */
+  backdrop-filter: blur(6px);
+}
+.mgs-glass-card,
+.mgs-glass-panel,
+.ant-modal-content,
+.ant-drawer-content {
+  background: linear-gradient(145deg, var(--cs2-bg-card), color-mix(in srgb, var(--cs2-bg-card) 98%, var(--cs2-accent)));
+  border-color: var(--mgs-glass-edge);
+  box-shadow: inset 0 1px 0 var(--mgs-glass-highlight), var(--mgs-glass-shadow);
+}
+.mgs-glass-panel { border-radius: 18px; }
+.mgs-glass-overlay { backdrop-filter: none; }
+/* Legacy dialogs/toolbars still carry Tailwind blur classes. Keep their
+   existing opacity and interaction while enforcing the global filter budget,
+   including React portals outside app-shell. The titlebar is the sole filter. */
+:root:is(.dark, .light) [class*="backdrop-blur"]:not(.mgs-glass-titlebar) {
+  backdrop-filter: none;
+}
+.app-shell [class~="bg-cs2-accent"][class~="text-white"] { color: var(--cs2-text-on-accent); }
+/* Opt-in neutral Lab panels only. Replay/killfeed/video layers retain their
+   intentional dark palettes even when the surrounding shell is light. */
+:root.light .mgs-readable-content :is([class~="text-amber-100"], [class~="text-amber-100/80"], [class~="text-amber-200"], [class~="text-amber-300"], [class~="text-amber-400"]) { color: #78350f; }
+:root.light .mgs-readable-content :is([class~="text-violet-100"], [class~="text-violet-200"], [class~="text-violet-300"]) { color: #5b21b6; }
+:root.light .mgs-readable-content :is([class~="text-emerald-100"], [class~="text-emerald-200"], [class~="text-emerald-300"], [class~="text-emerald-400"]) { color: #065f46; }
+.app-shell :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--cs2-accent);
+  outline-offset: 2px;
+}
+.app-shell :where(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.045);
+}
+.mgs-home-surface { position: relative; isolation: isolate; }
+.mgs-home-surface::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: radial-gradient(ellipse at 90% 0%, var(--cs2-accent-soft), transparent 70%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root.dark { --cs2-bg-card: #1c1d20; }
+  :root.light { --cs2-bg-card: #ffffff; }
+  .mgs-glass-titlebar, .mgs-glass-nav { background: var(--cs2-bg-sidebar); backdrop-filter: none; }
+  .mgs-glass-card, .mgs-glass-panel, .ant-modal-content, .ant-drawer-content { background: var(--cs2-bg-elevated); box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell :where(button, a) { transition: none; }
+}
+@media (forced-colors: active) {
+  .mgs-glass-titlebar, .mgs-glass-nav, .mgs-glass-card, .mgs-glass-panel, .ant-modal-content, .ant-drawer-content { color: CanvasText; background: Canvas; border-color: CanvasText; backdrop-filter: none; box-shadow: none; }
+}

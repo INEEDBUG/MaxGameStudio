@@ -36,7 +36,7 @@ export default function Modal({
   return (
     <div
       style={{ zIndex }}
-      className="fixed inset-0 flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
+      className="mgs-glass-overlay fixed inset-0 flex items-center justify-center bg-cs2-bg-overlay px-4 py-6"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
@@ -44,7 +44,7 @@ export default function Modal({
       }}
     >
       <div
-        className={`flex h-full ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
+        className={`mgs-glass-panel flex h-full ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
       >
         {/* Header */}
         {(title || icon || subtitle) && (

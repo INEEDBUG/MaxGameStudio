@@ -360,6 +360,9 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         try:
+            from .cosmetic_studio.service import service as cosmetic_service
+
+            await asyncio.to_thread(cosmetic_service.shutdown, 25)
             await league_lab_service.stop()
             from .recording.api import get_queue_abort_event
 
@@ -384,6 +387,8 @@ app.include_router(lite_cut_router)
 app.include_router(training_router)
 app.include_router(valorant_lab_router)
 app.include_router(league_lab_router)
+from .cosmetic_studio.api import router as cosmetic_studio_router
+app.include_router(cosmetic_studio_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -438,6 +443,12 @@ async def app_shutdown():
     from .lite_cut.api import shutdown_lite_cut_jobs
     from .recording.api import get_queue_abort_event
     from .shutdown_state import request_server_shutdown
+    from .cosmetic_studio.service import service as cosmetic_service
+
+    cosmetic_clean = await asyncio.to_thread(cosmetic_service.shutdown, 25)
+    if not cosmetic_clean:
+        await asyncio.to_thread(_write_recovery_marker, "Cosmetic Studio cleanup not confirmed")
+        raise HTTPException(409, detail="离线制片会话尚未确认退出，已暂停关闭后端，请检查实验任务状态。")
 
     abort_event = get_queue_abort_event()
     if abort_event is not None:
@@ -1610,7 +1621,7 @@ def setup_status():
 
 # ─── OBS endpoints ─────────────────────────────────────────────
 
-@app.post("/api/obs/config-check")
+@app.post("/api/obs/config-check", dependencies=[Depends(runtime_session_dependency)])
 def obs_config_check(payload: OBSConfig | None = Body(default=None)):
     """配置检查：先测路径（拉起 OBS），再测连接。"""
     import time as _time
@@ -1714,7 +1725,7 @@ def obs_is_running():
     return {"running": running, "obs_path": obs_path}
 
 
-@app.post("/api/obs/launch")
+@app.post("/api/obs/launch", dependencies=[Depends(runtime_session_dependency)])
 def obs_launch():
     """拉起 OBS 进程（不等待 WebSocket）。"""
     import time as _t

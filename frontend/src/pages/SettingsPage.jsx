@@ -81,7 +81,7 @@ function openIssueTemplate(type) {
 function SectionCard({ title, hint, children, search, className }) {
   if (search) return null;
   return (
-    <div className={`rounded-xl border border-cs2-border/70 bg-cs2-bg-card px-4 py-3.5 ${className ?? ""}`}>
+    <div className={`mgs-glass-card rounded-xl border border-cs2-border/70 bg-cs2-bg-card px-4 py-3.5 ${className ?? ""}`}>
       <div className="mb-2.5 flex items-baseline gap-2">
         <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-secondary">{title}</h2>
         {hint && <span className="text-xs text-cs2-text-muted">{hint}</span>}

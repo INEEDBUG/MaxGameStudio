@@ -12,6 +12,12 @@ vi.mock("../i18n/localeStore.js", () => ({ useLocaleStore: (selector) => selecto
 describe("HomePage", () => {
   beforeEach(() => openExternal.mockClear());
 
+  test("provides a labeled region inside the existing application main", () => {
+    render(<MemoryRouter><HomePage /></MemoryRouter>);
+    expect(screen.getByRole("region", { name: "home.title" })).toBeTruthy();
+    expect(screen.queryByRole("main")).toBeNull();
+  });
+
   test("presents cross-game release notes and feedback actions", () => {
     render(<MemoryRouter><HomePage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "home.title" })).toBeTruthy();
