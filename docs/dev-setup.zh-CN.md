@@ -13,6 +13,10 @@
 
 ## 首次配置
 
+换设备时检出需要续接的分支，不要只下载默认 `main`。源码、目录数据、测试
+和锁文件已纳入 Git；虚拟环境、依赖目录、编译缓存与桌面运行时暂存目录应
+在新设备重新生成。请使用 uv 0.11.x：项目的 `required-version` 不接受 0.12.x。
+
 在仓库根目录执行：
 
 ```powershell
@@ -75,6 +79,10 @@ pnpm --dir frontend run desktop:check
 打包流程。
 
 ## Windows 手动打包
+
+干净检出后，先完成[固定 League runtime 的准备](../packaging/windows/RELEASE-WINDOWS.md)。
+下面的命令不会自动下载并构建该运行时；上面的日常前端/Rust 源码检查不需要
+完整安装包资源。
 
 请在仓库根目录打开一个干净的 PowerShell 终端执行发布构建。应使用
 `desktop:build:ver`，不要使用 `desktop:build`；前者会把指定版本统一应用到

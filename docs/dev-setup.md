@@ -13,6 +13,11 @@ English | [简体中文](dev-setup.zh-CN.md)
 
 ## First-time setup
 
+Clone the branch you intend to resume, not only the default `main`. Source,
+catalog data, tests and lockfiles are tracked; virtual environments, dependency
+directories, compiler caches and desktop runtime staging are rebuilt locally.
+Use uv 0.11.x: the project's `required-version` rejects uv 0.12.x.
+
 Run these commands from the repository root:
 
 ```powershell
@@ -77,6 +82,10 @@ Only use the NSIS flows below when testing installation, upgrades, uninstallatio
 embedded release resources, or an actual release.
 
 ## Manual Windows packaging
+
+On a fresh checkout, first complete the [pinned League runtime preparation](../packaging/windows/RELEASE-WINDOWS.md).
+The commands below do not download or build that runtime implicitly. Ordinary
+frontend/Rust source checks above do not require a complete installer bundle.
 
 Run release builds from a clean PowerShell terminal at the repository root.
 Use `desktop:build:ver` rather than `desktop:build` so the requested version is

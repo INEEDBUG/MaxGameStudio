@@ -8,6 +8,41 @@ Python 后端与 demoparser2 等既有运行时依赖按锁定清单打入 resou
 
 如果仓库配置了 `WINDOWS_PFX_BASE64` 与 `WINDOWS_PFX_PASSWORD`，GitHub Actions 会把 PFX 导入临时证书库，并对主程序、内嵌 `MaxGameStudioLeague.exe` 和 NSIS 安装包执行 Authenticode 签名；内嵌运行时签名后会重新生成哈希清单，再由 Tauri 宿主把该清单编译进自身。未配置时仍允许按项目此前的发布方式产出不带 Authenticode 的安装包，但必须明确说明 Windows 可能显示“未知发布者”；Tauri 更新签名与 SHA-256 校验仍为发布必需条件。
 
+## 从干净检出恢复构建环境（Fresh checkout）
+
+换设备时必须检出需要继续开发的分支，而不只是默认 `main`。例如，本次保存的功能源码位于独立分支：
+
+```powershell
+git clone --single-branch --branch codex/preserve-local-source-20261104 https://github.com/INEEDBUG/MaxGameStudio.git
+Set-Location MaxGameStudio
+```
+
+先按 [开发环境配置](../../docs/dev-setup.zh-CN.md) / [Development Setup](../../docs/dev-setup.md) 安装 Node 22、pnpm 11.9.0、uv 0.11.x、Rust stable/MSVC、C++ Build Tools 和 Windows SDK。日常源码编译按开发文档安装锁定依赖并执行 `desktop:check`，不需要复制旧设备的 `.venv`、`node_modules` 或 `target`。
+
+**首次构建完整 NSIS 安装包还必须生成 League runtime。** 在仓库根目录执行以下步骤，复用 CI 的固定源码与依赖顺序；它们只生成本地资源，不推送分支、tag 或 Release：
+
+```powershell
+$leagueCommit = "14557723706ccc0e0a9d62c470141d4cb7190fcd"
+# 使用一个空的工作目录；保留已有源码目录时，另选路径，不要覆盖或删除它。
+$leagueSource = Join-Path $env:TEMP "maxgamestudio-league-v1.5.1"
+New-Item -ItemType Directory -Path $leagueSource -ErrorAction Stop | Out-Null
+git init --quiet $leagueSource
+git -C $leagueSource remote add origin https://github.com/LeagueAkari/LeagueAkari.git
+git -C $leagueSource fetch --depth 1 origin $leagueCommit
+git -C $leagueSource checkout --detach $leagueCommit
+if ($LASTEXITCODE -ne 0) { throw "Pinned League source checkout failed." }
+Push-Location $leagueSource
+try {
+  corepack.cmd yarn install --immutable
+  if ($LASTEXITCODE -ne 0) { throw "Pinned League dependency install failed." }
+} finally { Pop-Location }
+./packaging/windows/stage-league-runtime.ps1 -SourceDir $leagueSource -Build
+```
+
+然后执行下文锁定 wheel/Python runtime 的准备与 `desktop:build:ver` 流程。`python/`、`frontend/.runtime-cache/`、`bundle-resources/` 和 `dist/wheels/` 是这些步骤的生成物，不是应从旧电脑上传的隐藏源码。不要用单独的 `-FetchPinnedSource -Build` 代替上述依赖安装步骤；`-Build` 要求输入源码已经有 `node_modules`。
+
+未配置签名密钥仍可编译本地 unsigned 安装包。现有 updater 私钥和 Authenticode 证书应通过独立受保护的渠道迁移，不能放进 Git，也不能为了恢复编译而替换现有公钥或生成新的更新身份。仅有 Git 源码不等于恢复了签名发布权限。
+
 ## Cut a release
 
 1. 确保 `frontend/pnpm-lock.yaml` 与 `frontend/src-tauri/Cargo.lock` 已更新。
