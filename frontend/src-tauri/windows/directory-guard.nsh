@@ -27,6 +27,9 @@ Function MGS_CheckProgramAndDataDirectories
   StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
   IfFileExists "$R6" +2
     StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ; The mutex loads the native System.dll into $PLUGINSDIR. Leave that working
+  ; directory so PowerShell Add-Type resolves the .NET framework assembly.
+  SetOutPath "$WINDIR"
   nsExec::ExecToStack /TIMEOUT=20000 '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\validate-install-directories.ps1" -ProgramDir "$INSTDIR\." $R5'
   Pop $R0
   Pop $R1

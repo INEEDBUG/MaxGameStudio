@@ -151,10 +151,12 @@ test('native preflight rejects /D overlapping either product\u2019s files', { sk
     .replaceAll('Software\\cs2insightagent\\MaxGameStudio', `${registry}\\Main`)
     .replaceAll('Software\\MaxGameStudio\\Storage', `${registry}\\Storage`));
   const wrapper = readFileSync(new URL('../../../frontend/src-tauri/windows/directory-guard.nsh', import.meta.url), 'utf8')
-    .replace('${__FILEDIR__}\\validate-install-directories.ps1', disposableGuard);
+    .replace('${__FILEDIR__}\\validate-install-directories.ps1', disposableGuard)
+    .replace('Global\\MaxGameStudio.InstallDirectoryOwnership', 'Global\\MGSInstallerTest.' + randomUUID());
   const profileJson = JSON.stringify({ root: mainData }).replaceAll('"', '$\\"');
   const script = join(root, 'probe.nsi');
   const probe = join(root, 'probe.exe');
+  const trace = join(root, 'directory-validation.txt');
   const source = `Unicode true
 RequestExecutionLevel user
 SilentInstall silent
@@ -164,10 +166,18 @@ Var MGSSelectedDataDir
 ${wrapper}
 Section
   WriteRegStr HKCU "${registry}\\League" "InstallLocation" "${league}"
-  WriteRegStr HKCU "${registry}\\Main" "" "${main}"
+  WriteRegStr HKCU "${registry}\\Uninstall\\MaxGameStudio" "InstallLocation" '$\\"${main}$\\"'
   WriteRegStr HKCU "${registry}\\Storage" "LocationV1" "${profileJson}"
   ReadEnvStr $MGSSelectedDataDir "MGS_TEST_CHOSEN_DATA"
+  Call MGS_ReserveInstallationDirectories
+  StrCmp $R0 "0" +4
+    DeleteRegKey HKCU "${registry}"
+    SetErrorLevel 3
+    Quit
   Call MGS_CheckProgramAndDataDirectories
+  FileOpen $9 "${trace}" w
+  FileWriteUTF16LE /BOM $9 "$R0 $R1"
+  FileClose $9
   DeleteRegKey HKCU "${registry}"
   StrCmp $R0 "0" +3
     SetErrorLevel 2
@@ -196,7 +206,8 @@ SectionEnd
   assert.equal(readFileSync(sentinel, 'utf8'), 'profile sentinel');
   for (const path of [main, allowed]) {
     const run = spawnSync(probe, [`/D=${path}`], { env, windowsHide: true, windowsVerbatimArguments: true, timeout: 15000 });
-    assert.equal(run.status, 0, `rejected separate or registered /D=${path}`);
+    const detail = existsSync(trace) ? readFileSync(trace, 'utf16le').trim() : String(run.error || '');
+    assert.equal(run.status, 0, `rejected separate or registered /D=${path}: ${detail}`);
     assert.equal(readFileSync(join(path, 'fixture-payload.txt'), 'utf8'), 'permitted');
   }
 });
