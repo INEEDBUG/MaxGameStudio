@@ -51,6 +51,7 @@ $oldLoggerPath = @'
       : path.join(path.join(app.getPath('exe'), '..'), 'logs')
 '@
 Update-StandaloneSource $logger $oldLoggerPath "  const logsDir = app.getPath('logs')"
+Update-StandaloneSource $logger "import path from 'node:path'`n" ''
 
 $protocol = 'src\main\utils\deep-link.ts'
 Update-StandaloneSource $protocol "is.dev ? 'league-akari-dev' : 'league-akari'" "is.dev ? 'maxgamestudio-league-dev' : 'maxgamestudio-league'"

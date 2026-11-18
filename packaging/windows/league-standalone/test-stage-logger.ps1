@@ -26,7 +26,7 @@ $sharedEdit = $shared.Find({
   $node -is [System.Management.Automation.Language.CommandAst] -and
     $node.GetCommandName() -eq 'Replace-TextExactlyOnce' -and $node.CommandElements[1].Extent.Text -eq '$loggerPath'
 }, $true)
-$standaloneEdit = $standalone.Find({
+$standaloneEdits = $standalone.FindAll({
   param($node)
   $node -is [System.Management.Automation.Language.CommandAst] -and
     $node.GetCommandName() -eq 'Update-StandaloneSource' -and $node.CommandElements[1].Extent.Text -eq '$logger'
@@ -35,7 +35,7 @@ $anchor = $standalone.Find({
   param($node)
   $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$oldLoggerPath'
 }, $true)
-if (-not ($sharedHelper -and $standaloneHelper -and $sharedEdit -and $standaloneEdit -and $anchor)) {
+if (-not ($sharedHelper -and $standaloneHelper -and $sharedEdit -and $standaloneEdits.Count -and $anchor)) {
   throw 'Logger patch operations were not found.'
 }
 
@@ -65,13 +65,18 @@ try {
       if (-not $afterShared.Contains("process.env.MAXGAMESTUDIO_EMBEDDED === '1'")) {
         throw 'The shared embedded logger predicate was not applied.'
       }
-      & ([scriptblock]::Create($standaloneEdit.Extent.Text))
+      foreach ($edit in $standaloneEdits) {
+        & ([scriptblock]::Create($edit.Extent.Text))
+      }
       $output = [IO.File]::ReadAllText($loggerPath)
+      if ($output -match '(?m)^import\s+path\s+from\s+') {
+        throw 'The standalone logger carries an unused path import.'
+      }
       if (-not $output.Contains("const logsDir = app.getPath('logs')") -or
           $output.Contains("app.getPath('exe')") -or $output.Contains('MAXGAMESTUDIO_EMBEDDED')) {
         throw 'The standalone logger did not use the selected-profile logs path.'
       }
-      Write-Output "$($variant.Name): standalone logger uses app.getPath('logs') after the shared patch."
+      Write-Output "$($variant.Name): the staged logger uses app.getPath('logs') without an unused path import."
     } catch {
       $failures += "$($variant.Name): $($_.Exception.Message.Split([char]10)[0])"
     }

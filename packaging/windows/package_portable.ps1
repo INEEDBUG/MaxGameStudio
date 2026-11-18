@@ -93,7 +93,12 @@ function Get-EmbeddedPython {
     Write-Step "Extract embeddable Python to python\"
     if (Test-Path $DestDir) { Remove-Item -Recurse -Force $DestDir }
     Ensure-Directory (Split-Path $DestDir -Parent)
-    Expand-Archive -Path $ZipLocal -DestinationPath $DestDir -Force
+    # A Windows PowerShell child can inherit PowerShell 7's Archive module path.
+    # The destination is fresh, so both runtimes can use the two-argument API.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $ZipFilePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ZipLocal)
+    $DestinationPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DestDir)
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipFilePath, $DestinationPath)
 
     $pth = Get-ChildItem -Path $DestDir -Filter "*._pth" -File | Select-Object -First 1
     if (-not $pth) { throw "No *._pth file in embeddable Python zip" }
