@@ -34,15 +34,19 @@ jobs:
     env:
       YARN_IGNORE_PATH: '1'
       YARN_ENABLE_GLOBAL_CACHE: 'true'
-      YARN_GLOBAL_FOLDER: ${{ runner.temp }}/league-cache/yarn
-      ELECTRON_CACHE: ${{ runner.temp }}/league-cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/league-cache/electron-builder
       LEAGUE_PIN: 14557723706ccc0e0a9d62c470141d4cb7190fcd
       LEAGUE_BRANCH_VERSION: '1.0.0-beta.1'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Configure League build caches
+        shell: pwsh
+        run: |
+          "YARN_GLOBAL_FOLDER=$(Join-Path $env:RUNNER_TEMP 'league-cache/yarn')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "ELECTRON_CACHE=$(Join-Path $env:RUNNER_TEMP 'league-cache/electron')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "ELECTRON_BUILDER_CACHE=$(Join-Path $env:RUNNER_TEMP 'league-cache/electron-builder')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Resolve League version
         id: version
