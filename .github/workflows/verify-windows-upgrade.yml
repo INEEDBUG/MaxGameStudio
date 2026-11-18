@@ -3,36 +3,120 @@ on:
   workflow_dispatch:
     inputs:
       candidate_run_id:
-        description: Candidate run ID, or published-3.1.4 for the original release baseline
+        description: Candidate run ID, or published-3.1.4 for a repair-package retest
         required: true
+      candidate_version:
+        description: Exact version produced by the candidate run
+        required: true
+        default: '3.2.0-beta.1'
+      league_run_id:
+        description: Private League candidate run from the same commit as Main (preferred)
+        required: false
+      league_tag:
+        description: Published League tag used only if no League run is specified (blank to omit)
+        required: false
+        default: 'league-v1.0.0-beta.1'
 permissions:
   contents: read
   actions: read
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Download completed candidate
+      - name: Download stable repair package and completed candidate
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
+          $baselineFile = 'MaxGameStudio_3.1.4_x64-repair-setup.exe'
+          gh release download v3.1.4 --repo $env:GITHUB_REPOSITORY --pattern $baselineFile --dir baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Published repair package download failed' }
+          $baseline = (Resolve-Path -LiteralPath (Join-Path baseline $baselineFile)).Path
+          "MGS_BASELINE_INSTALLER=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           if ($env:CANDIDATE_RUN_ID -eq 'published-3.1.4') {
-            gh release download v3.1.4 --repo $env:GITHUB_REPOSITORY --pattern MaxGameStudio_3.1.4_x64-setup.exe --dir candidate
-            if ($LASTEXITCODE -ne 0) { throw 'Published baseline download failed' }
+            "MGS_CANDIDATE_INSTALLER=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "MGS_EXPECTED_VERSION=3.1.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             exit 0
           }
           if ($env:CANDIDATE_RUN_ID -notmatch '^\d+$') { throw 'Invalid candidate run ID' }
-          $run = gh run view $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName | ConvertFrom-Json
-          if ($run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or $run.workflowName -ne 'Release Windows') { throw 'Candidate is not a successful manual Release Windows build.' }
-          gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name MaxGameStudio-3.1.4 --dir candidate
+          if ($env:CANDIDATE_VERSION -notmatch '^\d+\.\d+\.\d+(?:-(?:beta|rc)\.\d+)?$') { throw 'Invalid candidate version' }
+          $run = gh run view $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName,headSha | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or
+              $run.workflowName -cne 'Release Windows' -or $run.headSha -cnotmatch '^[a-f0-9]{40}$') {
+            throw 'Candidate is not a successful manual Release Windows build.'
+          }
+          "MGS_MAIN_CANDIDATE_SHA=$($run.headSha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "MaxGameStudio-$env:CANDIDATE_VERSION" --dir candidate
           if ($LASTEXITCODE -ne 0) { throw 'Candidate download failed' }
-      - name: Verify non-default-directory upgrade
+          $installers = @(Get-ChildItem candidate -Recurse -File -Filter "MaxGameStudio_$($env:CANDIDATE_VERSION)_x64-setup.exe")
+          if ($installers.Count -ne 1) { throw 'Expected exactly one candidate installer' }
+          "MGS_CANDIDATE_INSTALLER=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MGS_EXPECTED_VERSION=$env:CANDIDATE_VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Download and verify the private League candidate
+        if: inputs.league_run_id != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEAGUE_RUN_ID: ${{ inputs.league_run_id }}
+        run: |
+          if ($env:LEAGUE_RUN_ID -notmatch '^\d+$' -or $env:MGS_MAIN_CANDIDATE_SHA -cnotmatch '^[a-f0-9]{40}$') {
+            throw 'Provide a private League run ID and a Main candidate run.'
+          }
+          $run = gh run view $env:LEAGUE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName,headBranch,headSha | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'push' -or
+              $run.workflowName -cne 'Release League Toolbox for Windows' -or $run.headBranch -cne 'codex/desktop-utilities-beta' -or
+              $run.headSha -cne $env:MGS_MAIN_CANDIDATE_SHA) {
+            throw 'The private League and Main candidate builds must be successful builds of the same commit.'
+          }
+          $artifact = 'league-toolbox-1.0.0-beta.1-windows-x64'
+          $filename = 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe'
+          gh run download $env:LEAGUE_RUN_ID --repo $env:GITHUB_REPOSITORY --name $artifact --dir league-candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Private League candidate download failed.' }
+          $path = (Resolve-Path -LiteralPath (Join-Path league-candidate $filename)).Path
+          $sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-Content -LiteralPath "$path.sha256" -Raw).Trim() -cne "$sha *$filename") {
+            throw 'The private League installer does not match its SHA-256 file.'
+          }
+          "MGS_LEAGUE_INSTALLER=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Download and verify the published League installer
+        if: inputs.league_run_id == '' && inputs.candidate_run_id != 'published-3.1.4' && inputs.league_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEAGUE_TAG: ${{ inputs.league_tag }}
+        run: |
+          $tag = $env:LEAGUE_TAG
+          if ($tag -cnotmatch '^league-v(\d+\.\d+\.\d+(?:-beta\.\d+)?)$') { throw 'Invalid League release tag.' }
+          $version = $Matches[1]
+          $filename = "MaxGameStudioLeague_$($version)_x64-setup.exe"
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag -or $release.draft -or $release.prerelease -ne ($version -like '*-beta.*')) {
+            throw 'Expected the exact published League release.'
+          }
+          $assets = @($release.assets | Where-Object { $_.name -ceq $filename })
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$filename"
+          if ($assets.Count -ne 1 -or $assets[0].browser_download_url -cne $url -or $assets[0].digest -notmatch '^sha256:[a-f0-9]{64}$') {
+            throw 'The exact League installer or its SHA-256 is missing.'
+          }
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $filename --dir league
+          if ($LASTEXITCODE -ne 0) { throw 'League installer download failed.' }
+          $path = (Resolve-Path -LiteralPath (Join-Path league $filename)).Path
+          $sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+          if ("sha256:$sha" -ne $assets[0].digest -or (Get-Item -LiteralPath $path).Length -ne $assets[0].size) {
+            throw 'Downloaded League installer does not match GitHub release metadata.'
+          }
+          "MGS_LEAGUE_INSTALLER=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify non-default-directory upgrade and optional coexistence
         shell: pwsh
         run: |
-          $installers = @(Get-ChildItem candidate -Recurse -Filter MaxGameStudio_3.1.4_x64-setup.exe)
-          if ($installers.Count -ne 1) { throw 'Expected exactly one candidate installer' }
-          ./packaging/windows/tests/verify-packaged-upgrade.ps1 -Installer $installers[0].FullName
+          $options = @{
+            Installer = $env:MGS_CANDIDATE_INSTALLER
+            BaselineInstaller = $env:MGS_BASELINE_INSTALLER
+            ExpectedVersion = $env:MGS_EXPECTED_VERSION
+          }
+          if ($env:MGS_LEAGUE_INSTALLER) { $options.LeagueInstaller = $env:MGS_LEAGUE_INSTALLER }
+          ./packaging/windows/tests/verify-packaged-upgrade.ps1 @options

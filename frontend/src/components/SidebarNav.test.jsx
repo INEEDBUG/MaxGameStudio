@@ -44,16 +44,17 @@ describe("SidebarNav", () => {
     expect(screen.getByRole("button", { name: "nav.sectionCs2" }).getAttribute("aria-current")).toBeNull();
   });
 
-  test("exposes the single League workspace as a direct route", () => {
+  test("exposes Steam accounts independently from the game workspaces", () => {
     render(
-      <MemoryRouter initialEntries={["/league/history"]}>
+      <MemoryRouter initialEntries={["/steam"]}>
         <SidebarNav />
       </MemoryRouter>,
     );
 
-    const leagueLink = screen.getByRole("link", { name: "nav.sectionLeague" });
-    expect(leagueLink.getAttribute("href")).toBe("/league");
-    expect(leagueLink.getAttribute("aria-current")).toBe("page");
+    const steamLink = screen.getByRole("link", { name: "nav.steamAccounts" });
+    expect(steamLink.getAttribute("href")).toBe("/steam");
+    expect(steamLink.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("link", { name: "nav.sectionLeague" })).toBeNull();
     expect(screen.queryByRole("link", { name: "nav.sensitivityLab" })).toBeNull();
   });
 

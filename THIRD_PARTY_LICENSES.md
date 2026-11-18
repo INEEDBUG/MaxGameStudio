@@ -2,7 +2,7 @@
 
 MaxGameStudio 在编译与运行时依赖以下开源组件。常规编译依赖主要使用 MIT / BSD / Apache-2.0 / ISC 等宽松型许可证；另有下文单独列出的可选 GPL 工具。项目主体仍使用 **PolyForm Noncommercial 1.0.0**。
 
-League 工作台与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面应用分发，不是独立的桌面产品；下列条目记录它们实际涉及的依赖与许可证边界。当前稳定版本为 `v3.1.1`；本文仅记录依赖归属与许可证边界，不替代 GitHub Release 的版本说明。
+MaxGameStudio 与 MaxGameStudio League 使用同一仓库，分别构建与分发。独立 League 工具箱基于 MIT 许可的 LeagueAkari 1.5.1；安装包保留其版权、许可证和所需第三方通知。
 
 分发本项目编译产物（便携包 / 安装包 / Docker 镜像等）时，请保留各自的版权声明与许可证全文。具体许可证文本可在每个依赖包源码中的 `LICENSE` 文件查阅。
 
@@ -55,3 +55,7 @@ League 工作台与 VALORANT 实验室均随同一个 MaxGameStudio Tauri 桌面
 
 - The match share-code decoder in `backend/app/valve_demo_resolver.py` is a Python adaptation of `akiver/csgo-sharecode` (MIT). Source: https://github.com/akiver/csgo-sharecode. The required notice is retained in `third_party/licenses/csgo-sharecode-LICENSE.txt`.
 - The integrated League automation lab and embedded workspace use the pinned `LeagueAkari` (MIT) source for the local LCU discovery and game-flow surface, adapted to MaxGameStudio's Python/Tauri host and branding. Source: https://github.com/LeagueAkari/LeagueAkari. The required notice is retained in `third_party/licenses/LeagueAkari-LICENSE.txt`; the source-built runtime is hosted as part of MaxGameStudio rather than presented as an independently installed upstream product.
+
+## Game identity icons
+
+Steam, Counter-Strike, VALORANT and League of Legends SVGs are from [Simple Icons 16.0.0](https://github.com/simple-icons/simple-icons/tree/16.0.0), whose icon collection is CC0-1.0. Game names and marks belong to their respective owners; this software is not affiliated with those owners. The four SVGs are bundled locally and do not require network loading.

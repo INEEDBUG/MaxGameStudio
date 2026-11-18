@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sys
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
 from packaging.version import Version
+from pytest import raises
 
 _BACKEND = Path(__file__).resolve().parents[1]
 if str(_BACKEND) not in sys.path:
@@ -13,6 +15,7 @@ if str(_BACKEND) not in sys.path:
 
 from app import update_info
 from app.update_info import (
+    _fetch_latest_release_dict,
     _guess_download_urls,
     _fetch_latest_release_dict_via_redirect,
     _github_api_token,
@@ -87,6 +90,54 @@ def test_pick_download_urls_prefers_real_current_asset_over_legacy_order():
     setup, zip_url = pick_download_urls(assets, ver)
     assert setup == "https://example/current-setup"
     assert zip_url is None
+
+
+def _release_asset(tag, name):
+    return {
+        "name": name,
+        "browser_download_url": f"https://github.com/INEEDBUG/MaxGameStudio/releases/download/{tag}/{name}",
+    }
+
+
+def test_314_uses_only_the_repair_installer():
+    original = _release_asset("v3.1.4", "MaxGameStudio_3.1.4_x64-setup.exe")
+    repair = _release_asset("v3.1.4", "MaxGameStudio_3.1.4_x64-repair-setup.exe")
+    assert pick_download_urls([original, repair], "3.1.4") == (repair["browser_download_url"], None)
+    assert pick_download_urls([original], "3.1.4") == (None, None)
+    assert _guess_download_urls("v3.1.4", "3.1.4")[0] == repair["browser_download_url"]
+
+
+def test_league_release_never_generates_a_main_notification():
+    payload = {
+        "tag_name": "league-v99.0.0",
+        "html_url": "https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v99.0.0",
+        "body": "League only",
+        "assets": [_release_asset("league-v99.0.0", "MaxGameStudio_99.0.0_x64-setup.exe")],
+    }
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
+        result = build_update_payload("3.1.0", "file", force_refresh=True)
+    assert result["latest_version"] is None
+    assert result["release_url"] == ""
+    assert result["downloads"]["setup_url"] is None
+
+
+def test_api_falls_back_to_highest_eligible_main_release_in_mixed_list():
+    league = {"tag_name": "league-v99.0.0", "assets": [_release_asset("league-v99.0.0", "MaxGameStudioLeague_99.0.0_x64-setup.exe")]}
+    beta = {"tag_name": "v3.2.0-beta.1", "prerelease": True, "assets": [_release_asset("v3.2.0-beta.1", "MaxGameStudio_3.2.0-beta.1_x64-setup.exe")]}
+    misleading = {"tag_name": "v12.1.0", "assets": [{
+        "name": "MaxGameStudio_12.1.0_x64-setup.exe",
+        "browser_download_url": league["assets"][0]["browser_download_url"],
+    }]}
+    older = {"tag_name": "v3.1.2", "assets": [_release_asset("v3.1.2", "MaxGameStudio_3.1.2_x64-setup.exe")]}
+    stable = {"tag_name": "v3.1.4", "assets": [_release_asset("v3.1.4", "MaxGameStudio_3.1.4_x64-repair-setup.exe")]}
+    responses = [
+        _FakeHttpResponse(update_info.GITHUB_LATEST_API, json.dumps(league)),
+        _FakeHttpResponse("https://api.github.com/repos/INEEDBUG/MaxGameStudio/releases?per_page=100",
+                          json.dumps([league, beta, misleading, older, stable])),
+    ]
+    with patch.object(update_info.urllib.request, "urlopen", side_effect=responses) as mocked:
+        assert _fetch_latest_release_dict(timeout_sec=0.1) == stable
+    assert mocked.call_count == 2
 
 
 def test_registry_display_name_compatibility_contains_only_exact_legacy_name():
@@ -196,8 +247,8 @@ def test_build_update_payload_upgrade():
         "html_url": "https://github.com/o/r/releases/tag/v2.0.0",
         "body": "## Notes\n\nhello",
         "assets": [
-            {"name": "CS2InsightAgent-2.0.0-Setup.exe", "browser_download_url": "https://dl/setup"},
-            {"name": "CS2InsightAgent-2.0.0-windows-amd64.zip", "browser_download_url": "https://dl/zip"},
+            _release_asset("v2.0.0", "CS2InsightAgent-2.0.0-Setup.exe"),
+            _release_asset("v2.0.0", "CS2InsightAgent-2.0.0-windows-amd64.zip"),
         ],
     }
     with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
@@ -205,7 +256,7 @@ def test_build_update_payload_upgrade():
     assert out["update_available"] is True
     assert out["show_latest_release"] is False
     assert out["latest_version"] == "2.0.0"
-    assert out["downloads"]["setup_url"] == "https://dl/setup"
+    assert out["downloads"]["setup_url"] == payload["assets"][0]["browser_download_url"]
 
 
 def test_build_update_payload_unknown_local_shows_latest():
@@ -295,6 +346,14 @@ def test_on_mode_uses_mirror_only(monkeypatch):
 def test_parse_release_tag_from_url():
     url = "https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.0.0"
     assert _parse_release_tag_from_url(url) == "v3.0.0"
+    assert _parse_release_tag_from_url(mirror_wrap_url("https://mirror.example", url)) == "v3.0.0"
+
+
+def test_redirect_cannot_guess_a_main_installer_using_another_repository_tag():
+    url = "https://github.com/other/project/releases/tag/v99.0.0"
+    with patch.object(update_info.urllib.request, "urlopen", return_value=_FakeHttpResponse(url, "")):
+        with raises(ValueError):
+            _fetch_latest_release_dict_via_redirect(timeout_sec=0.1)
 
 
 def test_build_update_payload_rate_limit_falls_back_to_redirect():
@@ -303,8 +362,8 @@ def test_build_update_payload_rate_limit_falls_back_to_redirect():
         "html_url": "https://github.com/o/r/releases/tag/v2.0.0",
         "body": "",
         "assets": [
-            {"name": "CS2InsightAgent-2.0.0-Setup.exe", "browser_download_url": "https://dl/setup"},
-            {"name": "CS2InsightAgent-2.0.0-windows-amd64.zip", "browser_download_url": "https://dl/zip"},
+            _release_asset("v2.0.0", "CS2InsightAgent-2.0.0-Setup.exe"),
+            _release_asset("v2.0.0", "CS2InsightAgent-2.0.0-windows-amd64.zip"),
         ],
     }
     err = urllib.error.HTTPError(

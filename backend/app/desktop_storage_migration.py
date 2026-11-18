@@ -19,7 +19,7 @@ import time
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
 try:
@@ -61,6 +61,14 @@ class StorageMigrationResult:
     file_count: int
     byte_count: int
     marker: str
+
+
+@dataclass(frozen=True)
+class LegacyStorageLayout:
+    root: Path
+    data: Path
+    webview: Path
+    league_runtime: Path
 
 
 def _is_reparse(path: Path) -> bool:
@@ -308,6 +316,8 @@ def _expand_legacy_cache_sources(pairs: list[tuple[Path, Path]], destination: Pa
             expanded.append((path, rel))
             continue
         path = _safe_resolve(path)
+        if path == destination or path in destination.parents or destination in path.parents:
+            raise StorageMigrationError("legacy data and destination must be distinct, non-nested paths")
         children = list(path.iterdir())
         if not any(_is_reparse(child) for child in children):
             expanded.append((path, rel))
@@ -336,29 +346,46 @@ def _verify_legacy_cache_sources(layouts, aliases, destination: Path) -> None:
 
 def migrate_storage(*, destination: Path, source: Path | None = None,
                     legacy_appdata: Path | None = None, legacy_localappdata: Path | None = None,
+                    legacy_layout: LegacyStorageLayout | None = None,
                     host_pid: int | None = None,
                     process_check: bool = True,
                     copy_impl: Callable[[Path, Path], None] = _copy_tree) -> StorageMigrationResult:
-    if source is not None and (legacy_appdata is not None or legacy_localappdata is not None):
-        raise StorageMigrationError("source mode cannot include legacy appdata paths")
-    if (source is None) == (legacy_appdata is None or legacy_localappdata is None):
-        raise StorageMigrationError("provide either --source or both legacy appdata paths")
+    if sum(value is not None for value in (source, legacy_appdata, legacy_layout)) != 1:
+        raise StorageMigrationError("provide a source directory, legacy AppData directories, or a selected legacy layout")
+    if (legacy_appdata is None) != (legacy_localappdata is None):
+        raise StorageMigrationError("provide both legacy AppData directories")
     source_root = _safe_resolve(Path(source)) if source is not None else None
     appdata_root = _safe_resolve(Path(legacy_appdata)) if legacy_appdata is not None else None
     local_root = _safe_resolve(Path(legacy_localappdata)) if legacy_localappdata is not None else None
     destination = _safe_resolve(Path(destination))
-    pairs = _build_sources(source_root, appdata_root, local_root)
+    if legacy_layout is not None:
+        legacy_root = _safe_resolve(legacy_layout.root)
+        layout_paths = tuple(_safe_resolve(getattr(legacy_layout, field))
+                             for field in ("data", "webview", "league_runtime"))
+        if legacy_root == destination or legacy_root in destination.parents or destination in legacy_root.parents:
+            raise StorageMigrationError("legacy storage root and destination must be distinct, non-nested paths")
+        pairs = [(path, Path(name)) for path, name in zip(layout_paths, LAYOUT_NAMES) if path.is_dir()]
+        for state_name in ("window-state.json", ".window-state.json"):
+            current_state = legacy_root / state_name
+            if current_state.is_file():
+                pairs.append((current_state, Path("window-state.json")))
+                break
+    else:
+        pairs = _build_sources(source_root, appdata_root, local_root)
     invocation = {"mode": "source" if source is not None else "legacy",
                   "source": str(source_root) if source_root else None,
                   "legacy_appdata": str(appdata_root) if appdata_root else None,
                   "legacy_localappdata": str(local_root) if local_root else None,
                   "destination": str(destination)}
+    if legacy_layout is not None:
+        invocation["mode"] = "selected_legacy"
+        invocation["layout"] = [str(path) for path in (legacy_root, *layout_paths)]
     if source is not None and not pairs:
         raise StorageMigrationError("source directory does not exist")
     if source_root is not None and not source_root.is_dir():
         raise StorageMigrationError("source must be a directory")
     layouts, aliases = {}, {}
-    if appdata_root is not None:
+    if appdata_root is not None or legacy_layout is not None:
         pairs, layouts, aliases = _expand_legacy_cache_sources(pairs, destination)
     if appdata_root is not None:
         # Never launch an old Electron executable to export settings: it can
@@ -436,21 +463,78 @@ def migrate_storage(*, destination: Path, source: Path | None = None,
     return StorageMigrationResult("migrated", str(destination), expected_count, expected_bytes, str(destination / MARKER_NAME))
 
 
+def retire_embedded_league(program_root: Path) -> int:
+    """Remove the shipped and still unmodified files of the old embedded app."""
+    runtime = _safe_resolve(program_root / "league-runtime")
+    manifest = runtime / "maxgamestudio-runtime-manifest.json"
+    hashes = runtime / "maxgamestudio-runtime-hashes.json"
+    if not manifest.is_file() or not hashes.is_file():
+        return 0
+    _reject_reparse_tree(manifest)
+    _reject_reparse_tree(hashes)
+    info = json.loads(manifest.read_text(encoding="utf-8"))
+    if (info.get("component"), info.get("productBrand"), info.get("updaterOwnership")) != (
+        "league-runtime", "MaxGameStudio League", "MaxGameStudio host",
+    ):
+        return 0
+    inventory = json.loads(hashes.read_text(encoding="utf-8"))
+    if not isinstance(inventory, dict) or "MaxGameStudioLeague.exe" not in inventory:
+        raise StorageMigrationError("invalid embedded League inventory")
+    removable = []
+    for name, digest in inventory.items():
+        relative = PurePosixPath(name)
+        if (
+            not relative.parts or relative.is_absolute() or ".." in relative.parts
+            or ":" in name or "\\" in name or relative.name == hashes.name
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        ):
+            raise StorageMigrationError("invalid embedded League inventory entry")
+        path = _safe_resolve(runtime.joinpath(*relative.parts))
+        if path.is_file() and _digest(path) == digest:
+            removable.append(path)
+    if manifest not in removable:
+        raise StorageMigrationError("embedded League manifest hash does not match")
+
+    # The original manifest stays until all payload deletions have succeeded.
+    for path in removable:
+        if path != manifest:
+            path.unlink()
+    hashes.unlink()
+    manifest.unlink()
+    parents = {parent for path in removable for parent in path.parents if runtime in parent.parents}
+    for parent in sorted(parents, key=lambda path: len(path.parts), reverse=True):
+        if not any(parent.iterdir()):
+            parent.rmdir()
+    if not any(runtime.iterdir()):
+        runtime.rmdir()
+    return len(removable)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Safely copy MaxGameStudio desktop storage")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--source", type=Path)
     group.add_argument("--legacy-appdata", type=Path)
+    group.add_argument("--selected-legacy-layout", nargs=4, type=Path,
+                       metavar=("ROOT", "DATA", "WEBVIEW", "LEAGUE"))
+    group.add_argument("--retire-embedded-league", type=Path, metavar="PROGRAM_ROOT")
     parser.add_argument("--legacy-localappdata", type=Path)
-    parser.add_argument("--destination", required=True, type=Path)
+    parser.add_argument("--destination", type=Path)
     parser.add_argument("--host-pid", type=int)
     args = parser.parse_args(argv)
     try:
+        if args.retire_embedded_league is not None:
+            retire_embedded_league(args.retire_embedded_league)
+            return 0
+        if args.destination is None:
+            parser.error("--destination is required for migration")
+        layout = LegacyStorageLayout(*args.selected_legacy_layout) if args.selected_legacy_layout else None
         result = migrate_storage(destination=args.destination, source=args.source,
                                  legacy_appdata=args.legacy_appdata,
                                  legacy_localappdata=args.legacy_localappdata,
+                                 legacy_layout=layout,
                                  host_pid=args.host_pid)
-    except (StorageMigrationError, OSError) as exc:
+    except (StorageMigrationError, OSError, ValueError) as exc:
         print(f"storage migration failed: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result.__dict__, ensure_ascii=False))

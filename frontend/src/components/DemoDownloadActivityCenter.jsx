@@ -26,23 +26,31 @@ export default function DemoDownloadActivityCenter() {
   const refreshJobs = useDemoDownloadStore((state) => state.refreshJobs);
   const active = useMemo(() => jobs.filter((job) => job.status === "running"), [jobs]);
   const current = active[0] || null;
+  const hasActiveJobs = active.length > 0;
 
   useEffect(() => {
+    void refreshJobs();
+    const resume = () => { if (!document.hidden) void refreshJobs(); };
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      void updateTaskbarProgress(null);
+    };
+  }, [refreshJobs]);
+
+  useEffect(() => {
+    if (!hasActiveJobs) return;
     let stopped = false;
     const poll = async () => {
       await refreshJobs();
       if (!stopped) timer = window.setTimeout(poll, document.hidden ? 1200 : 500);
     };
-    let timer = window.setTimeout(poll, 0);
-    const resume = () => { if (!document.hidden) void refreshJobs(); };
-    document.addEventListener("visibilitychange", resume);
+    let timer = window.setTimeout(poll, document.hidden ? 1200 : 500);
     return () => {
       stopped = true;
       window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", resume);
-      void updateTaskbarProgress(null);
     };
-  }, [refreshJobs]);
+  }, [refreshJobs, hasActiveJobs]);
 
   useEffect(() => { void updateTaskbarProgress(current); }, [current?.job_id, current?.progress, current?.stage]);
   if (!current) return null;

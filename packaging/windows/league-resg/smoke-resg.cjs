@@ -1,9 +1,12 @@
 // Isolated Electron acceptance test. Does not connect to LCU, launch games, or use user profiles.
-// node smoke-resg.cjs <staged-source> <new-output-directory>
+// node smoke-resg.cjs <pinned-or-staged-source-with-dependencies> <new-output-directory>
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { createRequire } = require('node:module')
+if (!process.argv[2] || !process.argv[3]) {
+  throw new Error('Specify the pinned League source and a new output directory.')
+}
 const source = path.resolve(process.argv[2])
 const output = path.resolve(process.argv[3])
 const dependency = createRequire(path.join(source, 'package.json'))
@@ -11,10 +14,12 @@ const dependency = createRequire(path.join(source, 'package.json'))
 if (!process.versions.electron) {
   if (fs.existsSync(output)) throw new Error('Use a new, isolated output directory')
   fs.mkdirSync(output, { recursive: true })
+  const stagedController = path.join(source, 'src/main/shards/window-manager/resg-window/resg-window-controller.ts')
+  const controller = fs.existsSync(stagedController)
+    ? stagedController
+    : path.join(__dirname, 'resg-window-controller.ts')
   dependency('esbuild').buildSync({
-    entryPoints: [
-      path.join(source, 'src/main/shards/window-manager/resg-window/resg-window-controller.ts')
-    ],
+    entryPoints: [controller],
     outfile: path.join(output, 'controller.cjs'),
     bundle: true,
     platform: 'node',
@@ -50,19 +55,34 @@ Module._load = function (request, parent, isMain) {
     return originalLoad.call(this, dependency.resolve(request), parent, isMain)
   return originalLoad.call(this, request, parent, isMain)
 }
-app.setPath('userData', path.join(output, 'profile'))
-app.setPath('sessionData', path.join(output, 'profile'))
+const profile = path.join(output, 'profile')
+fs.mkdirSync(profile)
+app.setPath('userData', profile)
+app.setPath('sessionData', profile)
 app.setPath('temp', output)
 app.disableHardwareAcceleration()
 // Exercise real Chromium and native lifecycle without covering/focusing the user's game.
 BrowserWindow.prototype.show = function () {}
 BrowserWindow.prototype.showInactive = function () {}
 const results = []
+const events = []
+const started = Date.now()
+const note = (event, detail = '') => {
+  if (events.length < 100) events.push({ ms: Date.now() - started, event, detail })
+}
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('did-fail-load', (_event, code, description, url, mainFrame) => {
+    if (mainFrame && /^https:\/\/(www\.)?resg\.top\//.test(url)) note('load-failure', { code, description, path: new URL(url).pathname })
+  })
+  contents.on('dom-ready', () => { if (/^https:\/\/(www\.)?resg\.top\//.test(contents.getURL())) note('dom-ready', new URL(contents.getURL()).pathname) })
+  contents.on('did-finish-load', () => { if (/^https:\/\/(www\.)?resg\.top\//.test(contents.getURL())) note('finish-load', new URL(contents.getURL()).pathname) })
+  contents.on('render-process-gone', (_event, details) => note('renderer-gone', details.reason))
+})
 function finish(error) {
   fs.writeFileSync(
     path.join(output, 'result.json'),
     JSON.stringify(
-      { passed: !error, checks: results, error: error ? String(error.stack || error) : null },
+      { passed: !error, checks: results, events, error: error ? String(error.stack || error) : null },
       null,
       2
     )
@@ -128,7 +148,7 @@ app.whenReady().then(async () => {
     while (Date.now() < deadline) {
       const snapshot = controller.getSnapshot()
       if (snapshot.status === 'ready') return snapshot
-      if (snapshot.status === 'error') throw new Error('RESG status: ' + snapshot.error)
+      if (snapshot.status === 'error') { note('snapshot-failure', snapshot); throw new Error('RESG status: ' + snapshot.error) }
       await delay(200)
     }
     throw new Error('Champion never became ready')
@@ -136,7 +156,7 @@ app.whenReady().then(async () => {
   const remote = () =>
     webContents
       .getAllWebContents()
-      .find((contents) => /^https:\/\/(www\.)?(resg\.top|bilibili\.com)/.test(contents.getURL()))
+      .find((contents) => /^https:\/\/(www\.)?resg\.top\//.test(contents.getURL()))
   try {
     await controller.onInit()
     assert.equal(remote(), undefined)
@@ -154,13 +174,13 @@ app.whenReady().then(async () => {
       runInAction(() => {
         data.champSelect.session.myTeam[0].championId = id
       })
+      note('request-hero', id)
       await ready()
-      const frame = remote().mainFrame.framesInSubtree.find((frame) =>
-        frame.url.startsWith('https://www.bilibilitoy.com/toy/resg/')
-      )
+      note('hero-ready', id)
+      const frame = remote().mainFrame
       assert.ok(frame)
       const actual = await frame.executeJavaScript(
-        `({name:document.querySelector('h1')?.textContent?.trim(),node:typeof require,bridge:typeof window.electron,path:location.pathname})`
+        `({name:document.querySelector('.entity-hero .entity-identity h1')?.textContent?.trim(),node:typeof require,bridge:typeof window.electron,path:location.pathname})`
       )
       assert.equal(actual.name, name)
       assert.equal(actual.node, 'undefined')

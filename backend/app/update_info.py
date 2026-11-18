@@ -19,9 +19,10 @@ from packaging.version import InvalidVersion, Version
 
 _GITHUB_OWNER_REPO = (os.environ.get("CS2_INSIGHT_RELEASE_REPO") or "INEEDBUG/MaxGameStudio").strip()
 GITHUB_LATEST_API = f"https://api.github.com/repos/{_GITHUB_OWNER_REPO}/releases/latest"
+_GITHUB_RELEASES_API = f"https://api.github.com/repos/{_GITHUB_OWNER_REPO}/releases?per_page=100"
 GITHUB_RELEASE_LATEST_PAGE = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/latest"
 _USER_AGENT = "MaxGameStudio-UpdateCheck/1.0"
-_RE_RELEASE_TAG_PATH = re.compile(r"/releases/tag/([^/?#]+)\s*$", re.IGNORECASE)
+_RE_MAIN_STABLE_TAG = re.compile(r"[vV]?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", re.ASCII)
 _RE_GITHUB_URL = re.compile(r"https://github\.com/[^\s\"']+", re.IGNORECASE)
 
 # 社区镜像前缀（{prefix}/{完整 GitHub URL}）；可用 CS2_INSIGHT_UPDATE_MIRROR_PRESETS 覆盖
@@ -107,15 +108,46 @@ def unwrap_github_url(url: str) -> str:
     return text
 
 
-def pick_download_urls(assets: list[dict[str, Any]], version_without_v: str) -> tuple[Optional[str], Optional[str]]:
-    setup_names = tuple(pattern.format(version_without_v) for pattern in _SETUP_ASSET_NAME_PATTERNS)
+def _setup_asset_names(version: str) -> tuple[str, ...]:
+    if version == "3.1.4":
+        return ("MaxGameStudio_3.1.4_x64-repair-setup.exe",)
+    return tuple(pattern.format(version) for pattern in _SETUP_ASSET_NAME_PATTERNS)
+
+
+def _matches_release_download(url: str, tag: str, name: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    components = [unquote(part) for part in parsed.path.split("/")]
+    repo = _GITHUB_OWNER_REPO.split("/")
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.casefold() == "github.com"
+        and not (parsed.params or parsed.query or parsed.fragment)
+        and len(components) == 7
+        and [part.casefold() for part in components[1:3]] == [part.casefold() for part in repo]
+        and components[3:] == ["releases", "download", tag, name]
+    )
+
+
+def pick_download_urls(
+    assets: list[dict[str, Any]], version_without_v: str, *, release_tag: str | None = None
+) -> tuple[Optional[str], Optional[str]]:
+    setup_names = _setup_asset_names(version_without_v)
     setup_urls: dict[str, str] = {}
     zip_url: Optional[str] = None
     want_zip = f"CS2InsightAgent-{version_without_v}-windows-amd64.zip"
     for a in assets:
+        if not isinstance(a, dict):
+            continue
         name = str(a.get("name") or "")
         url = a.get("browser_download_url")
-        if not url:
+        if not isinstance(url, str) or not url:
+            continue
+        if name not in setup_names and name != want_zip:
+            continue
+        if release_tag and not _matches_release_download(url, release_tag, name):
             continue
         if name in setup_names and name not in setup_urls:
             # Preserve the first concrete URL for a name.  More importantly,
@@ -126,6 +158,23 @@ def pick_download_urls(assets: list[dict[str, Any]], version_without_v: str) -> 
             zip_url = zip_url or str(url)
     setup_url = next((setup_urls[name] for name in setup_names if name in setup_urls), None)
     return setup_url, zip_url
+
+
+def _main_stable_version(data: Any, *, require_asset: bool = False) -> str | None:
+    if not isinstance(data, dict) or data.get("draft") or data.get("prerelease"):
+        return None
+    if "product" in data and data["product"] != "maxgamestudio":
+        return None
+    tag = data.get("tag_name")
+    if not isinstance(tag, str) or not _RE_MAIN_STABLE_TAG.fullmatch(tag):
+        return None
+    version = normalize_release_tag(tag)
+    assets = data.get("assets", [])
+    if not isinstance(assets, list):
+        return None
+    if (assets or require_asset) and not any(pick_download_urls(assets, version, release_tag=tag)):
+        return None
+    return version
 
 
 def parse_semver_loose(text: str) -> Optional[Version]:
@@ -306,19 +355,20 @@ def _is_retryable_network_error(exc: BaseException) -> bool:
 
 
 def _parse_release_tag_from_url(url: str) -> str:
-    canonical = unwrap_github_url(url)
-    path = urlparse(canonical).path
-    m = _RE_RELEASE_TAG_PATH.search(path)
-    if not m:
-        raise ValueError(f"无法从 URL 解析版本标签: {url}")
-    return m.group(1).strip()
+    parsed = urlparse(unwrap_github_url(url))
+    prefix = f"/{_GITHUB_OWNER_REPO}/releases/tag/"
+    if parsed.scheme == "https" and parsed.netloc.casefold() == "github.com" and parsed.path.casefold().startswith(prefix.casefold()):
+        tag = parsed.path[len(prefix):]
+        if tag and "/" not in tag:
+            return tag
+    raise ValueError("无法从 MaxGameStudio 主程序的发布地址解析版本标签")
 
 
 def _guess_download_urls(tag_raw: str, tag_norm: str) -> tuple[str, None]:
     enc_tag = quote(tag_raw, safe="")
     base = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/download/{enc_tag}"
     return (
-        f"{base}/MaxGameStudio_{tag_norm}_x64-setup.exe",
+        f"{base}/{_setup_asset_names(tag_norm)[0]}",
         None,
     )
 
@@ -371,8 +421,8 @@ def _expanded_release_assets_url(tag_raw: str) -> str:
     return f"https://github.com/{_GITHUB_OWNER_REPO}/releases/expanded_assets/{quote(tag_raw, safe='')}"
 
 
-def _fetch_latest_release_dict(mirror_prefix: str | None = None, *, timeout_sec: float = 4.0) -> dict[str, Any]:
-    api_url = mirror_wrap_url(mirror_prefix, GITHUB_LATEST_API) if mirror_prefix else GITHUB_LATEST_API
+def _fetch_release_api(url: str, mirror_prefix: str | None, timeout_sec: float) -> Any:
+    api_url = mirror_wrap_url(mirror_prefix, url) if mirror_prefix else url
     headers: dict[str, str] = {
         "Accept": "application/vnd.github+json",
         "User-Agent": _USER_AGENT,
@@ -386,6 +436,24 @@ def _fetch_latest_release_dict(mirror_prefix: str | None = None, *, timeout_sec:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _fetch_latest_release_dict(mirror_prefix: str | None = None, *, timeout_sec: float = 4.0) -> dict[str, Any]:
+    latest = _fetch_release_api(GITHUB_LATEST_API, mirror_prefix, timeout_sec)
+    if _main_stable_version(latest):
+        return latest
+    # The repository also ships League. If GitHub's latest pointer changes,
+    # recover using published main app releases with concrete installer assets.
+    releases = _fetch_release_api(_GITHUB_RELEASES_API, mirror_prefix, timeout_sec)
+    candidates = []
+    if isinstance(releases, list):
+        for release in releases:
+            version = _main_stable_version(release, require_asset=True)
+            if version:
+                candidates.append((Version(version), release))
+    if not candidates:
+        raise ValueError("未找到 MaxGameStudio 主程序的正式版")
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
 def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *, timeout_sec: float = 4.0) -> dict[str, Any]:
     page_url = mirror_wrap_url(mirror_prefix, GITHUB_RELEASE_LATEST_PAGE) if mirror_prefix else GITHUB_RELEASE_LATEST_PAGE
     req = urllib.request.Request(page_url, headers={"User-Agent": _USER_AGENT})
@@ -396,6 +464,8 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
         except (AttributeError, OSError):
             page_body = ""
     tag_raw = _parse_release_tag_from_url(final_url)
+    if not _RE_MAIN_STABLE_TAG.fullmatch(tag_raw):
+        raise ValueError("镜像未返回 MaxGameStudio 主程序的正式版")
     tag_norm = normalize_release_tag(tag_raw)
     release_page = unwrap_github_url(final_url)
     assets = _extract_release_assets_from_html(page_body, release_page)
@@ -403,7 +473,7 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
     # The main release page lazy-loads its assets from this fragment.  Fetch
     # it only when no concrete setup asset was found, so an API/page fallback
     # can never replace a real asset with a guessed current-brand URL.
-    setup_u, _ = pick_download_urls(assets, tag_norm)
+    setup_u, _ = pick_download_urls(assets, tag_norm, release_tag=tag_raw)
     if setup_u is None and page_body:
         expanded_url = _expanded_release_assets_url(tag_raw)
         expanded_request_url = mirror_wrap_url(mirror_prefix, expanded_url) if mirror_prefix else expanded_url
@@ -418,15 +488,17 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
         except (AttributeError, UnicodeError, urllib.error.URLError, TimeoutError, OSError):
             pass
 
-    setup_u, _ = pick_download_urls(assets, tag_norm)
-    if setup_u is None:
+    setup_u, zip_u = pick_download_urls(assets, tag_norm, release_tag=tag_raw)
+    if setup_u is None and zip_u is None:
         # Keep the historical best-effort fallback for pages that expose no
         # asset links at all.  It is appended only after real assets were
         # inspected, and therefore cannot override a legacy/current asset.
+        if assets and tag_norm != "3.1.4":
+            raise ValueError("镜像发布中没有可用的 MaxGameStudio 主程序安装包")
         setup_u, _ = _guess_download_urls(tag_raw, tag_norm)
         assets.append(
             {
-                "name": f"MaxGameStudio_{tag_norm}_x64-setup.exe",
+                "name": _setup_asset_names(tag_norm)[0],
                 "browser_download_url": setup_u,
             }
         )
@@ -579,18 +651,20 @@ def build_update_payload(current_version: str, current_source: str, *, force_ref
     except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as e:
         fetch_err = e
 
-    if data is None:
-        base["error"] = _format_fetch_error(fetch_err) if fetch_err else "无法获取最新版本信息"
+    tag = _main_stable_version(data)
+    if tag is None:
+        base["error"] = _format_fetch_error(fetch_err) if fetch_err else "未找到 MaxGameStudio 主程序的正式版"
         _cache = dict(base)
         _cache_expiry = now + _ERROR_TTL_SEC
         return dict(base)
 
-    tag = normalize_release_tag(str(data.get("tag_name") or ""))
-    base["latest_version"] = tag or None
+    assert data is not None
+    raw_tag = data["tag_name"]
+    base["latest_version"] = tag
     base["release_notes"] = str(data.get("body") or "")
-    base["release_url"] = str(data.get("html_url") or "")
+    base["release_url"] = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/tag/{raw_tag}"
     assets = list(data.get("assets") or [])
-    setup_u, zip_u = pick_download_urls(assets, tag) if tag else (None, None)
+    setup_u, zip_u = pick_download_urls(assets, tag, release_tag=raw_tag)
     base["downloads"]["setup_url"] = setup_u
     base["downloads"]["zip_url"] = zip_u
     base["update_via_mirror"] = mirror_used

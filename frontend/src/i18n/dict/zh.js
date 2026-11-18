@@ -1,5 +1,7 @@
 ﻿// 中文字典：扁平 key（用 . 命名空间）。后续迁移按页面往这里追加。
 export default {
+  "home.aboutSubtitle": "版本信息、更新与问题反馈。",
+  "home.betaReleaseNotice": "测试版：覆盖安装会沿用已有数据。真实 Steam 登录与游戏内行为请在自己的电脑上测试。",
   "common.cancel": "取消",
   "common.confirm": "确定",
   "common.save": "保存",
@@ -34,6 +36,9 @@ export default {
   "nav.brand": "MaxGameStudio",
   "nav.mainNav": "主导航",
   "nav.home": "首页",
+  "nav.liteCut": "LiteCut",
+  "nav.steamAccounts": "Steam 账户",
+  "nav.about": "帮助与更新",
   "nav.sectionWorkflow": "工作流",
   "nav.sectionCs2": "CS2",
   "nav.sectionValorant": "无畏契约",

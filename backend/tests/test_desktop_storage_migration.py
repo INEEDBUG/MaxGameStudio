@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import stat
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.desktop_storage_migration import (
+    LegacyStorageLayout,
     MARKER_NAME,
     StorageMigrationError,
     migrate_storage,
@@ -23,6 +25,66 @@ def _tree(root: Path) -> None:
     (root / "data" / "db.sqlite-wal").write_bytes(b"\x00\xff\r\nraw")
     (root / "webview" / "Local Storage" / "state.bin").write_bytes(bytes(range(256)))
     (root / "league-runtime" / "runtime.txt").write_text("runtime", encoding="utf-8")
+
+
+def test_migrate_selected_legacy_layout_preserves_split_locations(tmp_path: Path):
+    old, appdata, local = [tmp_path / name for name in ("旧目录", "other", "local")]
+    old.mkdir()
+    (old / "window-state.json").write_bytes(b"current window state")
+    data = appdata / "selected-data"
+    data.mkdir(parents=True)
+    (data / "cs2-insight.db").write_bytes(b"current database")
+    (data / "cs2-insight.db-wal").write_bytes(b"current wal")
+    webview = local / "browser"
+    webview.mkdir(parents=True)
+    (webview / "preferences").write_bytes(b"current browser")
+    league = appdata / "selected-league"
+    league.mkdir()
+    (league / "Preferences").write_bytes(b"current League preferences")
+    guessed_data = appdata / "CS2 Insight Agent" / "data"
+    guessed_data.mkdir(parents=True)
+    (guessed_data / "cs2-insight.db").write_bytes(b"unselected database")
+
+    layout = LegacyStorageLayout(old, data, webview, league)
+    destination = tmp_path / "新数据目录"
+    result = migrate_storage(destination=destination, legacy_layout=layout, process_check=False)
+    assert result.mode == "migrated"
+    assert (destination / "data/cs2-insight.db").read_bytes() == b"current database"
+    assert (destination / "data/cs2-insight.db-wal").read_bytes() == b"current wal"
+    assert (destination / "webview/preferences").read_bytes() == b"current browser"
+    assert (destination / "league-runtime/Preferences").read_bytes() == b"current League preferences"
+    assert (destination / "window-state.json").read_bytes() == b"current window state"
+    assert (data / "cs2-insight.db").read_bytes() == b"current database"
+    assert migrate_storage(destination=destination, legacy_layout=layout, process_check=False).mode == "existing"
+
+
+def test_retire_embedded_league_preserves_unlisted_and_changed_files(tmp_path: Path):
+    from app.desktop_storage_migration import retire_embedded_league
+
+    runtime = tmp_path / "installed/league-runtime"
+    runtime.mkdir(parents=True)
+    info = runtime / "maxgamestudio-runtime-manifest.json"
+    info.write_text(json.dumps({"component": "league-runtime", "productBrand": "MaxGameStudio League",
+                                "updaterOwnership": "MaxGameStudio host"}), encoding="utf-8")
+    exe = runtime / "MaxGameStudioLeague.exe"
+    exe.write_bytes(b"old program")
+    changed = runtime / "changed.dll"
+    changed.write_bytes(b"changed since install")
+    profile = runtime / "Preferences"
+    profile.write_bytes(b"keep existing profile")
+    hashes = runtime / "maxgamestudio-runtime-hashes.json"
+    hashes.write_text(json.dumps({
+        path.name: hashlib.sha256(payload).hexdigest()
+        for path, payload in [
+            (info, info.read_bytes()), (exe, b"old program"), (changed, b"old DLL"),
+        ]
+    }), encoding="utf-8")
+
+    assert retire_embedded_league(runtime.parent) == 2
+    assert not exe.exists()
+    assert not hashes.exists()
+    assert profile.read_bytes() == b"keep existing profile"
+    assert changed.read_bytes() == b"changed since install"
 
 
 def _junction_fixture(tmp_path: Path, name: str) -> tuple[Path, Path, Path]:
@@ -342,6 +404,26 @@ def test_legacy_data_junction_is_copied_as_ordinary_directory(tmp_path: Path, na
         assert not (destination / "data" / name).is_symlink()
     finally:
         _remove_junction(appdata / "CS2 Insight Agent" / "data" / name)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_selected_legacy_layout_accepts_known_cache_junction(tmp_path: Path, monkeypatch):
+    # Use a real fixture junction and simulate a different system drive only
+    # for this process. No drive mapping or real application data is touched.
+    monkeypatch.setenv("SystemDrive", "Z:" if tmp_path.drive != "Z:" else "Y:")
+    root, source, target = _junction_fixture(tmp_path, "cache")
+    link = source / "data" / "cache"
+    try:
+        destination = root / "chosen"
+        layout = LegacyStorageLayout(source, source / "data", root / "webview", root / "league")
+        migrate_storage(destination=destination, legacy_layout=layout, process_check=False)
+        copied = destination / "data/cache/payload.bin"
+        assert copied.read_bytes() == b"junction-payload"
+        assert not (copied.parent.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        assert link.is_junction()
+        assert target.joinpath("payload.bin").read_bytes() == b"junction-payload"
+    finally:
+        _remove_junction(link)
         shutil.rmtree(root, ignore_errors=True)
 
 

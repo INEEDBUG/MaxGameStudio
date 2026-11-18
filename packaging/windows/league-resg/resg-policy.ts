@@ -9,18 +9,19 @@ export function isResgPage(value: string): boolean {
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
-    return (
-      ['resg.top', 'www.resg.top'].includes(url.hostname) ||
-      (['www.bilibili.com', 'www.bilibilitoy.com'].includes(url.hostname) &&
-        url.pathname.startsWith('/toy/resg/'))
-    )
+    return ['resg.top', 'www.resg.top'].includes(url.hostname)
   } catch {
     return false
   }
 }
 
 export function isResgContent(value: string): boolean {
-  return isResgPage(value) && new URL(value).hostname === 'www.bilibilitoy.com'
+  return isResgPage(value) && /^\/v\/[^/]+\/champions\/\d+\/?$/.test(new URL(value).pathname)
+}
+
+export function resgChampionUrl(championId: number): string {
+  if (!validChampion(championId)) throw new Error('Invalid champion')
+  return new URL(`v/latest/champions/${championId}`, RESG_HOME).href
 }
 
 function validChampion(value: unknown): number {
@@ -69,26 +70,13 @@ export function selectResgChampion(
   )
 }
 
-// Runs in the unprivileged remote frame. Only public links/DOM are used, not Vue internals or APIs.
-// Returning through the gallery remounts the site's detail component after a champion swap.
-export function resgNavigationStep(championId: number, expectedName: string): string {
+// The public hero component appears only after the detail data is loaded.
+export function resgNavigationStep(championId: number): string {
   if (!validChampion(championId)) throw new Error('Invalid champion')
   return `(() => {
-    const id = ${championId}; const expected = ${JSON.stringify(expectedName)};
-    const path = location.pathname;
-    const heading = document.querySelector('h1')?.textContent?.trim() || '';
-    if (path.endsWith('/champions/' + id) && expected && heading === expected)
-      return { kind: 'ready', name: heading };
-    const links = Array.from(document.querySelectorAll('a[href]'));
-    if (/\\/champions\\//.test(path)) {
-      if (path.endsWith('/champions/' + id) && expected) return { kind: 'waiting' };
-      const back = links.find(a => /\\/v\\/[^/]+\\/?$/.test(new URL(a.href).pathname));
-      back?.click(); return { kind: 'waiting' };
-    }
-    const link = links.find(a => new URL(a.href).origin === location.origin &&
-      new URL(a.href).pathname.endsWith('/champions/' + id));
-    if (!link) return { kind: 'waiting' };
-    const name = link.querySelector('strong')?.textContent?.trim() || link.textContent.trim();
-    link.click(); return { kind: 'selected', name };
+    const route = /^\\/v\\/[^/]+\\/champions\\/${championId}\\/?$/;
+    if (!route.test(location.pathname)) return { kind: 'waiting' };
+    const name = document.querySelector('#app .entity-hero .entity-identity h1')?.textContent?.trim();
+    return name ? { kind: 'ready', name } : { kind: 'waiting' };
   })()`
 }

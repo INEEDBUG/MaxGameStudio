@@ -1,5 +1,8 @@
 <template>
-  <NTooltip :z-index="75000">
+  <NButton v-if="overview" type="primary" size="small" :disabled="!canShow" :loading="busy" @click="show">
+    {{ t('titlebar.actions.resgWindow') }}
+  </NButton>
+  <NTooltip v-else :z-index="75000">
     <template #trigger>
       <div
         class="resg-button-outer"
@@ -26,7 +29,7 @@
 import { useInstance } from '@renderer-shared/shards'
 import { AkariIpcRenderer } from '@renderer-shared/shards/ipc'
 import { useTranslation } from 'i18next-vue'
-import { NSpin, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NSpin, NTooltip, useMessage } from 'naive-ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 type ResgSnapshot = {
@@ -41,6 +44,7 @@ type ResgSnapshot = {
 }
 
 const NAMESPACE = 'window-manager-main/resg-window'
+defineProps<{ overview?: boolean }>()
 const ipc = useInstance(AkariIpcRenderer)
 const { t } = useTranslation()
 const message = useMessage()

@@ -21,6 +21,10 @@ param(
   [string]$SourceDir = $env:MAXGAMESTUDIO_LEAGUE_SOURCE_DIR,
   [string]$RuntimeDir = $env:MAXGAMESTUDIO_LEAGUE_RUNTIME_DIR,
   [string]$OutputDir = "",
+  [string]$InstallerOutputDir = "",
+  [string]$StandaloneVersion = "1.0.0-beta.1",
+  [string]$YarnScript = "",
+  [switch]$Standalone,
   [switch]$FetchPinnedSource,
   [switch]$Build
 )
@@ -38,7 +42,27 @@ $buildTempRoot = if ($env:MAXGAMESTUDIO_BUILD_TEMP) {
 }
 New-Item -ItemType Directory -Path $buildTempRoot -Force | Out-Null
 if (-not $OutputDir) {
+  if ($Standalone) { throw "Standalone build requires a new unpacked OutputDir." }
   $OutputDir = Join-Path $repoRoot "frontend\.runtime-cache\league-runtime"
+}
+if ($Standalone) {
+  if (-not $Build -or $RuntimeDir -or -not $InstallerOutputDir) {
+    throw "Standalone requires -Build, a pinned source checkout, and -InstallerOutputDir."
+  }
+  if ($StandaloneVersion -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$') {
+    throw "Invalid standalone League version."
+  }
+  $OutputDir = [IO.Path]::GetFullPath($OutputDir)
+  $InstallerOutputDir = [IO.Path]::GetFullPath($InstallerOutputDir)
+  $installer = Join-Path $InstallerOutputDir "MaxGameStudioLeague_${StandaloneVersion}_x64-setup.exe"
+  if ((Test-Path -LiteralPath $OutputDir) -or (Test-Path -LiteralPath $installer)) {
+    throw "Standalone build output already exists. Supply fresh paths."
+  }
+  if ($InstallerOutputDir -eq $OutputDir -or $InstallerOutputDir.StartsWith(
+    $OutputDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase
+  )) {
+    throw "Choose separate installer and unpacked output locations."
+  }
 }
 
 function Invoke-Git([string[]]$Arguments, [string]$WorkingDirectory) {
@@ -553,7 +577,7 @@ try {
       throw "Host package.json is missing: $hostPackagePath"
     }
     $hostPackage = Get-Content -LiteralPath $hostPackagePath -Raw -Encoding utf8 | ConvertFrom-Json
-    $hostVersion = [string]$hostPackage.version
+    $hostVersion = if ($Standalone) { $StandaloneVersion } else { [string]$hostPackage.version }
     if ($hostVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
       throw "Host package version is not valid semver: $hostVersion"
     }
@@ -575,13 +599,18 @@ try {
     if ([string]$patchedRuntimePackage.version -ne $hostVersion) {
       throw "Failed to synchronize runtime package version with host version $hostVersion."
     }
-    $yarn = Get-Command yarn.cmd -ErrorAction SilentlyContinue
-    $yarnArgs = @()
-    if (-not $yarn) {
-      $corepack = Get-Command corepack.cmd -ErrorAction SilentlyContinue
-      if (-not $corepack) { throw "-Build requires yarn.cmd or corepack.cmd; no package manager was installed." }
-      $yarn = $corepack
-      $yarnArgs = @("yarn")
+    if ($YarnScript) {
+      $yarnExecutor = (Get-Command node.exe -ErrorAction Stop).Source
+      $yarnArgs = @((Resolve-Path -LiteralPath $YarnScript).Path)
+    } else {
+      $yarn = Get-Command yarn.cmd -ErrorAction SilentlyContinue
+      $yarnArgs = @()
+      if (-not $yarn) {
+        $yarn = Get-Command corepack.cmd -ErrorAction SilentlyContinue
+        if (-not $yarn) { throw "-Build requires yarn.cmd, corepack.cmd, or -YarnScript." }
+        $yarnArgs = @("yarn")
+      }
+      $yarnExecutor = $yarn.Source
     }
     # Enumerate only source roots that are known not to contain dependencies.
     # Filtering a whole-tree Get-ChildItem after traversal is unsafe on this
@@ -972,7 +1001,14 @@ try {
     }
     Push-Location $source
     try {
-      & $yarn.Source @yarnArgs build:win
+      if ($Standalone) {
+        & (Join-Path $repoRoot 'packaging\windows\league-standalone\stage.ps1') -SourceRoot $source
+        & $yarnExecutor @yarnArgs build
+        if ($LASTEXITCODE -ne 0) { throw "Standalone League source build failed ($LASTEXITCODE)." }
+        & $yarnExecutor @yarnArgs electron-builder --win --x64 --dir --config electron-builder.yml
+      } else {
+        & $yarnExecutor @yarnArgs build:win
+      }
       if ($LASTEXITCODE -ne 0) { throw "Upstream build failed with exit code $LASTEXITCODE." }
     } finally { Pop-Location }
     $builtAssetVerifier = Join-Path $repoRoot "packaging\windows\verify-league-runtime-assets.ps1"
@@ -1003,7 +1039,7 @@ try {
   # prebuilt runtime is copied byte-for-byte so its asar signature/content is
   # not silently invalidated; the host must disable its updater integration.
 
-  $runtimeExeName = if ($sourceMode -eq "built-pinned-source") { "MaxGameStudioLeague.exe" } else { "LeagueAkari.exe" }
+  $runtimeExeName = if ($Standalone) { "MaxGameStudioLeagueToolbox.exe" } elseif ($sourceMode -eq "built-pinned-source") { "MaxGameStudioLeague.exe" } else { "LeagueAkari.exe" }
   $requiredRuntimePaths = @(
     (Join-Path $OutputDir $runtimeExeName),
     (Join-Path $OutputDir "resources\app.asar"),
@@ -1072,7 +1108,7 @@ $manifest = [ordered]@{
     buildRequested = [bool]$Build
     sourceMode = if ($FetchPinnedSource) { "fetched-pinned" } else { $sourceMode }
     runnable = $true
-    updaterOwnership = "MaxGameStudio host"
+    updaterOwnership = if ($Standalone) { "MaxGameStudio League" } else { "MaxGameStudio host" }
     upstreamUpdaterFilesRetained = $true
     upstreamNoticeFetchDisabled = $true
     upstreamUsageStatisticsDisabled = $true
@@ -1091,6 +1127,14 @@ $manifest = [ordered]@{
   [IO.File]::WriteAllText((Join-Path $OutputDir "maxgamestudio-runtime-hashes.json"), $hashesJson, [Text.UTF8Encoding]::new($false))
   if (-not (Test-Path -LiteralPath (Join-Path $OutputDir "THIRD_PARTY_NOTICES\LeagueAkari-MIT.txt"))) {
     throw "MIT notice was not staged."
+  }
+  if ($Standalone) {
+    & (Join-Path $repoRoot 'packaging\windows\build-league-installer.ps1') `
+      -SourceDir $SourceDir -UnpackedDir $OutputDir `
+      -InstallerOutputDir $InstallerOutputDir -Version $StandaloneVersion
+    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+      throw "Standalone League NSIS installer was not produced."
+    }
   }
   Write-Host "League runtime staged at $OutputDir"
   Write-Host "Pinned source: $PinnedCommit"

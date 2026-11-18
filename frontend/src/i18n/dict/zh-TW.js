@@ -1,5 +1,8 @@
 // Sparse zh-TW overlay. Deep feature namespaces intentionally fall back to the locale base.
 export default {
+  "nav.liteCut": "LiteCut",
+  "nav.steamAccounts": "Steam 帳戶",
+  "nav.about": "說明與更新",
   "common.cancel": "取消",
   "common.confirm": "確認",
   "common.save": "儲存",

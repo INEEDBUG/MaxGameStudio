@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCargoReleaseRoot } from "./cargo-release-root.mjs";
+import { prepareWindowsResourceBundle } from "./windows-resource-bundle.mjs";
 import {
   assertPeX64,
   isGnuBuild,
@@ -23,7 +24,6 @@ const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "pa
 const buildEnv = {
   ...process.env,
   CS2_INSIGHT_APP_VERSION: version,
-  MAXGAMESTUDIO_REQUIRE_LEAGUE_RUNTIME_MANIFEST: "1",
   [pathKey]: [dirname(process.execPath), process.env[pathKey] || ""]
     .filter(Boolean)
     .join(delimiter),
@@ -111,7 +111,10 @@ if (stagedLibunwind) {
 }
 
 const tauri = join(frontendRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
-const buildConfig = { version };
+const buildConfig = {
+  version,
+  plugins: { updater: { endpoints: [`https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/${version.includes("-") ? "beta" : "latest"}.json`] } },
+};
 const hasUpdaterSigningKey = Boolean(buildEnv.TAURI_SIGNING_PRIVATE_KEY);
 if (!hasUpdaterSigningKey) {
   buildConfig.bundle = { createUpdaterArtifacts: false };
@@ -128,6 +131,16 @@ if (certificateThumbprint) {
     },
   };
 }
+const shortResources = prepareWindowsResourceBundle(join(tauriRoot, "bundle-resources"));
+if (shortResources) {
+  buildConfig.bundle = {
+    ...buildConfig.bundle,
+    // Tauri merges config maps using JSON Merge Patch; remove the deep key.
+    resources: { "bundle-resources/": null, [`${shortResources.root.replaceAll("\\", "/")}/`]: "" },
+  };
+  process.once("exit", () => shortResources.cleanup());
+}
+
 // A release-candidate build must never reuse a previous candidate's Vite
 // output. The desktop metadata and backend marker are validated elsewhere;
 // this clean build plus the post-build assertion covers the user-visible UI.

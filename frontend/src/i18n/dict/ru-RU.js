@@ -1,5 +1,8 @@
 // Sparse ru-RU overlay. Deep feature namespaces intentionally fall back to the locale base.
 export default {
+  "nav.liteCut": "LiteCut",
+  "nav.steamAccounts": "Аккаунты Steam",
+  "nav.about": "Помощь и обновления",
   "common.cancel": "Отмена",
   "common.confirm": "Подтвердить",
   "common.save": "Сохранить",

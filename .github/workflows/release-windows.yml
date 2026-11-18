@@ -50,7 +50,7 @@ jobs:
           } elseif ($env:GITHUB_REF_TYPE -eq "tag") {
             $env:LATEST_RELEASE_TAG = ""
           } else {
-            $latestTag = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>$null
+            $latestTag = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == false and (.tag_name | test("^[vV][0-9]+\\.[0-9]+\\.[0-9]+$")))) | .[0].tag_name' 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $latestTag) { $latestTag = "v0.0.0" }
             $env:LATEST_RELEASE_TAG = $latestTag.Trim()
           }
@@ -62,7 +62,7 @@ jobs:
           "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "stable=$($stable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           if (-not $stable) {
-            Write-Host "Version $version is a prerelease; formal Release, latest.json, and updater publication will be skipped."
+            Write-Host "Version $version is a prerelease; beta Release and beta.json will remain separate from the stable updater."
           }
           Write-Host "Resolved release version: $version"
 
@@ -84,21 +84,6 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-
-      - name: Build pinned MaxGameStudio League runtime
-        shell: pwsh
-        run: |
-          $source = Join-Path $env:RUNNER_TEMP "maxgamestudio-league-v1.5.1"
-          git init --quiet $source
-          git -C $source remote add origin https://github.com/LeagueAkari/LeagueAkari.git
-          git -C $source fetch --depth 1 origin 14557723706ccc0e0a9d62c470141d4cb7190fcd
-          git -C $source checkout --detach 14557723706ccc0e0a9d62c470141d4cb7190fcd
-          Push-Location $source
-          try {
-            corepack.cmd yarn install --immutable
-            if ($LASTEXITCODE -ne 0) { throw "Pinned League runtime dependency install failed: $LASTEXITCODE" }
-          } finally { Pop-Location }
-          ./packaging/windows/stage-league-runtime.ps1 -SourceDir $source -Build
 
       - name: Install backend test dependencies
         run: uv sync --frozen
@@ -164,31 +149,6 @@ jobs:
             if (-not $certificate) { throw "The imported PFX did not contain a code-signing certificate with a private key" }
             "CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-            # The League workspace can be launched through UAC independently
-            # from the Tauri host. Sign that executable too, then refresh the
-            # payload manifest that is embedded into the host at compile time.
-            $runtimeRoot = (Resolve-Path "frontend/.runtime-cache/league-runtime").Path
-            $runtimeExe = Join-Path $runtimeRoot "MaxGameStudioLeague.exe"
-            $runtimeSignature = Set-AuthenticodeSignature `
-              -FilePath $runtimeExe `
-              -Certificate $certificate `
-              -HashAlgorithm SHA256 `
-              -TimestampServer "http://timestamp.comodoca.com"
-            if ($runtimeSignature.Status -ne 'Valid') {
-              throw "Embedded League runtime signing failed: $($runtimeSignature.Status)"
-            }
-            $runtimeHashes = [ordered]@{}
-            Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File | Where-Object {
-              $_.Name -ne "maxgamestudio-runtime-hashes.json"
-            } | Sort-Object FullName | ForEach-Object {
-              $relative = [IO.Path]::GetRelativePath($runtimeRoot, $_.FullName).Replace('\', '/')
-              $runtimeHashes[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
-            [IO.File]::WriteAllText(
-              (Join-Path $runtimeRoot "maxgamestudio-runtime-hashes.json"),
-              ($runtimeHashes | ConvertTo-Json -Depth 10),
-              [Text.UTF8Encoding]::new($false)
-            )
           } finally {
             Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
           }
@@ -239,10 +199,7 @@ jobs:
 
       - name: Report bundled runtime size
         shell: pwsh
-        # The pinned Electron League workbench includes Chromium license and
-        # graphics fallback files. Keep the resource gate below the 500 MiB
-        # installed-footprint gate without stripping required runtime files.
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 450
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 160
 
       - name: Write SHA256SUMS
         shell: pwsh
@@ -252,12 +209,11 @@ jobs:
           if (-not $installer) { throw "Tauri NSIS installer not found" }
           $installerMiB = $installer.Length / 1MB
           Write-Host ("Installer size: {0:N2} MiB" -f $installerMiB)
-          if ($installerMiB -gt 400) { throw ("Installer exceeds 400 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          if ($installerMiB -gt 140) { throw ("Installer exceeds 140 MiB budget: {0:N2} MiB" -f $installerMiB) }
           $appExe = Get-Item "frontend/src-tauri/target/release/cs2-insight-agent-desktop.exe"
           if ($env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT) {
             $expectedThumbprint = $env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', ''
-            $leagueRuntimeExe = Get-Item "frontend/src-tauri/bundle-resources/league-runtime/MaxGameStudioLeague.exe"
-            foreach ($artifact in @($appExe, $installer, $leagueRuntimeExe)) {
+            foreach ($artifact in @($appExe, $installer)) {
               $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
               if ($signature.Status -ne 'Valid') { throw "Authenticode validation failed for $($artifact.Name): $($signature.Status)" }
               if ($signature.SignerCertificate.Thumbprint -ne $expectedThumbprint) {
@@ -268,7 +224,7 @@ jobs:
           $resourceBytes = (Get-ChildItem "frontend/src-tauri/bundle-resources" -Recurse -File | Measure-Object Length -Sum).Sum
           $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
           Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
-          if ($installedMiB -gt 500) { throw ("Installed footprint exceeds 500 MiB budget: {0:N2} MiB" -f $installedMiB) }
+          if ($installedMiB -gt 180) { throw ("Installed footprint exceeds 180 MiB budget: {0:N2} MiB" -f $installedMiB) }
           $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }
@@ -276,7 +232,7 @@ jobs:
 
       - name: Resolve GitHub Release notes
         id: release_notes
-        if: github.event_name == 'push' && github.ref_type == 'tag' && steps.release_version.outputs.stable == 'true'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: pwsh
         run: |
           $notesPath = "docs/releases/v$env:BUILD_VERSION.zh-CN.md"
@@ -291,40 +247,45 @@ jobs:
           if ([string]$userNotes.version -ne $env:BUILD_VERSION) {
             throw "Plain-language update notes version must match $env:BUILD_VERSION"
           }
-          if ([string]$userNotes.releaseStatus -ne "stable") {
-            throw "Stable tags require releaseStatus=stable in $userNotesPath"
+          $expectedStatus = if ($env:BUILD_VERSION.Contains("-")) { "beta" } else { "stable" }
+          if ([string]$userNotes.releaseStatus -ne $expectedStatus) {
+            throw "Release status must match $expectedStatus in $userNotesPath"
           }
           "path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "user_path=$userNotesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Generate signed updater manifest
-        if: github.event_name == 'push' && github.ref_type == 'tag' && steps.release_version.outputs.stable == 'true'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         working-directory: frontend
         env:
           RELEASE_NOTES: "本版本已经发布，可在客户端内点击立即更新。完整更新说明请查看 GitHub Release。"
           USER_RELEASE_NOTES_PATH: ${{ github.workspace }}/${{ steps.release_notes.outputs.user_path }}
           UPDATE_MODE: normal
+          UPDATE_CHANNEL: ${{ steps.release_version.outputs.stable == 'true' && 'stable' || 'beta' }}
         run: node scripts/generate-github-updater-manifest.mjs
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref_type == 'tag' && steps.release_version.outputs.stable == 'true'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_version.outputs.tag }}
           body_path: ${{ steps.release_notes.outputs.path }}
+          prerelease: ${{ steps.release_version.outputs.stable != 'true' }}
+          make_latest: ${{ steps.release_version.outputs.stable == 'true' && 'true' || 'false' }}
           files: frontend/src-tauri/target/release/bundle/nsis/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish updater channel
-        if: github.event_name == 'push' && github.ref_type == 'tag' && steps.release_version.outputs.stable == 'true'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $manifestPath = "frontend/src-tauri/target/release/bundle/nsis/latest.json"
+          $manifestName = if ($env:BUILD_VERSION.Contains("-")) { "beta.json" } else { "latest.json" }
+          $manifestPath = "frontend/src-tauri/target/release/bundle/nsis/$manifestName"
           if (-not (Test-Path -LiteralPath $manifestPath)) { throw "latest.json was not generated" }
           $branch = "updater"
           gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/$branch" --silent 2>$null
@@ -333,12 +294,12 @@ jobs:
             gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$env:GITHUB_SHA" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Failed to create updater branch" }
           }
-          $existingJson = gh api "repos/$env:GITHUB_REPOSITORY/contents/latest.json?ref=$branch" 2>$null
+          $existingJson = gh api "repos/$env:GITHUB_REPOSITORY/contents/$manifestName?ref=$branch" 2>$null
           $fileExists = $LASTEXITCODE -eq 0
           $existing = if ($fileExists) { $existingJson | ConvertFrom-Json } else { $null }
           $content = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $manifestPath)))
           $args = @(
-            "api", "--method", "PUT", "repos/$env:GITHUB_REPOSITORY/contents/latest.json",
+            "api", "--method", "PUT", "repos/$env:GITHUB_REPOSITORY/contents/$manifestName",
             "-f", "message=Publish updater manifest $env:BUILD_VERSION",
             "-f", "branch=$branch",
             "-f", "content=$content"

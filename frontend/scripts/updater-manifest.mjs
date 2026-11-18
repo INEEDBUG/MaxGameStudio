@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { MAIN_UPDATE_PRODUCT, mainInstallerNames, mainUpdateChannel } from "../src/utils/mainUpdateIdentity.mjs";
 
 export function githubReleaseAssetName(installerName) {
   return String(installerName).replaceAll(" ", ".");
@@ -9,15 +10,23 @@ export function createGithubUpdaterManifest({
   repository,
   installerName,
   signature,
+  channel = "stable",
+  tag = `v${version}`,
   notes = "",
   pubDate = new Date().toISOString(),
   updateMode = "normal",
   userReleaseNotes = null,
 }) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  if (channel === "stable" && mainUpdateChannel(version) !== "stable") {
     throw new Error(`Updater manifest requires a stable semantic version (x.y.z): ${version}`);
   }
-  if (!/^[^/]+\/[^/]+$/.test(repository)) {
+  if (!["stable", "beta"].includes(channel) || mainUpdateChannel(version) !== channel) {
+    throw new Error(`Invalid main updater version for the ${channel} channel: ${version}`);
+  }
+  if (tag !== `v${version}`) {
+    throw new Error(`Updater tag must match the main release version: ${tag}`);
+  }
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) {
     throw new Error(`Invalid GitHub repository: ${repository}`);
   }
   if (!String(signature || "").trim()) {
@@ -25,10 +34,16 @@ export function createGithubUpdaterManifest({
   }
 
   const assetName = githubReleaseAssetName(installerName);
-  const assetUrl = `https://github.com/${repository}/releases/download/v${version}/${encodeURIComponent(assetName)}`;
+  if (!mainInstallerNames(version).includes(assetName)) {
+    throw new Error(`Unexpected main installer for ${tag}: ${assetName}`);
+  }
+  const assetUrl = `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
 
   const manifest = {
     version,
+    product: MAIN_UPDATE_PRODUCT,
+    tag_name: tag,
+    channel,
     notes,
     pub_date: pubDate,
     update_mode: updateMode === "force" ? "force" : "normal",

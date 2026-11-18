@@ -60,7 +60,6 @@ import { desktopCloseActionPayload, normalizeDesktopCloseAction } from "./utils/
 import CustomTitleBar from "./components/CustomTitleBar";
 import DesktopCloseDialog from "./components/DesktopCloseDialog";
 import DemoDownloadActivityCenter from "./components/DemoDownloadActivityCenter";
-import LeagueRuntimeAutoManager from "./components/LeagueRuntimeAutoManager";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
@@ -78,7 +77,8 @@ const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const SensitivityLabPage = lazy(() => import("./pages/SensitivityLabPage"));
 const MagneticInputLabPage = lazy(() => import("./pages/MagneticInputLabPage"));
 const ValorantLabPage = lazy(() => import("./pages/ValorantLabPage"));
-const LeagueRuntimePage = lazy(() => import("./pages/LeagueRuntimePage"));
+const SteamAccountsPage = lazy(() => import("./pages/SteamAccountsPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
@@ -90,13 +90,6 @@ function PreserveSearchRedirect({ to }) {
   return <Navigate to={{ pathname: to, search: location.search, hash: location.hash }} replace />;
 }
 
-function LegacyLeagueRedirect() {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  params.delete("league_tab");
-  const search = params.toString();
-  return <Navigate to={{ pathname: "/league", search: search ? `?${search}` : "", hash: location.hash }} replace />;
-}
 
 function LegacyValorantRedirect() {
   const location = useLocation();
@@ -3383,7 +3376,6 @@ export default function App() {
   return (
     <AppShellProvider value={shell}>
       <div className="app-shell relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
-        <LeagueRuntimeAutoManager />
         <CustomTitleBar />
         {backendReady && <DemoDownloadActivityCenter />}
         <DesktopCloseDialog
@@ -3449,7 +3441,9 @@ export default function App() {
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               {(!backendRequired || backendReady) && <Routes>
-                <Route path="/" element={<HomePage onCheckUpdates={() => void fetchUpdateInfo({ manual: true })} />} />
+                <Route path="/" element={<HomePage />} />
+                <Route path="/steam" element={<SteamAccountsPage />} />
+                <Route path="/about" element={<AboutPage onCheckUpdates={() => void fetchUpdateInfo({ manual: true })} />} />
                 <Route path="/cs2" element={<Navigate to="/cs2/guide" replace />} />
                 <Route path="/cs2/guide" element={<GuidePage />} />
                 <Route path="/cs2/library" element={<DemoLibraryPage />} />
@@ -3468,8 +3462,6 @@ export default function App() {
                 <Route path="/valorant" element={<Navigate to="/valorant/stretch" replace />} />
                 <Route path="/valorant/stretch" element={<ValorantLabPage section="stretch" />} />
                 <Route path="/valorant/crosshair" element={<ValorantLabPage section="crosshair" />} />
-                <Route path="/league" element={<LeagueRuntimePage />} />
-                <Route path="/league/:legacyTab" element={<LegacyLeagueRedirect />} />
                 <Route path="/peripherals" element={<Navigate to="/peripherals/sensitivity" replace />} />
                 <Route path="/peripherals/sensitivity" element={<SensitivityLabPage />} />
                 <Route path="/peripherals/input" element={<MagneticInputLabPage />} />
@@ -3492,7 +3484,6 @@ export default function App() {
                 <Route path="/sensitivity-lab" element={<PreserveSearchRedirect to="/peripherals/sensitivity" />} />
                 <Route path="/input-lab" element={<PreserveSearchRedirect to="/peripherals/input" />} />
                 <Route path="/valorant-lab" element={<LegacyValorantRedirect />} />
-                <Route path="/league-lab" element={<LegacyLeagueRedirect />} />
                 <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
                 <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

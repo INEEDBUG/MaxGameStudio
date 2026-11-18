@@ -1,15 +1,14 @@
-// Bundled offline notes; keep in sync with docs/update-notes/v3.1.4.json.
-export const HOME_RELEASE_VERSION = "3.1.4";
-export const SUPERSEDED_LOCAL_CANDIDATE_VERSION = "3.0.6";
+// Bundled notes for the installed product, available offline.
+export const HOME_RELEASE_VERSION = "3.2.0-beta.1";
 export const HOME_RELEASE_NOTES = {
   zh: {
-    fixed: ["后端启动失败不再关闭整个软件，可返回首页或英雄联盟。"],
-    added: ["RESG 数据窗口新增可记忆的置顶开关，窗口管理中的设置同步生效。", "首页可直接检查更新，无需启动 Python 后端。"],
-    optimized: ["后端改为按需启动：首页与英雄联盟入口不再等待 Python，依赖后端的页面首次使用时才启动服务。", "从英雄联盟返回主程序不再等待后端启动，切换页面不会中断已有后台任务。", "保留 GitHub 更新与签名校验，改善超时和取消安装提示；不接入付费国内加速服务。"],
+    fixed: ["主程序更新只识别 MaxGameStudio 安装包；英雄联盟工具箱使用自己的更新通道。"],
+    added: ["Steam 已保存账户一键切换，保留本机登录设置。", "中文安装向导可选择程序和数据目录，默认沿用正式版数据。"],
+    optimized: ["首页直接显示 Steam 账户和常用工具。", "英雄联盟工具箱改为独立安装，主程序不再携带 Electron 运行环境。", "没有下载任务时停止快速轮询，首页保持按需启动后端。"],
   },
   en: {
-    fixed: ["Backend startup failures no longer close the application. Home and League remain available."],
-    added: ["RESG has a remembered Keep on top toggle, synchronized with window settings.", "Check updates directly from Home without starting Python."],
-    optimized: ["Python starts on demand for service-dependent pages, not on Home or League entry.", "Returning from League no longer waits for Python; navigation does not interrupt existing backend jobs.", "GitHub updates retain signature verification with improved timeout and cancellation handling. No paid domestic acceleration service is added."],
+    fixed: ["Main updates only accept MaxGameStudio installers. League Toolbox uses its own update channel."],
+    added: ["Switch between saved Steam accounts while preserving local sign-in settings.", "Chinese setup offers program and data locations and keeps stable-version data by default."],
+    optimized: ["Home opens directly to Steam accounts and common tools.", "League Toolbox installs separately; main no longer bundles its Electron runtime.", "Fast download polling stops when idle. Home keeps the backend on demand."],
   },
 };

@@ -106,7 +106,9 @@ def test_runtime_and_data_failure_abort_before_legacy_tauri_retirement(hook: str
     assert "desktop_data_migration.py" not in postinstall
     assert 'StrCpy $CS2ElectronScope "all"' not in postinstall
     assert "Call CS2_RemoveLegacyElectron" not in postinstall
-    assert "Call CS2_AbortMigrationInstall" in postinstall
+    assert postinstall.rindex("Call CS2_ValidateBundledRuntime") < postinstall.index(
+        "Call MGS_RecordDataDirectorySelection"
+    )
 
 
 def test_legacy_shortcut_cleanup_is_exact_and_non_recursive(hook: str):

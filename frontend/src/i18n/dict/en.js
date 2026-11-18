@@ -1,6 +1,8 @@
 // English dictionary. Keys must mirror zh.js (enforced by dict-consistency test),
 // except keys whose name starts with __test_only_ (intentional fallback fixtures).
 export default {
+  "home.aboutSubtitle": "Version information, updates and feedback.",
+  "home.betaReleaseNotice": "Beta: installing over stable keeps existing data. Test real Steam sign-in and in-game behavior on your PC.",
   "common.cancel": "Cancel",
   "common.confirm": "Confirm",
   "common.save": "Save",
@@ -33,6 +35,9 @@ export default {
   "nav.brand": "MaxGameStudio",
   "nav.mainNav": "Main navigation",
   "nav.home": "Home",
+  "nav.liteCut": "LiteCut",
+  "nav.steamAccounts": "Steam accounts",
+  "nav.about": "Help and updates",
   "nav.sectionWorkflow": "Workflow",
   "nav.sectionCs2": "CS2",
   "nav.sectionValorant": "Valorant",

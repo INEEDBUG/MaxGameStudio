@@ -1,5 +1,8 @@
 // Sparse ms-MY overlay. Deep feature namespaces intentionally fall back to the locale base.
 export default {
+  "nav.liteCut": "LiteCut",
+  "nav.steamAccounts": "Akaun Steam",
+  "nav.about": "Bantuan dan kemas kini",
   "common.cancel": "Batal",
   "common.confirm": "Sahkan",
   "common.save": "Simpan",

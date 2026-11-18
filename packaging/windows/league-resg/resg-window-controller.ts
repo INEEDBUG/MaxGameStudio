@@ -7,10 +7,10 @@ import { z } from 'zod'
 import type { WindowManagerMainContext } from '../context'
 import { type ResgDisplayMode, resgDisplayScript } from './resg-display'
 import {
-  RESG_HOME,
   RESG_NAMESPACE,
   isResgContent,
   isResgPage,
+  resgChampionUrl,
   resgNavigationStep,
   selectResgChampion
 } from './resg-policy'
@@ -243,7 +243,7 @@ export class ResgWindowController {
     })
     view.webContents.on('will-frame-navigate', (event) => {
       // The site's original wrapper iframe is allowed; unrelated top-level destinations are not.
-      if (event.isMainFrame && !isResgPage(event.url)) event.preventDefault()
+      if (!isResgPage(event.url)) event.preventDefault()
     })
     view.webContents.on('render-process-gone', () => {
       if (this._view === view) this._fail('page-unavailable')
@@ -256,8 +256,8 @@ export class ResgWindowController {
           this._context.logger.warn('RESG display preference was not saved')
         })
       }
-      if (url === 'mgs-resg:browser')
-        void shell.openExternal(RESG_HOME).catch(() => this._fail('page-unavailable'))
+      if (url === 'mgs-resg:browser' && this._championId)
+        void shell.openExternal(resgChampionUrl(this._championId)).catch(() => this._fail('page-unavailable'))
       if (url === 'mgs-resg:toggle-pin')
         void this.setAlwaysOnTop(!this.settings.alwaysOnTop).catch(() => {
           this._context.logger.warn('RESG always-on-top preference was not saved')
@@ -280,7 +280,7 @@ export class ResgWindowController {
     this._status = 'loading'
     this._renderShell()
     focus ? win.show() : win.showInactive()
-    this._scheduleNavigation(true)
+    this._scheduleNavigation()
   }
 
   close() {
@@ -293,7 +293,7 @@ export class ResgWindowController {
 
   retry() {
     if (!this._window) this.show()
-    else this._scheduleNavigation(true)
+    else this._scheduleNavigation()
   }
 
   async setDisplayMode(mode: ResgDisplayMode) {
@@ -329,10 +329,9 @@ export class ResgWindowController {
   }
 
   private async _applyDisplay() {
-    const frame = this._view?.webContents.mainFrame.framesInSubtree.find(
-      (frame) => !frame.detached && isResgContent(frame.url)
-    )
-    if (!frame) return
+    const frame = this._view?.webContents.mainFrame
+    if (!frame || frame.detached || !isResgContent(frame.url)) return
+    const generation = this._generation
     const script = (mode: ResgDisplayMode) =>
       resgDisplayScript(
         mode,
@@ -348,12 +347,14 @@ export class ResgWindowController {
           timer = setTimeout(() => reject(new Error('Display timeout')), 3000)
         })
       ])
+      if (generation !== this._generation) return
       this._displayFallback =
         typeof result === 'object' &&
         result !== null &&
         'kind' in result &&
         result.kind === 'fallback'
     } catch {
+      if (generation !== this._generation) return
       this._displayFallback = this.settings.displayMode === 'compact'
       // A changed/unavailable website must retain the full view as a fallback.
       void frame.executeJavaScript(script('all')).catch(() => {})
@@ -401,7 +402,7 @@ export class ResgWindowController {
     this._publish()
   }
 
-  private _scheduleNavigation(reload = false) {
+  private _scheduleNavigation() {
     const generation = ++this._generation
     const id = this._championId
     this._status = 'loading'
@@ -410,35 +411,33 @@ export class ResgWindowController {
     this._view?.setVisible(false)
     this._renderShell()
     this._publish()
-    this._navigation = this._navigation
-      .catch(() => {})
-      .then(async () => {
-        const view = this._view
-        if (!view || generation !== this._generation) return
+    const view = this._view
+    if (!view) return
+    this._navigation = (async () => {
         const current = () => generation === this._generation && !view.webContents.isDestroyed()
         try {
-          // A timeout covers navigation too; an unreachable website must not stall later requests.
           const deadline = Date.now() + 25000
-          if (reload || !view.webContents.getURL()) {
-            void view.webContents.loadURL(RESG_HOME).catch(() => {})
-          }
-          let expected = ''
+          let loaded = false
+          let loadFailed = false
+          void view.webContents.loadURL(resgChampionUrl(id)).then(
+            () => { loaded = true },
+            () => { loadFailed = true }
+          )
           while (current() && Date.now() < deadline) {
-            const frame = view.webContents.mainFrame.framesInSubtree.find((frame) =>
-              isResgContent(frame.url)
-            )
-            if (frame && !frame.detached) {
+            if (loadFailed) return this._fail('page-unavailable')
+            const frame = view.webContents.mainFrame
+            // On retry the previous document can have the same URL until the new one commits.
+            if (loaded && !frame.detached && isResgContent(frame.url)) {
               let timer: ReturnType<typeof setTimeout> | undefined
               const result = (await Promise.race([
-                frame.executeJavaScript(resgNavigationStep(id, expected)),
+                frame.executeJavaScript(resgNavigationStep(id)),
                 new Promise<never>((_, reject) => {
-                  timer = setTimeout(() => reject(new Error('Frame timeout')), 3000)
+                  timer = setTimeout(() => reject(new Error('Frame timeout')), Math.min(3000, deadline - Date.now()))
                 })
               ]).finally(() => clearTimeout(timer))) as { kind: string; name?: string }
               if (!current()) return
-              if (result.kind === 'selected') expected = result.name || ''
-              if (result.kind === 'ready' && expected) {
-                this._expectedName = expected
+              if (result.kind === 'ready' && result.name) {
+                this._expectedName = result.name
                 await this._applyDisplay()
                 if (!current()) return
                 this._status = 'ready'
@@ -454,7 +453,7 @@ export class ResgWindowController {
         } catch {
           if (current()) this._fail('page-unavailable')
         }
-      })
+      })()
   }
 
   private _renderShell() {

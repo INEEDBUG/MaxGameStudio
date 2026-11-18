@@ -22,25 +22,18 @@ vi.mock('electron', async () => {
       setPermissionRequestHandler: vi.fn()
     })
     mainFrame = {
-      framesInSubtree: [
-        {
-          url: 'https://www.bilibilitoy.com/toy/resg/build/index.html',
-          detached: false,
-          executeJavaScript: vi.fn(async (script: string) => {
-            if (fake.hang) return new Promise(() => {})
-            if (script.includes('mgs-resg-compact-style')) return { kind: 'compact' }
-            this.calls++
-            return this.calls % 2
-              ? { kind: 'selected', name: 'Fixture Champion' }
-              : { kind: 'ready', name: 'Fixture Champion' }
-          })
-        }
-      ]
+      url: '',
+      detached: false,
+      executeJavaScript: vi.fn(async (script: string) => {
+        if (fake.hang) return new Promise(() => {})
+        if (script.includes('mgs-resg-compact-style')) return { kind: 'compact' }
+        return { kind: 'ready', name: 'Fixture Champion' }
+      })
     }
-    calls = 0
     setWindowOpenHandler = vi.fn()
     loadURL = vi.fn(async (url: string) => {
       this.url = url
+      this.mainFrame.url = url
     })
     getURL() {
       return this.url
@@ -229,7 +222,7 @@ describe('RESG window behavior', () => {
     await invoke('setDisplayMode', 'all')
     await invoke('setDisplayMode', 'compact')
     await vi.advanceTimersByTimeAsync(400)
-    const frame = fake.views[0].webContents.mainFrame.framesInSubtree[0]
+    const frame = fake.views[0].webContents.mainFrame
     const displayScripts = frame.executeJavaScript.mock.calls
       .map((call: string[]) => call[0])
       .filter((script: string) => script.includes('mgs-resg-compact-style'))
@@ -250,6 +243,9 @@ describe('RESG window behavior', () => {
       championId: 63
     })
     expect(fake.views[0].visible).toBe(true)
+    expect(fake.views[0].webContents.loadURL).toHaveBeenCalledWith(
+      'https://www.resg.top/v/latest/champions/63'
+    )
     expect(fake.views[0].options.webPreferences).toMatchObject({
       sandbox: true,
       nodeIntegration: false,
@@ -316,7 +312,7 @@ describe('RESG window behavior', () => {
   it('bounds a stalled remote frame and permits retry', async () => {
     fake.hang = true
     await invoke('setEnabled', true)
-    await vi.advanceTimersByTimeAsync(3100)
+    await vi.advanceTimersByTimeAsync(3200)
     expect(controller.getSnapshot().status).toBe('error')
     fake.hang = false
     await invoke('retry')

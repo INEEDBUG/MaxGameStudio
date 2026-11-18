@@ -50,8 +50,8 @@ describe('RESG only follows the local Hextech ARAM champion', () => {
 describe('RESG navigation isolation', () => {
   it.each([
     'https://www.resg.top/',
-    'https://www.bilibili.com/toy/resg/index.html',
-    'https://www.bilibilitoy.com/toy/resg/new-version/v/16.17/champions/63'
+    'https://resg.top/v/16.22/champions/63',
+    'https://www.resg.top/v/latest/champions/63'
   ])('allows expected host route %s', (url) => {
     expect(isResgPage(url)).toBe(true)
   })
@@ -60,6 +60,7 @@ describe('RESG navigation isolation', () => {
     'https://www.resg.top.evil.test/',
     'file:///D:/private',
     'https://www.bilibili.com/account',
+    'https://www.bilibilitoy.com/toy/resg/build/index.html',
     'https://user:pass@www.resg.top/',
     'javascript:alert(1)',
     'https://localhost:2999/',

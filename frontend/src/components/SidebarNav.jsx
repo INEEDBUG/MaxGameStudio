@@ -10,7 +10,6 @@ import {
   Clock3,
   Crosshair,
   Download,
-  Gamepad2,
   Home,
   Keyboard,
   Laptop,
@@ -25,6 +24,7 @@ import {
 import { useThemeStore } from "../stores/themeStore";
 import { useReplayStore } from "../stores/replayStore";
 import { useT } from "../i18n/useT.js";
+import { CounterStrikeIcon, SteamIcon, ValorantIcon } from "./GameIcon.jsx";
 
 const linkBase =
   "group flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-[12px] font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.98]";
@@ -227,23 +227,24 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
   const toggleGroup = (groupId) => setExpandedGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
 
   return (
-    <aside className="relative z-[60] flex w-56 shrink-0 flex-col border-r border-cs2-border-subtle bg-cs2-bg-sidebar/88 px-2.5 pb-2.5 backdrop-blur-2xl">
+    <aside className="relative z-[60] flex w-52 shrink-0 flex-col border-r border-cs2-border-subtle bg-cs2-bg-sidebar px-2.5 pb-2.5">
       <div className="flex items-center gap-2.5 px-1.5 py-4">
-        <img src="/cs2-ultimate-insight-logo.png" alt={t("nav.brand")} width={42} height={42} decoding="async" className="h-10 w-10 shrink-0 object-contain drop-shadow-sm" />
+        <img src="/cs2-ultimate-insight-logo.png" alt={t("nav.brand")} width={30} height={30} decoding="async" className="h-8 w-8 shrink-0 object-contain" />
         <div className="min-w-0">
           <div className="truncate text-[13px] font-semibold tracking-[-0.01em] text-cs2-text-primary">{t("nav.brand")}</div>
           <div
             data-build-version={`maxgamestudio:${__APP_VERSION__}`}
-            className="mt-0.5 text-[9px] font-medium tracking-[0.08em] text-cs2-text-muted"
+            className="mt-0.5 text-[11px] text-cs2-text-muted"
           >
-            STUDIO · {__APP_VERSION__}
+            {__APP_VERSION__}
           </div>
         </div>
       </div>
 
       <nav className="scrollbar-hover flex flex-1 flex-col gap-0.5 overflow-y-auto" aria-label={t("nav.mainNav")} onPointerDownCapture={suspendReplayPlayback}>
         <NavItem to="/" end icon={Home}>{t("nav.home")}</NavItem>
-        <SidebarGroup id="cs2" label={t("nav.sectionCs2")} icon={Gamepad2} active={activeGroup === "cs2"} expanded={Boolean(expandedGroups.cs2)} onToggle={() => toggleGroup("cs2")}>
+        <NavItem to="/steam" icon={SteamIcon}>{t("nav.steamAccounts")}</NavItem>
+        <SidebarGroup id="cs2" label={t("nav.sectionCs2")} icon={CounterStrikeIcon} active={activeGroup === "cs2"} expanded={Boolean(expandedGroups.cs2)} onToggle={() => toggleGroup("cs2")}>
           <NavItem to="/cs2/guide" end icon={BookOpen}>{t("nav.guide")}</NavItem>
           <NavItem to="/cs2/library" icon={Library}>{t("nav.demoLibrary")}</NavItem>
           <NavItem to="/cs2/match-history" icon={Download}>{t("nav.officialDemos")}</NavItem>
@@ -251,15 +252,14 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           <NavItem to="/cs2/queue" icon={Package} disabled={disabled} badge={queueLength}>{t("nav.recordQueue")}</NavItem>
           <NavItem to="/cs2/recorded-videos" icon={Video} disabled={disabled}>{t("nav.recordedVideos")}</NavItem>
           <NavItem to="/cs2/montage" icon={Clapperboard} disabled={disabled}>{t("nav.montage")}</NavItem>
-          <NavItem to="/cs2/lite-cut" icon={Clapperboard} disabled={disabled}>LiteCut</NavItem>
+          <NavItem to="/cs2/lite-cut" icon={Clapperboard} disabled={disabled}>{t("nav.liteCut")}</NavItem>
           <NavItem to="/cs2/params" icon={SlidersHorizontal} disabled={disabled}>{t("nav.recordParams")}</NavItem>
           <NavItem to="/cs2/player-game-config" icon={Settings} disabled={disabled}>{t("nav.playerConfig")}</NavItem>
         </SidebarGroup>
-        <SidebarGroup id="valorant" label={t("nav.sectionValorant")} icon={Gamepad2} active={activeGroup === "valorant"} expanded={Boolean(expandedGroups.valorant)} onToggle={() => toggleGroup("valorant")}>
+        <SidebarGroup id="valorant" label={t("nav.sectionValorant")} icon={ValorantIcon} active={activeGroup === "valorant"} expanded={Boolean(expandedGroups.valorant)} onToggle={() => toggleGroup("valorant")}>
           <NavItem to="/valorant/stretch" icon={Crosshair}>{t("nav.valorantStretch")}</NavItem>
           <NavItem to="/valorant/crosshair" icon={Crosshair}>{t("nav.valorantCrosshair")}</NavItem>
         </SidebarGroup>
-        <NavItem to="/league" icon={Gamepad2}>{t("nav.sectionLeague")}</NavItem>
         <SidebarGroup id="peripherals" label={t("nav.sectionPeripherals")} icon={Crosshair} active={activeGroup === "peripherals"} expanded={Boolean(expandedGroups.peripherals)} onToggle={() => toggleGroup("peripherals")}>
           <NavItem to="/peripherals/sensitivity" icon={Crosshair}>{t("nav.sensitivityLab")}</NavItem>
           <NavItem to="/peripherals/input" icon={Keyboard}>{t("nav.inputLab")}</NavItem>
@@ -268,6 +268,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
 
       <div className="mt-2 space-y-0.5 border-t border-cs2-border-subtle pt-2">
         <NavItem to="/settings" icon={Settings}>{t("nav.settings")}</NavItem>
+        <NavItem to="/about" icon={BookOpen}>{t("nav.about")}</NavItem>
         <AppearanceMenu />
       </div>
     </aside>

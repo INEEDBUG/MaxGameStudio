@@ -1,32 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import HomePage from "./HomePage";
-import { HOME_RELEASE_NOTES, HOME_RELEASE_VERSION } from "../data/homeReleaseNotes.js";
-
-const { openExternal } = vi.hoisted(() => ({ openExternal: vi.fn() }));
-vi.mock("../desktop/desktopBridge.js", () => ({ desktopBridge: { openExternal } }));
-vi.mock("../i18n/useT.js", () => ({ useT: () => (key, params) => params ? `${key}:${params.version}` : key }));
+import { describe, expect, test, vi } from "vitest";
+import HomePage from "./HomePage.jsx";
+vi.mock("../i18n/useT.js", () => ({ useT: () => (key) => key }));
 vi.mock("../i18n/localeStore.js", () => ({ useLocaleStore: (selector) => selector({ effectiveLocale: "zh" }) }));
-
+vi.mock("../components/SteamAccountsPanel.jsx", () => ({ default: () => <section aria-label="Steam 账户" /> }));
 describe("HomePage", () => {
-  beforeEach(() => openExternal.mockClear());
-
-  test("presents cross-game release notes and feedback actions", () => {
+  test("puts account switching and existing tools within one click", () => {
     render(<MemoryRouter><HomePage /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "home.title" })).toBeTruthy();
-    expect(screen.getByText(`v${HOME_RELEASE_VERSION}`)).toBeTruthy();
-    expect(screen.getByText(HOME_RELEASE_NOTES.zh.fixed[0])).toBeTruthy();
-    expect(screen.getByRole("note").textContent).toContain("home.stableReleaseNotice");
-    expect(screen.getByRole("button", { name: /home.reportBug/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /home.requestFeature/ })).toBeTruthy();
-  });
-
-  test("opens localized issue forms and repository development links", () => {
-    render(<MemoryRouter><HomePage /></MemoryRouter>);
-    fireEvent.click(screen.getByRole("button", { name: /home.reportBug/ }));
-    expect(openExternal).toHaveBeenCalledWith(expect.stringContaining("template=bug_report.yml"));
-    fireEvent.click(screen.getByRole("button", { name: "home.viewPr" }));
-    expect(openExternal).toHaveBeenCalledWith("https://github.com/INEEDBUG/MaxGameStudio/pulls");
+    expect(screen.getByRole("region", { name: "Steam 账户" })).toBeTruthy();
+    for (const path of ["/cs2/library", "/cs2/match-history", "/cs2/lite-cut", "/valorant/stretch", "/peripherals/sensitivity"]) {
+      expect(document.querySelector(`a[href="${path}"]`)).toBeTruthy();
+    }
+    expect(document.querySelector('a[href="/league"]')).toBeNull();
   });
 });

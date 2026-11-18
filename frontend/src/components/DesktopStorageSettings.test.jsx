@@ -46,13 +46,12 @@ describe("DesktopStorageSettings", () => {
         logs: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent\\data\\logs",
         cache: "C:\\Users\\Tester\\AppData\\Roaming\\CS2 Insight Agent\\data\\cache",
         webview: "C:\\Users\\Tester\\AppData\\Local\\com.cs2insightagent.app",
-        league_runtime: "C:\\Users\\Tester\\AppData\\Roaming\\MaxGameStudio\\league-runtime",
         temp: "C:\\Users\\Tester\\AppData\\Local\\Temp\\MaxGameStudio",
       },
     });
     render(<DesktopStorageSettings />);
     expect(await screen.findByText(/WebView（旧位置）/)).toBeTruthy();
-    expect(screen.getByText(/不会在启动时自动搬运旧数据/)).toBeTruthy();
+    expect(screen.getByText(/原文件保留在原处/)).toBeTruthy();
     expect(screen.getByText(/C:\\Users\\Tester\\AppData\\Local\\com.cs2insightagent.app/)).toBeTruthy();
   });
 
@@ -85,7 +84,6 @@ describe("DesktopStorageSettings", () => {
     render(<DesktopStorageSettings />);
 
     expect((await screen.findByRole("alert")).textContent).toContain("目标目录不可用");
-    expect(screen.getByRole("alert").textContent).toContain("再次点击");
     fireEvent.click(screen.getByRole("button", { name: "更改存储位置" }));
     await waitFor(() => expect(bridge.chooseDesktopStorage).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());

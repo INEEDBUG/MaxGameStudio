@@ -38,16 +38,8 @@ export const desktopBridge = isDesktopApp
       hideToTray: () => invoke("hide_to_tray"),
       quitApp: () => invoke("quit_app"),
       onCloseChoiceRequested: (callback) => listen("desktop-close-choice-requested", callback),
-      getLeagueRuntimeStatus: () => invoke("get_league_runtime_status"),
-      prepareLeagueRuntime: () => invoke("prepare_league_runtime"),
-      cancelLeaguePrewarm: () => invoke("cancel_league_prewarm"),
-      // Keep the frontend call site optional while always satisfying the
-      // native command's required boolean argument.
-      launchLeagueRuntime: (mode, options = {}) => invoke("launch_league_runtime", {
-        mode,
-        administrator: Boolean(options?.administrator),
-      }),
-      stopLeagueRuntime: () => invoke("stop_league_runtime"),
+      getSteamAccounts: () => invoke("get_steam_accounts"),
+      switchSteamAccount: (steamId) => invoke("switch_steam_account", { steamId }),
       getDesktopStorage: () => invoke("get_desktop_storage"),
       chooseDesktopStorage: () => invoke("choose_desktop_storage"),
       cancelDesktopStorageChange: () => invoke("cancel_desktop_storage_change"),

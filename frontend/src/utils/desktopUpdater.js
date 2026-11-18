@@ -1,6 +1,45 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 import { boundedUpdateCheck } from "./updateSourceCheck";
+import { MAIN_UPDATE_PRODUCT, mainInstallerNames, mainUpdateChannel } from "./mainUpdateIdentity.mjs";
+
+function isExpectedMainAsset(platform, version, tag, legacy) {
+  if (typeof platform?.signature !== "string" || !platform.signature.trim() || typeof platform.url !== "string") {
+    return false;
+  }
+  try {
+    const url = new URL(platform.url);
+    if (url.origin !== "https://github.com" || url.username || url.password || url.search || url.hash) return false;
+    const [empty, owner, repo, releases, download, releaseTag, asset, ...extra] =
+      url.pathname.split("/").map(decodeURIComponent);
+    const allowedTags = legacy ? [tag, `V${version}`, version] : [tag];
+    return empty === "" && !extra.length &&
+      owner?.toLowerCase() === "ineedbug" && repo?.toLowerCase() === MAIN_UPDATE_PRODUCT &&
+      releases === "releases" && download === "download" && allowedTags.includes(releaseTag) &&
+      mainInstallerNames(version, { legacy }).includes(asset);
+  } catch {
+    return false;
+  }
+}
+
+function isExpectedMainUpdate(update, channel) {
+  const manifest = update.rawJson;
+  const version = update.version;
+  if (!manifest || mainUpdateChannel(version) !== channel) return false;
+  if (String(manifest.version ?? manifest.name ?? "").replace(/^v/, "") !== version) return false;
+  const tag = `v${version}`;
+  if (manifest.product !== undefined && manifest.product !== MAIN_UPDATE_PRODUCT) return false;
+  if (manifest.tag_name !== undefined && manifest.tag_name !== tag) return false;
+  if (manifest.channel !== undefined && manifest.channel !== channel) return false;
+  if (channel === "beta" && (manifest.product !== MAIN_UPDATE_PRODUCT || manifest.tag_name !== tag || manifest.channel !== channel)) return false;
+  const legacy = channel === "stable" && manifest.product === undefined;
+  // Tauri prefers the NSIS-specific target and otherwise uses the generic
+  // Windows platform. Validate both if supplied so either native path is safe.
+  const platforms = manifest.platforms == null
+    ? [manifest]
+    : [manifest.platforms["windows-x86_64-nsis"], manifest.platforms["windows-x86_64"]].filter(Boolean);
+  return platforms.length > 0 && platforms.every((platform) => isExpectedMainAsset(platform, version, tag, legacy));
+}
 
 /** Tauri 桌面壳注入 IPC 对象；浏览器 / Vite dev 页面无此对象。 */
 export function isTauriDesktop() {
@@ -40,6 +79,7 @@ export function createDesktopUpdateCheck(
   {
     checkTimeoutMs = 8000,
     skipVersion = "",
+    channel = typeof __APP_VERSION__ !== "undefined" && mainUpdateChannel(__APP_VERSION__) === "beta" ? "beta" : "stable",
   } = {},
 ) {
   let cancelled = false;
@@ -99,6 +139,16 @@ export function createDesktopUpdateCheck(
     }
     if (!update) {
       emit({ status: "not-available", update_mode: "normal" });
+      return;
+    }
+    if (!isExpectedMainUpdate(update, channel)) {
+      await update.close().catch(() => {});
+      emit({
+        status: "error",
+        error_stage: "check",
+        error: "更新清单与当前产品或渠道不匹配 / Update manifest does not match this product or channel",
+        update_mode: "normal",
+      });
       return;
     }
 

@@ -8,6 +8,7 @@ describe("DemoDownloadActivityCenter", () => {
   afterEach(() => {
     cleanup();
     act(() => useDemoDownloadStore.setState({ jobs: [], pollingError: "" }));
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -42,4 +43,20 @@ describe("DemoDownloadActivityCenter", () => {
     render(<MemoryRouter><DemoDownloadActivityCenter /></MemoryRouter>);
     expect(screen.queryByRole("button", { name: "查看官匹 Demo 下载进度" })).toBeNull();
   });
+  test("stops idle polling and restarts for a newly created download", async () => {
+    vi.useFakeTimers();
+    const refreshJobs = vi.fn(async () => []);
+    act(() => useDemoDownloadStore.setState({ refreshJobs, jobs: [] }));
+    render(<MemoryRouter><DemoDownloadActivityCenter /></MemoryRouter>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(refreshJobs).toHaveBeenCalledTimes(1);
+    act(() => useDemoDownloadStore.setState({ jobs: [{ job_id: "new", status: "running", progress: 0 }] }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(refreshJobs.mock.calls.length).toBeGreaterThan(1);
+    act(() => useDemoDownloadStore.setState({ jobs: [] }));
+    const completedCalls = refreshJobs.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(refreshJobs).toHaveBeenCalledTimes(completedCalls);
+  });
+
 });

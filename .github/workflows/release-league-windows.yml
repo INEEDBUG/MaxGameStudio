@@ -1,0 +1,259 @@
+name: Release League Toolbox for Windows
+
+on:
+  push:
+    branches:
+      - 'codex/desktop-utilities-beta'
+    tags:
+      - 'league-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Private League Toolbox build version
+        required: true
+        default: '1.0.0-beta.1'
+      verify_live_resg:
+        description: Verify the public RESG website in an isolated Electron profile
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-league-windows
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+    env:
+      YARN_IGNORE_PATH: '1'
+      YARN_ENABLE_GLOBAL_CACHE: 'true'
+      YARN_GLOBAL_FOLDER: ${{ runner.temp }}/league-cache/yarn
+      ELECTRON_CACHE: ${{ runner.temp }}/league-cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/league-cache/electron-builder
+      LEAGUE_PIN: 14557723706ccc0e0a9d62c470141d4cb7190fcd
+      LEAGUE_BRANCH_VERSION: '1.0.0-beta.1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve League version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $sourceSha = (git rev-parse HEAD | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceSha -cne $env:GITHUB_SHA) {
+            throw 'League checkout does not match the triggering commit.'
+          }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = $env:REQUESTED_VERSION
+          } elseif ($env:GITHUB_REF_TYPE -eq 'branch' -and $env:GITHUB_REF_NAME -ceq 'codex/desktop-utilities-beta') {
+            $version = $env:LEAGUE_BRANCH_VERSION
+          } else {
+            if ($env:GITHUB_REF_TYPE -ne 'tag' -or !$env:GITHUB_REF_NAME.StartsWith('league-v')) {
+              throw 'Expected a League Toolbox release tag.'
+            }
+            $version = $env:GITHUB_REF_NAME.Substring(8)
+          }
+          if ($version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$') {
+            throw 'Expected x.y.z or x.y.z-beta.n.'
+          }
+          $channel = if ($version.Contains('-beta.')) { 'beta' } else { 'stable' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+          "LEAGUE_VERSION=$version" >> $env:GITHUB_ENV
+          "LEAGUE_SOURCE=$(Join-Path $env:RUNNER_TEMP 'lcu')" >> $env:GITHUB_ENV
+          "LEAGUE_ARTIFACTS=$(Join-Path $env:RUNNER_TEMP 'league-installers')" >> $env:GITHUB_ENV
+          "MAXGAMESTUDIO_BUILD_TEMP=$(Join-Path $env:RUNNER_TEMP 'lt')" >> $env:GITHUB_ENV
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.9.0'
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install RESG fixture dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run League Toolbox regression fixtures
+        run: >-
+          node --test --test-isolation=none --test-concurrency=1
+          packaging/windows/league-resg/resg-navigation.test.cjs
+          packaging/windows/league-resg/resg-display.test.cjs
+          packaging/windows/league-standalone/league-update.test.mjs
+          packaging/windows/league-standalone/league-profile.test.mjs
+
+      - name: Restore League package and Electron download caches
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/league-cache
+          key: league-windows-${{ runner.arch }}-node24-yarn4.9.1-${{ env.LEAGUE_PIN }}
+
+      - name: Fetch and install the pinned League source
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          git init --quiet $env:LEAGUE_SOURCE
+          git -c core.longpaths=true -C $env:LEAGUE_SOURCE fetch --quiet --depth 1 https://github.com/LeagueAkari/LeagueAkari.git $env:LEAGUE_PIN
+          git -c core.longpaths=true -C $env:LEAGUE_SOURCE checkout --quiet --detach FETCH_HEAD
+          Push-Location $env:LEAGUE_SOURCE
+          try {
+            $yarn = Join-Path $env:LEAGUE_SOURCE '.yarn/releases/yarn-4.9.1.cjs'
+            node $yarn install --immutable
+          } finally { Pop-Location }
+
+      - name: Build the standalone x64 installer
+        shell: pwsh
+        run: |
+          $unpacked = Join-Path $env:RUNNER_TEMP 'league-unpacked'
+          $yarn = Join-Path $env:LEAGUE_SOURCE '.yarn/releases/yarn-4.9.1.cjs'
+          ./packaging/windows/stage-league-runtime.ps1 -Build -Standalone -SourceDir $env:LEAGUE_SOURCE `
+            -StandaloneVersion $env:LEAGUE_VERSION -YarnScript $yarn -OutputDir $unpacked `
+            -InstallerOutputDir $env:LEAGUE_ARTIFACTS
+          $installerName = "MaxGameStudioLeague_${env:LEAGUE_VERSION}_x64-setup.exe"
+          $installer = Join-Path $env:LEAGUE_ARTIFACTS $installerName
+          $sha = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha *$installerName" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+          "LEAGUE_INSTALLER=$installer" >> $env:GITHUB_ENV
+
+      - name: Verify standalone installation and removal
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'LeagueSmoke'
+          $setup = Start-Process -FilePath $env:LEAGUE_INSTALLER -ArgumentList '/S', "/D=$root" -WindowStyle Hidden -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "League installer failed ($($setup.ExitCode))." }
+          $exe = Join-Path $root 'MaxGameStudioLeagueToolbox.exe'
+          if (!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath (Join-Path $root 'resources/app.asar'))) {
+            throw 'Standalone League executable or ASAR missing.'
+          }
+          $uninstall = @(Get-ChildItem -LiteralPath $root -Filter 'Uninstall*.exe' -File)
+          if ($uninstall.Count -ne 1) { throw 'Expected one standalone uninstaller.' }
+          $exit = Start-Process -FilePath $uninstall[0].FullName -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
+          if ($exit.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe)) { throw 'League uninstall verification failed.' }
+
+      - name: Verify the live RESG provider
+        if: github.event_name == 'workflow_dispatch' && inputs.verify_live_resg
+        shell: pwsh
+        run: |
+          node packaging/windows/league-resg/smoke-resg.cjs $env:LEAGUE_SOURCE (Join-Path $env:RUNNER_TEMP 'league-resg-smoke')
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: league-toolbox-${{ steps.version.outputs.version }}-windows-x64
+          path: |
+            ${{ env.LEAGUE_INSTALLER }}
+            ${{ env.LEAGUE_INSTALLER }}.sha256
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'league-v') && github.repository == 'INEEDBUG/MaxGameStudio'
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      CHANNEL: ${{ needs.build.outputs.channel }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: league-toolbox-${{ needs.build.outputs.version }}-windows-x64
+          path: delivery
+
+      - name: Publish and verify the League-only release and feed
+        shell: pwsh
+        run: |
+          $tag = "league-v$env:VERSION"
+          if ($env:GITHUB_REF_NAME -cne $tag) { throw 'League tag and artifact version disagree.' }
+          $prerelease = $env:CHANNEL -eq 'beta'
+          $artifact = "MaxGameStudioLeague_${env:VERSION}_x64-setup.exe"
+          $installer = Join-Path 'delivery' $artifact
+          $sha = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-Content -LiteralPath "$installer.sha256" -Raw).Trim() -cne "$sha *$artifact") {
+            throw 'League installer and checksum do not match.'
+          }
+          $assetBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
+          $releaseApi = "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          $latestApi = "repos/$env:GITHUB_REPOSITORY/releases/latest"
+          $null = gh api $releaseApi 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $flags = @('release', 'create', $tag, $installer, "$installer.sha256", '--repo', $env:GITHUB_REPOSITORY,
+              '--title', "MaxGameStudio League $env:VERSION", '--latest=false', '--verify-tag',
+              '--notes', '独立英雄联盟工具箱 · Windows x64')
+            if ($prerelease) { $flags += '--prerelease' }
+            gh @flags
+            if ($LASTEXITCODE -ne 0) { throw 'League release creation failed.' }
+          }
+          $published = gh api $releaseApi | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.tag_name -cne $tag -or $published.draft -or
+              $published.prerelease -ne $prerelease -or $published.assets.Count -ne 2) {
+            throw 'Unexpected League release metadata.'
+          }
+          $publishedInstaller = @($published.assets | Where-Object { $_.name -ceq $artifact })
+          $publishedChecksum = @($published.assets | Where-Object { $_.name -ceq "$artifact.sha256" })
+          $checksumHash = (Get-FileHash -LiteralPath "$installer.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($publishedInstaller.Count -ne 1 -or $publishedChecksum.Count -ne 1 -or
+              $publishedInstaller[0].browser_download_url -cne "$assetBase/$artifact" -or
+              $publishedInstaller[0].digest -cne "sha256:$sha" -or
+              $publishedChecksum[0].digest -cne "sha256:$checksumHash") {
+            throw 'Published League assets failed checksum verification.'
+          }
+          $globalLatest = gh api $latestApi --jq '.tag_name' 2>$null
+          if ($LASTEXITCODE -ne 0 -or $globalLatest -notmatch '^v\d+\.\d+\.\d+$') {
+            throw 'Could not verify that the repository-wide latest release remains a Main release.'
+          }
+
+          $feedName = if ($prerelease) { 'league-beta.json' } else { 'league-latest.json' }
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/contents/$feedName"
+          $priorRaw = gh api "${endpoint}?ref=updater" 2>$null
+          $prior = if ($LASTEXITCODE -eq 0) { $priorRaw | ConvertFrom-Json } else { $null }
+          if ($prior) {
+            $oldContent = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($prior.content))
+            $old = $oldContent | ConvertFrom-Json
+            $oldVersionPattern = if ($prerelease) { '^\d+\.\d+\.\d+-beta\.\d+$' } else { '^\d+\.\d+\.\d+$' }
+            if ($old.product -cne 'maxgamestudio-league' -or $old.channel -cne $env:CHANNEL -or
+                $old.version -cnotmatch $oldVersionPattern -or $old.tag -cne "league-v$($old.version)") {
+              throw 'Existing feed identity could not be verified.'
+            }
+            $oldParts = $old.version -split '-beta\.'
+            $parts = $env:VERSION -split '-beta\.'
+            if ([version]$oldParts[0] -gt [version]$parts[0] -or
+                ($prerelease -and $oldParts[0] -eq $parts[0] -and [int]$oldParts[1] -gt [int]$parts[1])) {
+              throw 'A newer League feed already exists.'
+            }
+          }
+          $feed = @{
+            product = 'maxgamestudio-league'
+            channel = $env:CHANNEL
+            version = $env:VERSION
+            tag = $tag
+            url = "$assetBase/$artifact"
+            sha256 = $sha
+          } | ConvertTo-Json -Compress
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($feed))
+          $put = @('api', '--method', 'PUT', $endpoint, '-f', 'branch=updater',
+            '-f', "message=Update League $env:CHANNEL feed to $env:VERSION", '-f', "content=$encoded")
+          if ($prior) { $put += @('-f', "sha=$($prior.sha)") }
+          gh @put --silent
+          if ($LASTEXITCODE -ne 0) { throw 'League feed publication failed.' }
+          $saved = gh api "${endpoint}?ref=updater" | ConvertFrom-Json
+          $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($saved.content))
+          if ($LASTEXITCODE -ne 0 -or $decoded -cne $feed) { throw 'League feed readback failed.' }

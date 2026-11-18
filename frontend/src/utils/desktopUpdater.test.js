@@ -16,11 +16,19 @@ import {
   normalizeUserReleaseNotes,
 } from "./desktopUpdater.js";
 
-function makeUpdate(overrides = {}) {
+function makeUpdate({ version = "2.5.13", rawJson = {}, ...overrides } = {}) {
   return {
-    version: "2.5.13",
+    version,
     body: "修复自动更新安装",
-    rawJson: { update_mode: "normal" },
+    rawJson: {
+      version,
+      update_mode: "normal",
+      platforms: { "windows-x86_64": {
+        signature: "test",
+        url: `https://github.com/INEEDBUG/MaxGameStudio/releases/download/v${version}/MaxGameStudio_${version}_x64-setup.exe`,
+      } },
+      ...rawJson,
+    },
     download: vi.fn(async (onEvent) => {
       onEvent({ event: "Started", data: { contentLength: 100 } });
       onEvent({ event: "Progress", data: { chunkLength: 40 } });
@@ -84,6 +92,96 @@ describe("normalizeUserReleaseNotes", () => {
 });
 
 describe("createDesktopUpdateCheck", () => {
+  it.each([
+    ["a League product", { product: "maxgamestudio-league" }, "v99.0.0/MaxGameStudio_99.0.0_x64-setup.exe"],
+    ["a League tag", {}, "league-v99.0.0/MaxGameStudio_99.0.0_x64-setup.exe"],
+    ["a League installer", {}, "v99.0.0/MaxGameStudioLeague_99.0.0_x64-setup.exe"],
+    ["a different version's tag", {}, "v98.0.0/MaxGameStudio_99.0.0_x64-setup.exe"],
+  ])("does not offer %s as a main update", async (_name, fields, path) => {
+    const update = makeUpdate({
+      version: "99.0.0",
+      rawJson: {
+        version: "99.0.0", ...fields,
+        platforms: { "windows-x86_64": { signature: "test", url: `https://github.com/INEEDBUG/MaxGameStudio/releases/download/${path}` } },
+      },
+    });
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+    const controller = createDesktopUpdateCheck((state) => states.push(state));
+    const task = controller.start();
+    await vi.waitFor(() => expect(states.at(-1)?.status).not.toBe("checking"));
+    const inspected = states.at(-1);
+    controller.cancel();
+    await task;
+
+    expect(inspected.status).toBe("error");
+    expect(update.close).toHaveBeenCalledOnce();
+    expect(update.download).not.toHaveBeenCalled();
+  });
+
+  it("accepts the official repair asset from a legacy stable manifest", async () => {
+    const update = makeUpdate({ version: "3.1.4", rawJson: {
+      version: "3.1.4",
+      platforms: { "windows-x86_64": { signature: "test", url: "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe" } },
+    } });
+    updaterMocks.check.mockResolvedValue(update);
+    const states = [];
+    const controller = createDesktopUpdateCheck((state) => states.push(state));
+    const task = controller.start();
+    await vi.waitFor(() => expect(states.at(-1)?.status).not.toBe("checking"));
+    const inspected = states.at(-1);
+    controller.cancel();
+    await task;
+    expect(inspected.status).toBe("available");
+  });
+
+  it("rejects the superseded installer even if the generic target points to the repair", async () => {
+    const baseUrl = "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4";
+    const update = makeUpdate({ version: "3.1.4", rawJson: {
+      platforms: {
+        "windows-x86_64": { signature: "test", url: `${baseUrl}/MaxGameStudio_3.1.4_x64-repair-setup.exe` },
+        "windows-x86_64-nsis": { signature: "test", url: `${baseUrl}/MaxGameStudio_3.1.4_x64-setup.exe` },
+      },
+    } });
+    updaterMocks.check.mockResolvedValue(update);
+    const onStatus = vi.fn();
+    const controller = createDesktopUpdateCheck(onStatus);
+    const task = controller.start();
+    await vi.waitFor(() => expect(onStatus.mock.calls.at(-1)?.[0].status).not.toBe("checking"));
+    const status = onStatus.mock.calls.at(-1)?.[0].status;
+    controller.cancel();
+    await task;
+    expect(status).toBe("error");
+    expect(update.download).not.toHaveBeenCalled();
+  });
+
+  it("only accepts the identically tagged main prerelease on the beta feed", async () => {
+    const version = "3.2.0-beta.2";
+    const rawJson = { product: "maxgamestudio", channel: "beta", tag_name: `v${version}` };
+    const stableCheck = makeUpdate({ version, rawJson });
+    const betaCheck = makeUpdate({ version, rawJson });
+    updaterMocks.check.mockResolvedValueOnce(stableCheck).mockResolvedValueOnce(betaCheck);
+
+    const stableStatus = vi.fn();
+    const stable = createDesktopUpdateCheck(stableStatus, { channel: "stable" });
+    const first = stable.start();
+    await vi.waitFor(() => expect(stableStatus.mock.calls.at(-1)?.[0].status).not.toBe("checking"));
+    const stableResult = stableStatus.mock.calls.at(-1)?.[0].status;
+    stable.cancel();
+    await first;
+    expect(stableResult).toBe("error");
+    expect(stableCheck.close).toHaveBeenCalledOnce();
+
+    const betaStatus = vi.fn();
+    const beta = createDesktopUpdateCheck(betaStatus, { channel: "beta" });
+    const second = beta.start();
+    await vi.waitFor(() => expect(betaStatus.mock.calls.at(-1)?.[0].status).not.toBe("checking"));
+    const betaResult = betaStatus.mock.calls.at(-1)?.[0].status;
+    beta.cancel();
+    await second;
+    expect(betaResult).toBe("available");
+  });
+
   it("forwards categorized user release notes from the updater manifest", async () => {
     const update = makeUpdate({
       rawJson: {

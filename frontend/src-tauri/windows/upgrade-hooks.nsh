@@ -34,6 +34,9 @@ Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
 Var CS2LegacyTauriScope  ; "samedir" (preinstall) or "differentdir" (postinstall)
 Var CS2LegacyTauriDir    ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2LegacyTauriUninsExe ; parsed legacy Tauri uninstaller executable path
+Var MGSExistingProgramDir
+!include "${__FILEDIR__}\storage-page.nsh"
+!include "${__FILEDIR__}\directory-guard.nsh"
 
 ; MUI calls this after Tauri's .onInit has restored the registered install
 ; location, but before displaying the directory page. Keep /D and upgrades.
@@ -107,6 +110,31 @@ Function MGS_SelectFreshInstallDrive
   Pop $0
 FunctionEnd
 
+; Manual installs from Explorer have no /UPDATE flag. Detect an actual current
+; product before the maintenance page can offer to uninstall it.
+Function MGS_ApplyOverlayDirectory
+  Push $0
+  Push $1
+  StrCpy $MGSExistingProgramDir ""
+  ClearErrors
+  ${GetOptions} $CMDLINE "/UPDATE" $0
+  IfErrors 0 mgs_overlay_done
+  ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
+  StrCmp $0 "" 0 mgs_overlay_validate
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio" "InstallLocation"
+  StrCpy $1 $0 1
+  StrCmp $1 '$\"' 0 mgs_overlay_validate
+  StrCpy $0 $0 -1 1
+  mgs_overlay_validate:
+    StrCmp $0 "" mgs_overlay_done
+    IfFileExists "$0\cs2-insight-agent-desktop.exe" 0 mgs_overlay_done
+    StrCpy $MGSExistingProgramDir $0
+    StrCpy $INSTDIR $MGSExistingProgramDir
+  mgs_overlay_done:
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
   cs2_abort_interactive:
@@ -156,6 +184,7 @@ Function CS2_PrepareRunningApps
   ; lightweight Tauri guardian. Never copy over its runtime while it is still
   ; active: a medium-integrity installer cannot reliably terminate it and a
   ; partial in-place update would leave the workbench unusable.
+  IfFileExists "$INSTDIR\league-runtime\maxgamestudio-runtime-manifest.json" 0 mgs_embedded_league_done
   StrCpy $R9 "MaxGameStudioLeague.exe"
   Call CS2_IsProcessRunning
   ${If} $R0 = 1
@@ -168,6 +197,7 @@ Function CS2_PrepareRunningApps
     ${EndIf}
   ${EndIf}
 
+  mgs_embedded_league_done:
   ; The Tauri shell closes its window instantly but the process can keep
   ; running for several seconds while the Python backend shuts down. Wait for
   ; that instead of aborting; force-kill the whole child tree only if it never
@@ -806,19 +836,24 @@ FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
   Call MGS_ResolveUpdateDirectory
+  StrCmp $MGSVerifiedProgramDir "" +4
+  StrCmp $INSTDIR $MGSVerifiedProgramDir +3
+    StrCpy $R7 "安装目录已变化，请重新启动安装程序。"
+    Call CS2_AbortMigrationInstall
   ; A silent fresh installation has no directory page or GUI-init callback.
   ; Require an explicit /D instead of silently choosing the system disk.
   IfSilent 0 mgs_silent_path_done
   ClearErrors
   ${GetOptions} $CMDLINE "/UPDATE" $0
   IfErrors 0 mgs_silent_path_done
+  StrCmp $MGSExistingProgramDir "" 0 mgs_silent_path_done
   ReadRegStr $0 HKCU "Software\cs2insightagent\MaxGameStudio" ""
   StrCmp $0 "" 0 mgs_silent_path_done
   System::Call 'kernel32::GetCommandLineW() w.r1'
   ClearErrors
   ${GetOptions} $1 "/D=" $0
   IfErrors 0 mgs_silent_path_done
-  StrCpy $R7 "Fresh silent installations require an explicit /D= installation directory. No application files were copied."
+  StrCpy $R7 "首次静默安装需要通过 /D= 指定程序目录。尚未复制应用文件。"
   Call CS2_AbortMigrationInstall
   mgs_silent_path_done:
   Call CS2_PrepareRunningApps
@@ -856,36 +891,13 @@ FunctionEnd
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow.libs"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow-25.0.0.dist-info"
 
-  ; Runtime smoke tests and earlier installations may leave local diagnostic
-  ; logs outside the signed/hashed payload. Never carry those machine-specific
-  ; files into a repaired install or future release candidate.
-  ; The old installer also wrote an ACL marker beside the runtime. The current
-  ; administrator path no longer trusts or uses that user-writable directory,
-  ; so remove the obsolete marker instead of suggesting that it is protected.
-  Delete "$INSTDIR\league-runtime\.maxgamestudio-acl-hardened"
-  IfFileExists "$INSTDIR\league-runtime\.maxgamestudio-acl-hardened" cs2_stale_league_acl_marker cs2_stale_league_acl_marker_done
-  cs2_stale_league_acl_marker:
-    StrCpy $R7 "无法清理旧版英雄联盟工作台权限标记。安装已停止，避免继续显示已失效的安全状态。"
-    Call CS2_AbortMigrationInstall
-  cs2_stale_league_acl_marker_done:
-
-  Delete "$INSTDIR\league-runtime\debug.log"
-  RMDir /r "$INSTDIR\league-runtime\logs"
-  IfFileExists "$INSTDIR\league-runtime\debug.log" cs2_stale_league_logs cs2_stale_league_logs_check_dir
-  cs2_stale_league_logs_check_dir:
-  IfFileExists "$INSTDIR\league-runtime\logs\*.*" cs2_stale_league_logs cs2_stale_league_logs_done
-  cs2_stale_league_logs:
-    StrCpy $R7 "无法清理旧版英雄联盟工作台诊断日志。安装已停止，避免把本机路径或对局信息继续留在程序目录。"
-    Call CS2_AbortMigrationInstall
-  cs2_stale_league_logs_done:
-
   ; Validate the exact installed runtime before the finish page can launch
   ; Tauri. This catches stale metadata, a missing extension, or an incomplete
   ; file copy at install time instead of surfacing as a backend startup dialog.
   Call CS2_ValidateBundledRuntime
 
-  ; Neither installation nor startup copies user data. Native storage bootstrap
-  ; reuses existing data in place; users explicitly switch locations in Settings.
+  ; Keep existing data in place. An explicit data page selection is only a
+  ; request, validated and migrated by the application's storage bootstrap.
   ; Retain any different-dir Electron installation as a recoverable fallback.
   StrCpy $CS2LegacyTauriScope "differentdir"
   Call CS2_RemoveLegacyTauri
@@ -899,6 +911,18 @@ FunctionEnd
   ; the final on-disk runtime has passed the same import/version contract.
   Call CS2_ValidateBundledRuntime
 
+  ; Remove the verified original runtime payload only. Unknown files and user
+  ; profiles survive, even if they were placed below the old program folder.
+  IfFileExists "$INSTDIR\league-runtime\maxgamestudio-runtime-manifest.json" 0 mgs_retire_embedded_league_done
+  nsExec::ExecToStack '"$INSTDIR\python\python.exe" -I -B -X utf8 "$INSTDIR\backend\app\desktop_storage_migration.py" --retire-embedded-league "$INSTDIR"'
+  Pop $R0
+  Pop $R1
+  ${If} $R0 != "0"
+    DetailPrint "旧版内嵌工作台的程序文件未全部清理。已保留原配置。"
+    MessageBox MB_ICONEXCLAMATION|MB_OK "旧版内嵌工作台的程序文件未全部清理。已保留原配置。" /SD IDOK
+  ${EndIf}
+  mgs_retire_embedded_league_done:
+  Call MGS_RecordDataDirectorySelection
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
