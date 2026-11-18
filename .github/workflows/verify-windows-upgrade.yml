@@ -75,6 +75,7 @@ jobs:
             throw 'Provide a private League run ID and a Main candidate run.'
           }
           $run = gh run view $env:LEAGUE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName,headBranch,headSha | ConvertFrom-Json
+          Write-Host ("League candidate metadata: {0}" -f ($run | ConvertTo-Json -Compress))
           if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'push' -or
               $run.workflowName -cne 'Release League Toolbox for Windows' -or $run.headBranch -cne 'codex/desktop-utilities-beta' -or
               $run.headSha -cne $env:MGS_MAIN_CANDIDATE_SHA) {
