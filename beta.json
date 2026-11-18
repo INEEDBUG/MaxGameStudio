@@ -1,0 +1,30 @@
+{
+  "version": "3.2.0-beta.1",
+  "product": "maxgamestudio",
+  "tag_name": "v3.2.0-beta.1",
+  "channel": "beta",
+  "notes": "# MaxGameStudio 3.2.0-beta.1\n\n本测试版可覆盖 3.1.4 修复正式版，默认保留原安装位置、配置与数据库。安装向导为简体中文，可选择程序和数据目录；主动迁移数据时保留源目录。\n\n- 新增本机 Steam 已保存账户切换，退出游戏和 Steam 云同步完成后使用。无需保存密码到本软件。\n- 首页提供 Steam 账户与常用工具，加入真实游戏图标，减少装饰。\n- 英雄联盟工具箱改为独立安装。主程序移除其入口与 Electron 载荷。两个软件使用独立更新通道。\n- 下载任务为空时停止快速轮询，首页继续按需启动 Python。\n\n同仓库的 League 测试版使用 `league-v1.0.0-beta.1` 标签，可单独下载和卸载。旧版内嵌工具箱的配置保留，供独立工具箱迁移。\n\n开发机没有 Steam 与英雄联盟客户端。发布前覆盖 Steam 的模拟换号、安装覆盖和 RESG 公开英雄页面；真实登录、Steam Guard 与实际游戏对局仍请在自己的电脑验收。\n",
+  "pub_date": "2026-11-18T22:33:20Z",
+  "update_mode": "normal",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3AyRGtWR3doSGpuUk56ZjdnSlRmMll2UitNYXJtRzFPMStiS0VqMUFFeks4OVYrYy9ERGpOOVpjWUNzd0U3TzdXcTJHanV4cWFlakplY0J1amFqQ0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDQwNzc1CWZpbGU6TWF4R2FtZVN0dWRpb18zLjIuMC1iZXRhLjFfeDY0LXNldHVwLmV4ZQpMdm1lTVEySmtRWldLdzNtOG5wZXZCeklIbGFMZDBrMm5FS2RqcklLY2dEek1IUFJpNkF4S29PWndZc0ZxODcyYnNNSU50ak5OYnQycW5ZVFA0SW5Bdz09Cg==",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe"
+    }
+  },
+  "user_release_notes": {
+    "version": "3.2.0-beta.1",
+    "fixed": [
+      "更新只识别对应产品的安装包，主程序与英雄联盟工具箱独立更新。"
+    ],
+    "added": [
+      "Steam 已保存账户一键切换。",
+      "中文安装向导支持选择程序和数据目录，覆盖正式版时沿用原数据。"
+    ],
+    "optimized": [
+      "首页重绘，加入对应游戏图标和常用入口。",
+      "英雄联盟工具箱独立安装，主程序移除内嵌 Electron 运行环境。",
+      "空闲下载停止快速轮询，首页与 Steam 页无需启动 Python。"
+    ]
+  }
+}
