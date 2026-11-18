@@ -120,8 +120,11 @@ function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
   $elapsed = ((Get-Date) - $started).TotalSeconds
   $privateSet = (Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
     Where-Object { $processIds.Contains([int]$_.IDProcess) } | Measure-Object WorkingSetPrivate -Sum).Sum
+  $programBytes = (Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($App.Path)) -Recurse -File |
+    Measure-Object Length -Sum).Sum
   $sample = [ordered]@{
     product = $Product; scene = 'fresh profile, no game client, idle main window'; warmupSeconds = 10; processes = $last.Count
+    installedProgramBytes = [long]$programBytes; installedProgramMiB = [math]::Round($programBytes / 1MB, 2)
     privateWorkingSetMiB = [math]::Round($privateSet / 1MB, 2)
     privateCommitMiB = [math]::Round(($last | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 2)
     cpuCorePercent = [math]::Round(((($last | Measure-Object CPU -Sum).Sum - $cpu) / $elapsed * 100), 2)
