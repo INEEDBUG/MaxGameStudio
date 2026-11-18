@@ -324,6 +324,13 @@ if ($LeagueInstaller) {
   Assert-FileHash $leagueMarker $leagueMarkerHash
   Assert-FileHash $leagueLocator $leagueLocatorHash
 
+  $remainingMain = Start-Process -FilePath $installed -PassThru
+  try {
+    Wait-AppWindow $remainingMain '^MaxGameStudio$' 'MaxGameStudio after League uninstall'
+  } finally {
+    Stop-FixtureApp $remainingMain -TryClose
+  }
+
   Install-Package $LeagueInstaller "/S /D=$leagueDirectory"
   Assert-InstalledLeague
   Assert-FileHash $leagueExe $initialLeagueHash
