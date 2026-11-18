@@ -59,8 +59,22 @@ $relocated = Join-Path $root 'Relocated Profile'
 New-Item -ItemType Directory -Path $oldDirectory,$expectedDirectory,$data | Out-Null
 
 function Install-Package([string]$Exe, [string]$Arguments, [int]$ExpectedExit = 0) {
+  Write-Host "INSTALL_ATTEMPT: $([IO.Path]::GetFileName($Exe)) $Arguments (expected $ExpectedExit)"
   $process = Start-Process -FilePath $Exe -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
   if ($process.ExitCode -ne $ExpectedExit) {
+    if ([IO.Path]::GetFileName($Exe) -ceq 'MaxGameStudio_3.2.0-beta.1_x64-setup.exe') {
+      $registered = Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue
+      Write-Host ("MAIN_INSTALL_DIAGNOSTIC: {0}" -f (@{
+        registeredDirectory = $registered.InstallLocation; registeredVersion = $registered.DisplayVersion
+        expectedDirectory = $oldDirectory
+        binaryExists = Test-Path -LiteralPath (Join-Path $oldDirectory $binaryName)
+        publisherKeyExists = Test-Path -LiteralPath $productKey
+        runningMain = @(Get-Process -Name 'cs2-insight-agent-desktop' -ErrorAction SilentlyContinue).Count
+      } | ConvertTo-Json -Compress))
+      $checker = Join-Path $PSScriptRoot '../../../frontend/src-tauri/windows/validate-install-directories.ps1'
+      & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -File $checker -ProgramDir "$oldDirectory\."
+      Write-Host "DIRECTORY_VALIDATOR_DIAGNOSTIC: exit $LASTEXITCODE"
+    }
     throw "$([IO.Path]::GetFileName($Exe)) returned $($process.ExitCode), expected $ExpectedExit."
   }
 }
