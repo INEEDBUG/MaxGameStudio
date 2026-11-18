@@ -52,12 +52,12 @@ jobs:
           }
           if ($env:CANDIDATE_RUN_ID -notmatch '^\d+$') { throw 'Invalid candidate run ID' }
           if ($env:CANDIDATE_VERSION -notmatch '^\d+\.\d+\.\d+(?:-(?:beta|rc)\.\d+)?$') { throw 'Invalid candidate version' }
-          $run = gh run view $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName,headSha | ConvertFrom-Json
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'workflow_dispatch' -or
-              $run.workflowName -cne 'Release Windows' -or $run.headSha -cnotmatch '^[a-f0-9]{40}$') {
+              $run.path -cne '.github/workflows/release-windows.yml' -or $run.head_sha -cnotmatch '^[a-f0-9]{40}$') {
             throw 'Candidate is not a successful manual Release Windows build.'
           }
-          "MGS_MAIN_CANDIDATE_SHA=$($run.headSha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MGS_MAIN_CANDIDATE_SHA=$($run.head_sha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "MaxGameStudio-$env:CANDIDATE_VERSION" --dir candidate
           if ($LASTEXITCODE -ne 0) { throw 'Candidate download failed' }
           $installers = @(Get-ChildItem candidate -Recurse -File -Filter "MaxGameStudio_$($env:CANDIDATE_VERSION)_x64-setup.exe")
@@ -74,11 +74,11 @@ jobs:
           if ($env:LEAGUE_RUN_ID -notmatch '^\d+$' -or $env:MGS_MAIN_CANDIDATE_SHA -cnotmatch '^[a-f0-9]{40}$') {
             throw 'Provide a private League run ID and a Main candidate run.'
           }
-          $run = gh run view $env:LEAGUE_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,event,workflowName,headBranch,headSha | ConvertFrom-Json
-          Write-Host ("League candidate metadata: {0}" -f ($run | ConvertTo-Json -Compress))
+          # The run path stays exact even when CLI workflowName resolves through the default branch.
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:LEAGUE_RUN_ID" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'push' -or
-              $run.workflowName -cne 'Release League Toolbox for Windows' -or $run.headBranch -cne 'codex/desktop-utilities-beta' -or
-              $run.headSha -cne $env:MGS_MAIN_CANDIDATE_SHA) {
+              $run.path -cne '.github/workflows/release-league-windows.yml' -or $run.head_branch -cne 'codex/desktop-utilities-beta' -or
+              $run.head_sha -cne $env:MGS_MAIN_CANDIDATE_SHA) {
             throw 'The private League and Main candidate builds must be successful builds of the same commit.'
           }
           $artifact = 'league-toolbox-1.0.0-beta.1-windows-x64'
@@ -91,7 +91,7 @@ jobs:
             throw 'The private League installer does not match its SHA-256 file.'
           }
           "MGS_LEAGUE_INSTALLER=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "MGS_LEAGUE_CANDIDATE_SHA=$($run.headSha)" >> $env:GITHUB_ENV
+          "MGS_LEAGUE_CANDIDATE_SHA=$($run.head_sha)" >> $env:GITHUB_ENV
       - name: Download and verify the published League installer
         if: inputs.league_run_id == '' && inputs.candidate_run_id != 'published-3.1.4' && inputs.league_tag != ''
         shell: pwsh
