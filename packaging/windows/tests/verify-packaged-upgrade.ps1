@@ -36,7 +36,7 @@ if ($LeagueInstaller) {
   $leagueDirectory = Join-Path $root 'Toolbox Program'
   $leagueProfile = Join-Path $root 'Toolbox Profile'
   $leagueExe = Join-Path $leagueDirectory 'MaxGameStudioLeagueToolbox.exe'
-  $leagueRemove = Join-Path $leagueDirectory 'Uninstall MaxGameStudio League.exe'
+  $leagueRemove = Join-Path $leagueDirectory 'Uninstall MaxGameStudioLeagueToolbox.exe'
   $leagueLocator = Join-Path $leagueControl 'data-location.txt'
   $leagueMarker = Join-Path $leagueProfile 'coexistence-marker.txt'
   $pathsThatMustBeEmpty += @(
@@ -82,6 +82,40 @@ function Wait-AppWindow([Diagnostics.Process]$App, [string]$Title, [string]$Name
   throw "$Name did not show its main window. Observed title: $($App.MainWindowTitle)"
 }
 
+$sampledProducts = @{}
+function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
+  if ($sampledProducts.ContainsKey($Product)) { return }
+  Start-Sleep -Seconds 2
+  $processIds = [Collections.Generic.HashSet[int]]::new()
+  [void]$processIds.Add($App.Id)
+  $snapshot = @(Get-CimInstance Win32_Process)
+  do {
+    $added = $false
+    foreach ($process in $snapshot) {
+      if ($processIds.Contains([int]$process.ParentProcessId) -and $processIds.Add([int]$process.ProcessId)) { $added = $true }
+    }
+  } while ($added)
+  $first = @(Get-Process -Id @($processIds) -ErrorAction SilentlyContinue)
+  $cpu = ($first | Measure-Object CPU -Sum).Sum
+  $started = Get-Date
+  Start-Sleep -Seconds 3
+  $last = @(Get-Process -Id @($processIds) -ErrorAction SilentlyContinue)
+  $App.Refresh()
+  if ($App.HasExited) { throw "$Product exited during the idle resource sample." }
+  $elapsed = ((Get-Date) - $started).TotalSeconds
+  $privateSet = (Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
+    Where-Object { $processIds.Contains([int]$_.IDProcess) } | Measure-Object WorkingSetPrivate -Sum).Sum
+  $sample = [ordered]@{
+    product = $Product; scene = 'fresh profile, no game client, idle main window'; processes = $last.Count
+    privateWorkingSetMiB = [math]::Round($privateSet / 1MB, 2)
+    privateCommitMiB = [math]::Round(($last | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 2)
+    cpuCorePercent = [math]::Round(((($last | Measure-Object CPU -Sum).Sum - $cpu) / $elapsed * 100), 2)
+    seconds = [math]::Round($elapsed, 2)
+  }
+  Write-Host ('IDLE_RESOURCE_SAMPLE: ' + ($sample | ConvertTo-Json -Compress))
+  $sampledProducts[$Product] = $true
+}
+
 function Stop-FixtureApp([Diagnostics.Process]$App, [switch]$TryClose) {
   if ($App.HasExited) { return }
   if ($TryClose -and $App.CloseMainWindow() -and $App.WaitForExit(5000)) { return }
@@ -121,6 +155,7 @@ function Test-LeagueWindow {
   $leagueApp = Start-Process -FilePath $leagueExe -PassThru
   try {
     Wait-AppWindow $leagueApp '^英雄联盟工具箱$' 'League Toolbox'
+    Write-IdleResourceSample $leagueApp 'maxgamestudio-league'
     if ([IO.File]::ReadAllText($leagueLocator, [Text.Encoding]::Unicode).Trim() -ne $leagueProfile) {
       throw 'League did not commit the selected test profile.'
     }
@@ -249,6 +284,7 @@ if ($ExpectedVersion -ne '3.1.4') {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $relocated 'temp'))) { throw 'Candidate did not initialize the new runtime directory.' }
     Wait-AppWindow $app '^MaxGameStudio$' 'MaxGameStudio'
+    Write-IdleResourceSample $app 'maxgamestudio'
     foreach ($folder in @($data, (Join-Path $relocated 'data'))) {
       & $python -I -B $fixture verify $folder
       if ($LASTEXITCODE -ne 0) { throw 'Cannot read the retained or relocated profile.' }

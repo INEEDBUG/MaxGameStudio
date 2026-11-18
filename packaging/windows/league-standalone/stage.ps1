@@ -8,6 +8,8 @@ function Update-StandaloneSource([string]$RelativePath, [string]$Anchor, [string
   $target = Join-Path $SourceRoot $RelativePath
   $original = [IO.File]::ReadAllText($target)
   $newline = if ($original.Contains("`r`n")) { "`r`n" } else { "`n" }
+  # Shared staging can insert Windows newlines into an LF source checkout.
+  $original = ($original -replace "\r?\n", $newline)
   $anchorText = ($Anchor -replace "\r?\n", $newline)
   $replacementText = ($Replacement -replace "\r?\n", $newline)
   if ([regex]::Matches($original, [regex]::Escape($anchorText)).Count -ne 1) {
@@ -44,7 +46,7 @@ $oldLoggerPath = @'
   // macOS 下应用通常安装在 /Applications（对普通用户不可写），不能把日志写进 .app bundle 内。
   // Windows（NSIS per-user）等场景下保留原逻辑：写到可执行文件目录旁的 logs。
   const logsDir =
-    process.platform === 'darwin'
+    (process.platform === 'darwin' || process.env.MAXGAMESTUDIO_EMBEDDED === '1')
       ? app.getPath('logs')
       : path.join(path.join(app.getPath('exe'), '..'), 'logs')
 '@
