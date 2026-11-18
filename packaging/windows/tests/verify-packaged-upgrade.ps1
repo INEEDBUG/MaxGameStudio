@@ -99,7 +99,8 @@ function Wait-AppWindow([Diagnostics.Process]$App, [string]$Title, [string]$Name
 $sampledProducts = @{}
 function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
   if ($sampledProducts.ContainsKey($Product)) { return }
-  Start-Sleep -Seconds 2
+  # Let fresh WebView/Electron profile initialization settle before sampling idle.
+  Start-Sleep -Seconds 10
   $processIds = [Collections.Generic.HashSet[int]]::new()
   [void]$processIds.Add($App.Id)
   $snapshot = @(Get-CimInstance Win32_Process)
@@ -112,7 +113,7 @@ function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
   $first = @(Get-Process -Id @($processIds) -ErrorAction SilentlyContinue)
   $cpu = ($first | Measure-Object CPU -Sum).Sum
   $started = Get-Date
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 5
   $last = @(Get-Process -Id @($processIds) -ErrorAction SilentlyContinue)
   $App.Refresh()
   if ($App.HasExited) { throw "$Product exited during the idle resource sample." }
@@ -120,7 +121,7 @@ function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
   $privateSet = (Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
     Where-Object { $processIds.Contains([int]$_.IDProcess) } | Measure-Object WorkingSetPrivate -Sum).Sum
   $sample = [ordered]@{
-    product = $Product; scene = 'fresh profile, no game client, idle main window'; processes = $last.Count
+    product = $Product; scene = 'fresh profile, no game client, idle main window'; warmupSeconds = 10; processes = $last.Count
     privateWorkingSetMiB = [math]::Round($privateSet / 1MB, 2)
     privateCommitMiB = [math]::Round(($last | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 2)
     cpuCorePercent = [math]::Round(((($last | Measure-Object CPU -Sum).Sum - $cpu) / $elapsed * 100), 2)

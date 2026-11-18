@@ -7,6 +7,10 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ('mgs-nsis-test-' + [Guid]::NewG
 New-Item -ItemType Directory -Path $scratch | Out-Null
 $script = Join-Path $scratch 'include-test.nsi'
 $out = Join-Path $scratch 'include-test.exe'
+$originalAppData = $env:APPDATA
+$env:APPDATA = Join-Path $scratch 'fixture-appdata'
+$main = Join-Path $env:APPDATA 'MaxGameStudio'
+New-Item -ItemType Directory -Path $main -Force | Out-Null
 [IO.File]::WriteAllText($script, @'
 Unicode true
 RequestExecutionLevel user
@@ -26,7 +30,12 @@ InstallDir "$TEMP\MaxGameStudioLeagueIncludeTest"
 !ifdef BUILD_UNINSTALLER
 SilentInstall silent
 !else
+Function setInstallSectionSpaceRequired
+FunctionEnd
 Function .onInit
+  Call setInstallSectionSpaceRequired
+
+  SetOutPath $INSTDIR
   !insertmacro customInit
 FunctionEnd
 !endif
@@ -39,6 +48,9 @@ Section
 SectionEnd
 '@)
 try {
+  $launcher = Join-Path $PSScriptRoot 'run-league-nsis.cjs'
+  node -e "const fs = require('node:fs'); const { patchInstallerTemplate } = require(process.argv[1]); const script = process.argv[2]; fs.writeFileSync(script, patchInstallerTemplate(fs.readFileSync(script, 'utf8')));" $launcher $script
+  if ($LASTEXITCODE -ne 0) { throw 'Could not patch the NSIS test startup template.' }
   foreach ($mode in @('uninstaller', 'installer')) {
     $flags = @('/V2', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out")
     if ($mode -eq 'uninstaller') { $flags += '/DBUILD_UNINSTALLER' }
@@ -51,7 +63,8 @@ try {
   }
   $occupied = Join-Path $scratch 'wrong-folder'
   $empty = Join-Path $scratch 'empty-program'
-  New-Item -ItemType Directory -Path $occupied, $empty | Out-Null
+  $overlap = Join-Path $main 'Overlapping Toolbox'
+  New-Item -ItemType Directory -Path $occupied | Out-Null
   $sentinel = Join-Path $occupied 'main-marker.txt'
   Set-Content -LiteralPath $sentinel -Value 'keep'
   $blocked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$occupied" -WindowStyle Hidden -Wait -PassThru
@@ -59,13 +72,18 @@ try {
       ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'keep')) {
     throw 'NSIS silent destination did not retain the protected marker.'
   }
+  $blocked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$overlap" -WindowStyle Hidden -Wait -PassThru
+  if ($blocked.ExitCode -ne 2 -or (Test-Path -LiteralPath $overlap)) {
+    throw "NSIS created or accepted a forbidden Main child (exit $($blocked.ExitCode), exists $(Test-Path -LiteralPath $overlap))."
+  }
   $accepted = Start-Process -FilePath $out -ArgumentList '/S', "/D=$empty" -WindowStyle Hidden -Wait -PassThru
   if ($accepted.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $empty 'fixture-payload.txt'))) {
     throw "NSIS did not accept an independent empty folder (exit ${accepted.ExitCode})."
   }
-  Write-Host 'League NSIS blocked a nonempty destination and accepted an independent empty destination.'
+  Write-Host 'League NSIS rejected occupied and overlapping paths without writing there, and accepted a new independent directory.'
 } finally {
-  foreach ($child in 'wrong-folder\main-marker.txt', 'wrong-folder\fixture-payload.txt', 'wrong-folder', 'empty-program\fixture-payload.txt', 'empty-program') {
+  $env:APPDATA = $originalAppData
+  foreach ($child in 'wrong-folder\main-marker.txt', 'wrong-folder\fixture-payload.txt', 'wrong-folder', 'empty-program\fixture-payload.txt', 'empty-program', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox\fixture-payload.txt', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox', 'fixture-appdata\MaxGameStudio', 'fixture-appdata') {
     $file = Join-Path $scratch $child
     if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
   }

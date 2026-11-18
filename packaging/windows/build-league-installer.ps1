@@ -94,7 +94,8 @@ try {
       include = 'build/installer.nsh'
     }
   } | ConvertTo-Json -Depth 8), $encoding)
-  & $node $builder --projectDir $scratch --config $config --win nsis --x64 --prepackaged $unpacked --publish never
+  $launcher = Join-Path $PSScriptRoot 'league-standalone\run-league-nsis.cjs'
+  & $node $launcher $builder $scratch --projectDir $scratch --config $config --win nsis --x64 --prepackaged $unpacked --publish never
   $candidate = Join-Path $scratch "out\$installerName"
   if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $candidate -PathType Leaf)) {
     throw 'League NSIS repack failed.'
