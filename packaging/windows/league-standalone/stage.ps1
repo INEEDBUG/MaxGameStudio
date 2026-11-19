@@ -30,7 +30,9 @@ foreach ($name in @('LeagueOverview.vue', 'LeagueUpdateButton.vue', 'league-upda
 }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'frontend\public\brand-icons\leagueoflegends.svg') -Destination $overviewDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer.nsh') -Destination (Join-Path $SourceRoot 'build\mgs-league-installer.nsh')
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'destination-guard.ps1') -Destination (Join-Path $SourceRoot 'build\destination-guard.ps1')
+foreach ($name in 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1') {
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $SourceRoot "build\$name")
+}
 
 $main = 'src\main\main.ts'
 Update-StandaloneSource $main "import { bootstrap } from './bootstrap'" @'

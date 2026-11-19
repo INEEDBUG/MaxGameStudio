@@ -11,7 +11,7 @@ $plugins = (Resolve-Path -LiteralPath $PluginDirectory).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('mgs-nsis-test-' + [Guid]::NewGuid().ToString('n'))
 New-Item -ItemType Directory -Path $scratch | Out-Null
 $include = Join-Path $scratch 'installer.nsh'
-foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1') {
+foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1') {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $scratch
 }
 $inventory = Join-Path $scratch 'maxgamestudio-runtime-hashes.json'
@@ -144,7 +144,7 @@ try {
   }
   if (Test-Path -LiteralPath $out -PathType Leaf) { Remove-Item -LiteralPath $out }
   Remove-Item -LiteralPath $script
-  foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'maxgamestudio-runtime-hashes.json') {
+  foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1', 'maxgamestudio-runtime-hashes.json') {
     Remove-Item -LiteralPath (Join-Path $scratch $name)
   }
   Remove-Item -LiteralPath $scratch

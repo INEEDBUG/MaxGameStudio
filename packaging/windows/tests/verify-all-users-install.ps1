@@ -46,7 +46,7 @@ $league = @{
   Exe = 'MaxGameStudioLeagueToolbox.exe'; Remove = 'Uninstall MaxGameStudioLeagueToolbox.exe'; Shortcut = '英雄联盟工具箱'; MachineFlag = '/allusers'
   Default = (Join-Path $env:ProgramFiles 'MaxGameStudioLeagueToolbox'); Old = (Join-Path $root 'League per-user program')
 }
-$shell = New-Object -ComObject WScript.Shell
+. (Join-Path $PSScriptRoot '../league-standalone/shortcut-target.ps1')
 . (Join-Path $PSScriptRoot 'main-install-diagnostic.ps1')
 
 function Invoke-Installer([string]$Exe, [string]$Arguments, [switch]$Rejected) {
@@ -79,17 +79,17 @@ function Assert-CommonShortcuts($Product) {
   $target = Join-Path $Product.Default $Product.Exe
   $desktop = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) "$($Product.Shortcut).lnk"
   $menu = @(Get-ChildItem -LiteralPath ([Environment]::GetFolderPath('CommonPrograms')) -Filter "$($Product.Shortcut).lnk" -File -Recurse |
-    Where-Object { $shell.CreateShortcut($_.FullName).TargetPath -eq $target })
-  if (!(Test-Path -LiteralPath $desktop -PathType Leaf) -or $shell.CreateShortcut($desktop).TargetPath -ne $target -or $menu.Count -ne 1) {
+    Where-Object { (Get-MgsShortcutTarget $_.FullName) -eq $target })
+  if (!(Test-Path -LiteralPath $desktop -PathType Leaf) -or (Get-MgsShortcutTarget $desktop) -ne $target -or $menu.Count -ne 1) {
     $installed = Get-ItemProperty -LiteralPath "HKLM:\$($Product.Product)"
     $registration = Get-ItemProperty -LiteralPath "HKLM:\$($Product.Arp)"
     Write-Host ('SHORTCUT_REGISTRATION: ' + (@{ expected = $Product.Shortcut; shortcutName = $installed.ShortcutName; displayName = $registration.DisplayName } | ConvertTo-Json -Compress))
     foreach ($folder in 'CommonDesktopDirectory', 'CommonPrograms', 'Desktop', 'Programs') {
       $directory = [Environment]::GetFolderPath($folder)
       $links = @(Get-ChildItem -LiteralPath $directory -Filter '*.lnk' -File -Recurse | ForEach-Object {
-        $link = $shell.CreateShortcut($_.FullName)
-        if ($_.BaseName -eq $Product.Shortcut -or [IO.Path]::GetFileName($link.TargetPath) -eq $Product.Exe) {
-          @{ path = $_.FullName; target = $link.TargetPath; nameCodeUnits = @($_.BaseName.ToCharArray() | ForEach-Object { [int]$_ }) }
+        $linkTarget = Get-MgsShortcutTarget $_.FullName
+        if ($_.BaseName -eq $Product.Shortcut -or [IO.Path]::GetFileName($linkTarget) -eq $Product.Exe) {
+          @{ path = $_.FullName; target = $linkTarget; nameCodeUnits = @($_.BaseName.ToCharArray() | ForEach-Object { [int]$_ }) }
         }
       })
       Write-Host ('SHORTCUT_DIAGNOSTIC: ' + (@{ product = $Product.Name; folder = $folder; directory = $directory; links = $links } | ConvertTo-Json -Compress -Depth 4))
@@ -106,7 +106,7 @@ function Assert-RetiredUserInstall($Product) {
   }
   foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
     $stale = Get-ChildItem -LiteralPath $folder -Filter "$($Product.Shortcut).lnk" -File -Recurse |
-      Where-Object { $shell.CreateShortcut($_.FullName).TargetPath -eq (Join-Path $Product.Old $Product.Exe) } |
+      Where-Object { (Get-MgsShortcutTarget $_.FullName) -eq (Join-Path $Product.Old $Product.Exe) } |
       Select-Object -First 1
     if ($stale) { throw "$($Product.Name) left its old current-user shortcut." }
   }
@@ -201,7 +201,9 @@ function Test-BusyMainMachine([Diagnostics.Process]$Running) {
   if ($Running.HasExited) { throw 'The rejected machine updater stopped the other user''s Main process.' }
   Assert-Installed $main HKLM $main.Version $main.Default
 
-  Invoke-Installer (Join-Path $main.Default $main.Remove) '/S /ALLUSERS' -Rejected
+  # Read the real rejection code instead of the self-copying uninstaller launcher's status.
+  # https://nsis.sourceforge.io/Docs/AppendixD.html#D.1
+  Invoke-Installer (Join-Path $main.Default $main.Remove) "/S /ALLUSERS _?=$($main.Default)" -Rejected
   Assert-Hash $executable $exeHash
   Assert-Hash $parser $parserHash
   if ($Running.HasExited) { throw 'The rejected machine uninstaller stopped the other user''s Main process.' }

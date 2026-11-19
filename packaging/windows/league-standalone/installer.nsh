@@ -4,6 +4,7 @@
 !ifndef BUILD_UNINSTALLER
 !define MGS_LEAGUE_GUARD "${__FILEDIR__}\destination-guard.ps1"
 !define MGS_LEAGUE_RETIRE "${__FILEDIR__}\retire-user-install.ps1"
+!define MGS_LEAGUE_SHORTCUT_TARGET "${__FILEDIR__}\shortcut-target.ps1"
 !define MGS_LEAGUE_INVENTORY "${__FILEDIR__}\maxgamestudio-runtime-hashes.json"
 Var LeagueDataPath
 Var LeagueDataEdit
@@ -112,6 +113,7 @@ Function LeagueUserAction
   InitPluginsDir
   File "/oname=$PLUGINSDIR\mgs-league-destination.ps1" "${MGS_LEAGUE_GUARD}"
   File "/oname=$PLUGINSDIR\retire-user-install.ps1" "${MGS_LEAGUE_RETIRE}"
+  File "/oname=$PLUGINSDIR\shortcut-target.ps1" "${MGS_LEAGUE_SHORTCUT_TARGET}"
   File "/oname=$PLUGINSDIR\maxgamestudio-runtime-hashes.json" "${MGS_LEAGUE_INVENTORY}"
   System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_PHASE", w "$R0") i.r0'
   System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_DEST", w "$R1") i.r0'

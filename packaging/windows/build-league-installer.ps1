@@ -61,7 +61,7 @@ $resources = Join-Path $scratch 'build'
 New-Item -ItemType Directory -Path $resources | Out-Null
 $encoding = [Text.UTF8Encoding]::new($false)
 try {
-  foreach ($name in @('installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1')) {
+  foreach ($name in @('installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "league-standalone\$name") -Destination $resources
   }
   Copy-Item -LiteralPath $inventory -Destination $resources

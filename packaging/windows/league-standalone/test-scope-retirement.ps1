@@ -8,6 +8,11 @@ $activePointer = Join-Path $profile 'data-location.txt'
 $pendingPointer = Join-Path $profile 'installer-data-location.txt'
 $requested = Join-Path $scratch 'unapplied-custom-data'
 $newInventory = Join-Path $scratch 'new-hashes.json'
+$symbol = [char]::ConvertFromUtf32(0x1F680)
+$oldLink = "old-$symbol.lnk"
+$otherLink = "other-$symbol.lnk"
+$invalidLink = "invalid-$symbol.lnk"
+$fixtureLinks = @('old.lnk', 'other.lnk', $oldLink, $otherLink, $invalidLink)
 New-Item -ItemType Directory -Path $old, $profile -Force | Out-Null
 try {
   $exe = Join-Path $old 'MaxGameStudioLeagueToolbox.exe'
@@ -18,6 +23,37 @@ try {
   Set-Content -LiteralPath $changed -Value 'stock bytes'
   Set-Content -LiteralPath $unknown -Value 'user file'
   Set-Content -LiteralPath $data -Value 'private settings'
+  $shell = New-Object -ComObject WScript.Shell
+  try {
+    foreach ($pair in @(@('old.lnk', $exe), @('other.lnk', $unknown))) {
+      $link = $shell.CreateShortcut((Join-Path $scratch $pair[0]))
+      try {
+        $link.TargetPath = $pair[1]
+        $link.Save()
+      } finally {
+        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)
+      }
+    }
+  } finally {
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+  }
+  [IO.File]::Copy((Join-Path $scratch 'old.lnk'), (Join-Path $scratch $oldLink))
+  [IO.File]::Copy((Join-Path $scratch 'other.lnk'), (Join-Path $scratch $otherLink))
+  [IO.File]::WriteAllText((Join-Path $scratch $invalidLink), 'not a shortcut')
+  if ((Get-MgsShortcutTarget (Join-Path $scratch $oldLink)) -ne $exe -or
+      (Get-MgsShortcutTarget (Join-Path $scratch $otherLink)) -ne $unknown -or
+      (Get-MgsShortcutTarget (Join-Path $scratch $invalidLink))) {
+    throw 'The Unicode shortcut reader did not return the expected raw targets.'
+  }
+  foreach ($name in $oldLink, $otherLink, $invalidLink) {
+    Remove-LeagueOwnedShortcut $scratch $name $exe
+  }
+  if ((Test-Path -LiteralPath (Join-Path $scratch $oldLink)) -or
+      !(Test-Path -LiteralPath (Join-Path $scratch $otherLink) -PathType Leaf) -or
+      !(Test-Path -LiteralPath (Join-Path $scratch $invalidLink) -PathType Leaf)) {
+    throw 'Scope retirement must remove the exact old target and retain other or unreadable links.'
+  }
+  Write-Host 'Unicode shortcuts read correctly. Only the exact old program link was removed.'
   [IO.File]::WriteAllText($activePointer, $profile, [Text.Encoding]::Unicode)
   [IO.File]::WriteAllText($pendingPointer, $profile, [Text.Encoding]::Unicode)
   $before = @(Get-FileHash -LiteralPath $activePointer, $pendingPointer).Hash
@@ -55,6 +91,10 @@ try {
   }
   Write-Host 'Known program file removed. Private, unknown and modified files retained.'
 } finally {
+  foreach ($name in $fixtureLinks) {
+    $file = Join-Path $scratch $name
+    if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
+  }
   foreach ($file in @($newInventory, $exe, $changed, $unknown, $data, $activePointer, $pendingPointer, (Join-Path $old 'maxgamestudio-runtime-hashes.json'))) {
     if ($file -and (Test-Path -LiteralPath $file -PathType Leaf)) { Remove-Item -LiteralPath $file }
   }

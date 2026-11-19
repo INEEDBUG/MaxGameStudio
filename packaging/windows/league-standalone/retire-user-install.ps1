@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot 'shortcut-target.ps1')
+
 function Get-LeagueOrdinaryFile([string]$Root, [string]$Relative) {
   if (!$Root) { return }
   $parts = $Relative.Replace('\', '/').Split('/')
@@ -33,6 +35,14 @@ function Remove-LeagueOwnedPayload([string]$Root, [string]$NewInventory) {
   }
 }
 
+function Remove-LeagueOwnedShortcut([string]$Root, [string]$Relative, [string]$ExpectedExe) {
+  $link = Get-LeagueOrdinaryFile $Root $Relative
+  if ($link -and [string]::Equals((Get-MgsShortcutTarget $link.FullName), $ExpectedExe,
+      [StringComparison]::OrdinalIgnoreCase)) {
+    Remove-Item -LiteralPath $link.FullName
+  }
+}
+
 function Retire-LeagueUserInstall([string]$Root, [string]$NewInventory, [string]$Identity) {
   $installKey = "Software\$Identity"
   $uninstallKey = "Software\Microsoft\Windows\CurrentVersion\Uninstall\$Identity"
@@ -45,12 +55,8 @@ function Retire-LeagueUserInstall([string]$Root, [string]$NewInventory, [string]
       "$menu\$name.lnk"
     } else { "$name.lnk" }
     $expectedExe = Join-Path $Root 'MaxGameStudioLeagueToolbox.exe'
-    $shell = New-Object -ComObject WScript.Shell
-    foreach ($link in @((Get-LeagueOrdinaryFile $desktop "$name.lnk"), (Get-LeagueOrdinaryFile $programs $menuPath))) {
-      if ($link -and $shell.CreateShortcut($link.FullName).TargetPath -eq $expectedExe) {
-        Remove-Item -LiteralPath $link.FullName
-      }
-    }
+    Remove-LeagueOwnedShortcut $desktop "$name.lnk" $expectedExe
+    Remove-LeagueOwnedShortcut $programs $menuPath $expectedExe
   }
   [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($uninstallKey, $false)
   [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($installKey, $false)
