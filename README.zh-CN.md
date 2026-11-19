@@ -10,11 +10,15 @@ Windows 桌面工具。主程序提供 CS2 复盘与录制、Steam 换号、无�
 
 Windows 10/11 · x64
 
-| 软件 | 版本 | 安装包 | 下载体积 / 程序占用 |
+| 软件 | 版本 | 安装包 | 下载体积 |
 | --- | --- | --- | --- |
-| **MaxGameStudio 主程序** | 3.2.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sha256) | 40.3 / 107–108 MiB |
-| **MaxGameStudio League 工具箱** | 1.0.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe.sha256) | 102.1 / 335 MiB |
-| **MaxGameStudio 正式版** | 3.1.4 修复版 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/SHA256SUMS) | — |
+| **MaxGameStudio 主程序** | 3.2.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sha256) | 40.3 MiB |
+| **MaxGameStudio League 工具箱** | 1.0.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe.sha256) | 102.1 MiB |
+| **MaxGameStudio 正式版** | 3.1.4 修复版 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/SHA256SUMS) | 137.4 MiB |
+
+历史实测程序占用为 MaxGameStudio 主程序 3.2.0-beta.2 107–108 MiB，MaxGameStudio League 工具箱 1.0.0-beta.2 335 MiB。
+
+GitHub 上每款软件保留 1 个测试版和最多 3 个正式版，同时保留 Git 标签和源代码历史。
 
 程序占用不含用户数据和主程序使用的 Windows 共享 WebView2 运行库。3.1.4 修复正式版仍内嵌英雄联盟工作台。两个测试版可分别安装，并各自检查本软件的测试版更新。
 
