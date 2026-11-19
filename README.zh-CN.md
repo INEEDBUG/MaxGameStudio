@@ -12,13 +12,13 @@ Windows 10/11 · x64
 
 | 软件 | 版本 | 安装包 | 下载体积 / 程序占用 |
 | --- | --- | --- | --- |
-| **MaxGameStudio 主程序** | 3.2.0-beta.1 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe.sha256) | 38.6 / 108 MiB |
-| **MaxGameStudio League 工具箱** | 1.0.0-beta.1 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.1/MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.1/MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe.sha256) | 102.1 / 335 MiB |
+| **MaxGameStudio 主程序** | 3.2.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sha256) | 40.3 / 107–108 MiB |
+| **MaxGameStudio League 工具箱** | 1.0.0-beta.2 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe.sha256) | 102.1 / 335 MiB |
 | **MaxGameStudio 正式版** | 3.1.4 修复版 | [下载 EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/SHA256SUMS) | — |
 
-程序占用不含用户数据。3.1.4 修复正式版仍内嵌英雄联盟工作台。两个测试版可分别安装，并各自检查本软件的测试版更新。
+程序占用不含用户数据和主程序使用的 Windows 共享 WebView2 运行库。3.1.4 修复正式版仍内嵌英雄联盟工作台。两个测试版可分别安装，并各自检查本软件的测试版更新。
 
-[主程序发布说明](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.1) · [工具箱发布说明](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v1.0.0-beta.1) · [全部版本](https://github.com/INEEDBUG/MaxGameStudio/releases)
+[主程序发布说明](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.2) · [工具箱发布说明](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v1.0.0-beta.2) · [全部版本](https://github.com/INEEDBUG/MaxGameStudio/releases)
 
 [![MaxGameStudio 3.2 测试版首页，包含 Steam 账户及 CS2、LiteCut、无畏契约和外设调优入口](./docs/screenshots/main-beta-home.jpg)](./docs/screenshots/main-beta-home.jpg)
 
@@ -37,9 +37,11 @@ Windows 10/11 · x64
 
 ## 安装与数据
 
-1. 下载所需软件的 Windows 安装包。两个测试版均提供简体中文安装向导，可分别选择程序目录和数据目录。
-2. 试用主程序测试版时，可用同一 Windows 用户直接覆盖 3.1.4 修复正式版。默认沿用原安装位置与数据目录，并保留配置和数据库。主动迁移到新目录时也会保留源目录。
+1. 正常双击所需软件的安装包。两款向导均为简体中文，可选择**仅为我安装**或**为所有用户安装**；后者继续时会申请管理员权限，将程序安装到 Program Files。
+2. 主程序测试版可用同一 Windows 账户覆盖 3.1.4 修复正式版，保留原数据位置、配置和数据库。当前用户模式沿用原程序目录，主动迁移数据时保留源目录。
 3. 英雄联盟工具箱单独安装。首次启动时可将检测到的旧内嵌工作台配置和数据库复制到独立数据目录，原数据会保留。
+
+“仅为我安装”可自选程序和数据目录；“为所有用户安装”共享程序文件，各账户保留各自的数据位置。Windows 权限弹窗跟随系统显示语言。
 
 换号前请先退出游戏，等待 Steam 云同步完成。Steam 可能要求重新登录。
 

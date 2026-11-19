@@ -12,13 +12,13 @@ Windows 10/11 · x64
 
 | App | Version | Installer | Download / program size |
 | --- | --- | --- | --- |
-| **MaxGameStudio** | 3.2.0-beta.1 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe.sha256) | 38.6 / 108 MiB |
-| **MaxGameStudio League** | 1.0.0-beta.1 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.1/MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.1/MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe.sha256) | 102.1 / 335 MiB |
+| **MaxGameStudio** | 3.2.0-beta.2 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sha256) | 40.3 / 107–108 MiB |
+| **MaxGameStudio League** | 1.0.0-beta.2 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe.sha256) | 102.1 / 335 MiB |
 | **MaxGameStudio stable** | 3.1.4 repair | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/SHA256SUMS) | — |
 
-Program sizes exclude user data. Stable 3.1.4 repair includes the League workspace. The two beta apps install separately and each checks its own beta update channel.
+Program sizes exclude user data and the main app's shared Windows WebView2 runtime. Stable 3.1.4 repair includes the League workspace. The two beta apps install separately and each checks its own beta update channel.
 
-[Main app release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.1) · [League release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v1.0.0-beta.1) · [All releases](https://github.com/INEEDBUG/MaxGameStudio/releases)
+[Main app release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.2) · [League release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v1.0.0-beta.2) · [All releases](https://github.com/INEEDBUG/MaxGameStudio/releases)
 
 [![MaxGameStudio 3.2 beta home page with the Steam account panel and shortcuts for CS2, LiteCut, VALORANT, and input tools](./docs/screenshots/main-beta-home.jpg)](./docs/screenshots/main-beta-home.jpg)
 
@@ -37,9 +37,11 @@ Program sizes exclude user data. Stable 3.1.4 repair includes the League workspa
 
 ## Installation and data
 
-1. Run the Windows installer for the app you want. Both beta installers are in Simplified Chinese and allow you to choose separate program and data folders.
-2. To try the main app beta over 3.1.4 repair, run it under the same Windows account. By default, it reuses the existing installation and data locations, keeping settings and databases. If you choose to migrate data to a new folder, the original is retained.
+1. Double-click the installer for the app you want. Both beta installers are in Simplified Chinese. Choose **Only for me** or **All users**; the latter requests administrator permission when you continue and installs the program in Program Files.
+2. To upgrade the main app over 3.1.4 repair, use the same Windows account. Existing data locations, settings and databases are preserved. Current-user upgrades reuse the existing program folder. If you choose to migrate data, the original is retained.
 3. Install the League toolbox separately. On first launch it can copy the detected embedded workspace's settings and database to its own data folder. The original data remains available.
+
+Current-user installs let you choose program and data folders. All-users installs share program files; each account keeps its own data location. Windows permission dialogs use the system display language.
 
 Exit your game and let Steam finish syncing before switching accounts. Steam may ask you to sign in again.
 
