@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'retire-user-install.ps1')
 
 Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -57,19 +58,67 @@ function Read-InstallLocation([string]$Key) {
   if ($value) { $value.Trim() -replace '^"([^"]+)"$', '$1' }
 }
 
+function Assert-ProtectedMachinePath([string]$Path) {
+  $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  $acl = Get-Acl -LiteralPath $Path
+  if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
+    throw 'Unexpected machine installation path owner.'
+  }
+  $write = [Security.AccessControl.FileSystemRights]'Write, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
+  foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and
+        $rule.IdentityReference.Value -notin $trusted -and
+        -not ($rule.IdentityReference.Value -eq 'S-1-3-0' -and ($rule.PropagationFlags -band 'InheritOnly'))) {
+      throw 'Machine installation path is writable by an unprivileged principal.'
+    }
+  }
+}
+
+function Assert-MachineDestination([string]$Destination, [string]$Identity, [string]$UninstallKey) {
+  $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+  $program = Join-Path $programFiles 'MaxGameStudioLeagueToolbox'
+  if ((Get-LocalDirectory $Destination) -ne $program -or $Destination.TrimEnd('\') -ne $program) {
+    throw 'The machine program must use its dedicated Program Files directory.'
+  }
+  Assert-ProtectedMachinePath $programFiles
+  if ([IO.Directory]::Exists($program)) { Assert-ProtectedMachinePath $program }
+  $registered = Read-InstallLocation "HKLM:\Software\$Identity"
+  $remove = Read-Value "HKLM:\$UninstallKey\$Identity" 'UninstallString'
+  if (!$registered -and !$remove) { return }
+  $uninstaller = Get-LeagueOrdinaryFile $program 'Uninstall MaxGameStudioLeagueToolbox.exe'
+  if (!$uninstaller -or $registered -ne $program -or
+      $remove -notmatch '^"([^"]+\.exe)"(?:\s|$)' -or $Matches[1] -ne $uninstaller.FullName) {
+    throw 'Unexpected machine League registration.'
+  }
+  Assert-ProtectedMachinePath $uninstaller.FullName
+}
+
 try {
   if ([Environment]::Is64BitOperatingSystem -and ![Environment]::Is64BitProcess) {
     throw 'Native registry view is required.'
   }
+  $phase = $env:MGS_LEAGUE_INSTALL_PHASE
+  $scope = $env:MGS_LEAGUE_INSTALL_SCOPE
+  if ($phase -notin 'registrations', 'selection', 'machine', 'complete' -or $scope -notin 'CurrentUser', 'all') {
+    throw 'Unknown League installation phase or scope.'
+  }
+  if ($phase -eq 'selection' -and (Get-Process -Name 'MaxGameStudioLeagueToolbox' -ErrorAction SilentlyContinue)) {
+    exit 3
+  }
   $leagueIdentity = 'b1d9ab62-895c-574e-a779-36d3f2ee3611'
   $uninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall'
-  $leagueRoot = Join-Path $env:APPDATA 'MaxGameStudioLeague'
+  if ($phase -eq 'machine') {
+    if ($scope -ne 'all') { throw 'Wrong scope for machine destination check.' }
+    Assert-MachineDestination $env:MGS_LEAGUE_INSTALL_DEST $leagueIdentity $uninstallKey
+    exit 0
+  }
+  $leagueRoot = Get-LocalDirectory (Join-Path $env:APPDATA 'MaxGameStudioLeague')
   $activeLeagueProfile = Join-Path $leagueRoot 'Profile'
   $leagueProfiles = @($activeLeagueProfile)
   foreach ($filename in 'data-location.txt', 'installer-data-location.txt') {
-    $path = Join-Path $leagueRoot $filename
-    if (Test-Path -LiteralPath $path -PathType Leaf) {
-      $savedProfile = [IO.File]::ReadAllText($path, [Text.Encoding]::Unicode).Trim()
+    $locator = Get-LeagueOrdinaryFile $leagueRoot $filename
+    if ($locator) {
+      $savedProfile = [IO.File]::ReadAllText($locator.FullName, [Text.Encoding]::Unicode).Trim()
       $leagueProfiles += $savedProfile
       if ($savedProfile -and $filename -eq 'data-location.txt') { $activeLeagueProfile = $savedProfile }
     }
@@ -93,7 +142,7 @@ try {
     }
   }
   $protected = $mainProtected + $leagueProfiles + $leagueRoot
-  $owned = @()
+  $owned = @{}
   foreach ($hive in 'HKCU:', 'HKLM:') {
     $existing = Read-InstallLocation "$hive\Software\$leagueIdentity"
     $remove = Read-Value "$hive\$uninstallKey\$leagueIdentity" 'UninstallString'
@@ -114,13 +163,22 @@ try {
         throw 'Invalid registered League file.'
       }
     }
-    $owned += $existing
+    $registeredScope = if ($hive -eq 'HKCU:') { 'CurrentUser' } else { 'all' }
+    $owned[$registeredScope] = $existing
   }
-  if ($env:MGS_LEAGUE_INSTALL_PHASE -ne 'registrations') {
+  if ($phase -ne 'registrations') {
     $program = Get-LocalDirectory $env:MGS_LEAGUE_INSTALL_DEST
-    if ($env:MGS_LEAGUE_DATA_DEST) {
+    $otherScope = if ($scope -eq 'all') { 'CurrentUser' } else { 'all' }
+    Assert-Separate $program @($owned[$otherScope])
+    $deferUserChanges = $false
+    if ($scope -eq 'all' -and $phase -eq 'complete') {
+      $caller = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+      $deferUserChanges = $caller.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    $data = $null
+    if (!$deferUserChanges -and $env:MGS_LEAGUE_DATA_DEST) {
       $data = Get-LocalDirectory $env:MGS_LEAGUE_DATA_DEST
-      Assert-Separate $data ($mainProtected + $owned)
+      Assert-Separate $data ($mainProtected + @($owned.Values))
       $control = Get-LocalDirectory $leagueRoot
       if ($data -eq $control -or $control.StartsWith($data + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'The data directory would contain the Toolbox location settings.'
@@ -134,9 +192,15 @@ try {
       $protected += $data
     }
     Assert-Separate $program $protected
-    if ($program -notin $owned -and (Test-Path -LiteralPath $program) -and
+    if ($program -ne $owned[$scope] -and (Test-Path -LiteralPath $program) -and
         (Get-ChildItem -LiteralPath $program -Force | Select-Object -First 1)) {
       throw 'New program folder is not empty.'
+    }
+    if ($phase -eq 'complete') {
+      if ($program -ne $owned[$scope]) { throw 'The new program installation is not registered.' }
+      $selection = if ($data -and $data -ne (Get-LocalDirectory $activeLeagueProfile)) { $data }
+      $oldProgram = if ($scope -eq 'all') { $owned['CurrentUser'] }
+      exit (Complete-LeagueUserInstall $leagueRoot $selection $oldProgram $leagueIdentity -Defer:$deferUserChanges)
     }
   }
   exit 0

@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory)][string]$ProgramDir,
-  [string]$DataDir
+  [string]$DataDir,
+  [switch]$MachineScope,
+  [switch]$MachineFilesOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,6 +69,42 @@ public static class MgsDirectoryIdentity {
 
   $program = Get-DirectoryIdentity $ProgramDir
   if ($program -notmatch '^[A-Za-z]:\\.+') { throw 'Choose a dedicated local program directory.' }
+  if ($MachineScope) {
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    $expected = Join-Path $programFiles 'MaxGameStudio'
+    if (-not $program.Equals($expected, [StringComparison]::OrdinalIgnoreCase) -or
+        -not ([IO.Path]::GetFullPath($ProgramDir).TrimEnd('\')).Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+      throw 'The machine program must use its dedicated Program Files directory.'
+    }
+    # Confirm inherited Windows permissions as well as the physical path.
+    # A pre-created directory with a relaxed ACL must not receive code that
+    # the machine uninstaller will later execute or replace as administrator.
+    $trustedWriters = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    foreach ($path in @($programFiles, $program)) {
+      if (-not [IO.Directory]::Exists($path)) { continue }
+      $item = Get-Item -LiteralPath $path -Force
+      if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'The machine program path includes a reparse point.'
+      }
+      $acl = Get-Acl -LiteralPath $path
+      if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trustedWriters) {
+        throw 'The machine program directory has an unexpected owner.'
+      }
+      $rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+      $writeRights = [Security.AccessControl.FileSystemRights]'Write, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
+      foreach ($rule in $rules) {
+        if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $writeRights) -and
+            $rule.IdentityReference.Value -notin $trustedWriters -and
+            -not ($rule.IdentityReference.Value -eq 'S-1-3-0' -and ($rule.PropagationFlags -band 'InheritOnly'))) {
+          throw 'The machine program directory is writable by an unprivileged principal.'
+        }
+      }
+    }
+  }
+  if ($MachineFilesOnly) {
+    $leaguePaths = @()
+    $hives = @('HKLM:')
+  } else {
   $control = Join-Path $env:APPDATA 'MaxGameStudioLeague'
   $leaguePaths = @($control)
   foreach ($file in @('data-location.txt', 'installer-data-location.txt')) {
@@ -75,7 +113,9 @@ public static class MgsDirectoryIdentity {
       $leaguePaths += [IO.File]::ReadAllText($pointer, [Text.Encoding]::Unicode).Trim()
     }
   }
-  foreach ($hive in @('HKCU:', 'HKLM:')) {
+    $hives = @('HKCU:', 'HKLM:')
+  }
+  foreach ($hive in $hives) {
     foreach ($key in @(
       "$hive\Software\b1d9ab62-895c-574e-a779-36d3f2ee3611",
       "$hive\Software\Microsoft\Windows\CurrentVersion\Uninstall\b1d9ab62-895c-574e-a779-36d3f2ee3611"
@@ -92,6 +132,7 @@ public static class MgsDirectoryIdentity {
     }
   }
 
+  if (-not $MachineFilesOnly) {
   $storage = Get-RegistryRecord 'HKCU:\Software\MaxGameStudio\Storage'
   $mainPaths = @(
     (Join-Path $env:APPDATA 'CS2 Insight Agent')
@@ -123,20 +164,25 @@ public static class MgsDirectoryIdentity {
       throw 'The program directory overlaps a MaxGameStudio data directory.'
     }
   }
+  }
 
   if ([IO.Directory]::Exists($ProgramDir) -and
       (Get-ChildItem -LiteralPath $ProgramDir -Force | Select-Object -First 1)) {
-    $ownRegistration = Get-RegistryRecord 'HKCU:\Software\cs2insightagent\MaxGameStudio'
-    $ownUninstall = Get-RegistryRecord 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio'
+    $ownHive = if ($MachineScope) { 'HKLM:' } else { 'HKCU:' }
+    $ownRegistration = Get-RegistryRecord "$ownHive\Software\cs2insightagent\MaxGameStudio"
+    $ownUninstall = Get-RegistryRecord "$ownHive\Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio"
     $ownCandidates = @($ownRegistration.'(default)', $ownUninstall.InstallLocation)
-    foreach ($hive in @('HKCU:', 'HKLM:')) {
+    if ($MachineScope -and $ownUninstall.AllUsers -ne 1) { throw 'The machine directory is not registered.' }
+    if (-not $MachineScope) {
+    foreach ($hive in $hives) {
       $legacy = Get-RegistryRecord "$hive\Software\Microsoft\Windows\CurrentVersion\Uninstall\CS2 Ultimate Insight Studio"
       $ownCandidates += $legacy.InstallLocation
+    }
     }
     $registered = $ownCandidates | Where-Object {
       $_ -and $program.Equals((Get-DirectoryIdentity $_), [StringComparison]::OrdinalIgnoreCase)
     } | Select-Object -First 1
-    $legacyElectron = [IO.File]::Exists((Join-Path $ProgramDir 'CS2 Insight Agent.exe')) -and
+    $legacyElectron = -not $MachineScope -and [IO.File]::Exists((Join-Path $ProgramDir 'CS2 Insight Agent.exe')) -and
       [IO.File]::Exists((Join-Path $ProgramDir 'Uninstall CS2 Insight Agent.exe'))
     if (-not (($registered -and [IO.File]::Exists((Join-Path $ProgramDir 'cs2-insight-agent-desktop.exe'))) -or $legacyElectron)) {
       throw 'Choose an empty program directory.'

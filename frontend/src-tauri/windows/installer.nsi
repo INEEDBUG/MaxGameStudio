@@ -55,6 +55,18 @@ ManifestDPIAwareness PerMonitorV2
 ${StrCase}
 ${StrLoc}
 
+!define MGS_DUAL_SCOPE
+Var MGSMachineProgramDir
+Var MGSUserProgramDir
+Var MGSMachineTarget
+Var MGSMachineScope
+Var MGSExplicitProgramDir
+Var MGSScopeRequested
+Var MGSUserInstallDirChoice
+Var MGSInnerInstaller
+Var MGSDirectAdmin
+Var MGSMachineRadio
+Var MGSUserRadio
 {{#if installer_hooks}}
 !include "{{installer_hooks}}"
 {{/if}}
@@ -99,6 +111,7 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+!include "${MGS_WINDOWS_DIR}\install-scope.nsh"
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -125,31 +138,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !uninstfinalize '${UNINSTALLERSIGNCOMMAND}'
 !endif
 
-; Handle install mode, `perUser`, `perMachine` or `both`
-!if "${INSTALLMODE}" == "perMachine"
-  RequestExecutionLevel admin
-!endif
-
-!if "${INSTALLMODE}" == "currentUser"
-  RequestExecutionLevel user
-!endif
-
-!if "${INSTALLMODE}" == "both"
-  !define MULTIUSER_MUI
-  !define MULTIUSER_INSTALLMODE_INSTDIR "${PRODUCTNAME}"
-  !define MULTIUSER_INSTALLMODE_COMMANDLINE
-  !if "${ARCH}" == "x64"
-    !define MULTIUSER_USE_PROGRAMFILES64
-  !else if "${ARCH}" == "arm64"
-    !define MULTIUSER_USE_PROGRAMFILES64
-  !endif
-  !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_KEY "${UNINSTKEY}"
-  !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_VALUENAME "CurrentUser"
-  !define MULTIUSER_INSTALLMODEPAGE_SHOWUSERNAME
-  !define MULTIUSER_INSTALLMODE_FUNCTION RestorePreviousInstallLocation
-  !define MULTIUSER_EXECUTIONLEVEL Highest
-  !include MultiUser.nsh
-!endif
+; Keep the wizard asInvoker and request machine access after selection.
+RequestExecutionLevel user
 
 ; Installer icon
 !if "${INSTALLERICON}" != ""
@@ -190,26 +180,25 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_PRE MGS_SkipInputPages
 !insertmacro MUI_PAGE_WELCOME
 
 ; 2. License Page (if defined)
 !if "${LICENSE}" != ""
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE MGS_SkipInputPages
   !insertmacro MUI_PAGE_LICENSE "${LICENSE}"
 !endif
 
-; 3. Install mode (if it is set to `both`)
-!if "${INSTALLMODE}" == "both"
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-  !insertmacro MULTIUSER_PAGE_INSTALLMODE
-!endif
+; 3. Install scope in the original user's wizard
+Page custom MGS_ShowInstallScope MGS_LeaveInstallScope
 
 ; 4. Custom page to ask user if he wants to reinstall/uninstall
 ;    only if a previous installation was detected
 Var ReinstallPageCheck
 Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
+  StrCmp $MGSMachineScope 1 0 +2
+    Abort
   ; Uninstall previous WiX installation if exists.
   ;
   ; A WiX installer stores the installation info in registry
@@ -420,7 +409,9 @@ FunctionEnd
 !insertmacro MUI_PAGE_DIRECTORY
 
 Function MGS_SkipOverlayDirectory
-  Call SkipIfPassive
+  Call MGS_SkipInputPages
+  StrCmp $MGSMachineScope 1 0 +2
+    Abort
   StrCmp $MGSExistingProgramDir "" +2
     Abort
 FunctionEnd
@@ -430,7 +421,7 @@ Page custom MGS_ShowDataDirectory MGS_LeaveDataDirectory
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
 !if "${STARTMENUFOLDER}" != ""
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE MGS_SkipInputPages
   !define MUI_STARTMENUPAGE_DEFAULTFOLDER "${STARTMENUFOLDER}"
 !else
   !define MUI_PAGE_CUSTOMFUNCTION_PRE Skip
@@ -453,10 +444,31 @@ Var AppStartMenuFolder
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW MGS_ShowFinishPage
 !insertmacro MUI_PAGE_FINISH
 
+Function MGS_ShowFinishPage
+  ${If} $MGSMachineScope = 1
+  ${AndIf} $MGSDirectAdmin = 1
+    ${NSD_Uncheck} $mui.FinishPage.Run
+    ShowWindow $mui.FinishPage.Run ${SW_HIDE}
+  ${EndIf}
+FunctionEnd
+
 Function RunMainBinary
-  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+  StrCpy $R0 ""
+  Call MGS_RunMainBinaryAsUser
+FunctionEnd
+
+Function MGS_RunMainBinaryAsUser
+  ${If} $MGSInnerInstaller = 1
+    !insertmacro UAC_AsUser_ExecShell "open" "$INSTDIR\${MAINBINARYNAME}.exe" "$R0" "$INSTDIR" SW_SHOWNORMAL
+  ${ElseIf} $MGSMachineScope = 1
+  ${AndIf} $MGSDirectAdmin = 1
+    Return
+  ${Else}
+    nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
+  ${EndIf}
 FunctionEnd
 
 ; Uninstaller Pages
@@ -466,6 +478,8 @@ Var DeleteAppDataCheckboxState
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add add a `Delete app data` check box
+  StrCmp $MGSMachineScope 1 0 +2
+    Return
   ; $1 inner dialog HWND
   ; $2 window DPI
   ; $3 style
@@ -496,6 +510,8 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
+  StrCmp $MGSMachineScope 1 0 +2
+    Return
   SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
@@ -536,40 +552,23 @@ Function .onInit
   !insertmacro SetContext
 
   ${If} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
-    ; Set default install location
-    !if "${INSTALLMODE}" == "perMachine"
-      ${If} ${RunningX64}
-        !if "${ARCH}" == "x64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else if "${ARCH}" == "arm64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else
-          StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-        !endif
-      ${Else}
-        StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-      ${EndIf}
-    !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
-    !endif
-
-    Call RestorePreviousInstallLocation
+    StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
   ${EndIf}
-
-  Call MGS_ApplyOverlayDirectory
-
-  !if "${INSTALLMODE}" == "both"
-    !insertmacro MULTIUSER_INIT
-  !endif
+  Call MGS_InitInstallScope
 FunctionEnd
 
 
 Section EarlyChecks
-  Call MGS_ResolveUpdateDirectory
-  Call MGS_ReserveInstallationDirectories
-  ${If} $R0 != "0"
-    StrCpy $R7 "另一个 MaxGameStudio 或英雄联盟工具箱安装程序正在运行。请等待它完成后重试。"
-    Call CS2_AbortMigrationInstall
+  Call MGS_RequestMachineInstallAccess
+  ${If} $MGSMachineScope != 1
+    Call MGS_ResolveUpdateDirectory
+  ${EndIf}
+  ${If} $MGSInnerInstaller != 1
+    Call MGS_ReserveInstallationDirectories
+    ${If} $R0 != "0"
+      StrCpy $R7 "另一个 MaxGameStudio 或英雄联盟工具箱安装程序正在运行。请等待它完成后重试。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
   ${EndIf}
   Call MGS_CheckProgramAndDataDirectories
   ${If} $R0 != "0"
@@ -596,99 +595,85 @@ Section EarlyChecks
 
 SectionEnd
 
-Section WebView2
-  ; Check if Webview2 is already installed and skip this section
+Function MGS_ReadWebView2Version
   ${If} ${RunningX64}
     ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
   ${Else}
     ReadRegStr $4 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
   ${EndIf}
-  ${If} $4 == ""
+  ${If} $MGSMachineScope != 1
+  ${AndIf} $4 == ""
     ReadRegStr $4 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
   ${EndIf}
+  ${If} $4 == "0.0.0.0"
+    StrCpy $4 ""
+  ${EndIf}
+FunctionEnd
 
-  ${If} $4 == ""
-    ; Webview2 installation
-    ;
-    ; Skip if updating
-    ${If} $UpdateMode <> 1
-      !if "${INSTALLWEBVIEW2MODE}" == "downloadBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        DetailPrint "$(webview2Downloading)"
-        NSISdl::download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        Pop $0
-        ${If} $0 == "success"
-          DetailPrint "$(webview2DownloadSuccess)"
-        ${Else}
-          DetailPrint "$(webview2DownloadError)"
-          Abort "$(webview2AbortError)"
-        ${EndIf}
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        Goto install_webview2
-      !endif
+Function MGS_VerifyWebView2Bootstrapper
+  ; Check the embedded Microsoft executable before releasing it to an
+  ; elevated process. Do not run a downloaded file in the user's temp root.
+  File "/oname=$PLUGINSDIR\verify-webview2-bootstrapper.ps1" "${MGS_WINDOWS_DIR}\verify-webview2-bootstrapper.ps1"
+  Call MGS_FindWindowsPowerShell
+  SetOutPath "$WINDIR"
+  nsExec::ExecToStack /TIMEOUT=20000 '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\verify-webview2-bootstrapper.ps1" -Bootstrapper "$6"'
+  Pop $0
+  Pop $1
+FunctionEnd
 
-      !if "${INSTALLWEBVIEW2MODE}" == "embedBootstrapper"
-        Delete "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebview2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
-        DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
-        Goto install_webview2
-      !endif
-
-      !if "${INSTALLWEBVIEW2MODE}" == "offlineInstaller"
-        Delete "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
-        File "/oname=$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe" "${WEBVIEW2INSTALLERPATH}"
-        DetailPrint "$(installingWebview2)"
-        StrCpy $6 "$TEMP\MicrosoftEdgeWebView2RuntimeInstaller.exe"
-        Goto install_webview2
-      !endif
-
+Section WebView2
+  Call MGS_ReadWebView2Version
+  ${If} $4 != ""
+    !if "${MINIMUMWEBVIEW2VERSION}" == ""
       Goto webview2_done
-
-      install_webview2:
-        DetailPrint "$(installingWebview2)"
-        ; $6 holds the path to the webview2 installer
-        ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
-        ${If} $1 = 0
-          DetailPrint "$(webview2InstallSuccess)"
-        ${Else}
-          DetailPrint "$(webview2InstallError)"
-          Abort "$(webview2AbortError)"
-        ${EndIf}
-      webview2_done:
-    ${EndIf}
-  ${Else}
-    !if "${MINIMUMWEBVIEW2VERSION}" != ""
+    !else
       ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
-      ${If} $R0 = 1
-        update_webview:
-          DetailPrint "$(installingWebview2)"
-          ${If} ${RunningX64}
-            ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
-          ${Else}
-            ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\EdgeUpdate" "path"
-          ${EndIf}
-          ${If} $R1 == ""
-            ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
-          ${EndIf}
-          ${If} $R1 != ""
-            ; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:docs/updater/user_manual.md
-            ; Modified from "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView\ModifyPath"
-            ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
-            ${If} $1 = 0
-              DetailPrint "$(webview2InstallSuccess)"
-            ${Else}
-              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" IDIGNORE ignore IDRETRY update_webview
-              Quit
-              ignore:
-            ${EndIf}
-          ${EndIf}
-      ${EndIf}
+      StrCmp $R0 1 0 webview2_done
     !endif
   ${EndIf}
+  ${If} $UpdateMode = 1
+  ${AndIf} $MGSMachineScope != 1
+    Goto webview2_done
+  ${EndIf}
+
+  !if "${INSTALLWEBVIEW2MODE}" != "embedBootstrapper"
+    !error "The dual-scope installer requires the embedded Microsoft WebView2 bootstrapper."
+  !endif
+  InitPluginsDir
+  StrCpy $6 "$PLUGINSDIR\MicrosoftEdgeWebView2Setup.exe"
+  File "/oname=$PLUGINSDIR\MicrosoftEdgeWebView2Setup.exe" "${WEBVIEW2BOOTSTRAPPERPATH}"
+  Call MGS_VerifyWebView2Bootstrapper
+  ${If} $0 != 0
+    StrCpy $R7 "无法验证内置的 Microsoft WebView2 安装程序，已停止安装。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+  DetailPrint "$(installingWebview2)"
+  ClearErrors
+  ExecWait '"$6" ${WEBVIEW2INSTALLERARGS} /install' $1
+  ${If} ${Errors}
+  ${OrIf} $1 != 0
+    StrCpy $R7 "$(webview2AbortError)"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+
+  Call MGS_ReadWebView2Version
+  ${If} $4 == ""
+    StrCpy $R7 "未检测到所需的 Microsoft WebView2 运行时，已停止安装。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+  DetailPrint "$(webview2InstallSuccess)"
+  webview2_done:
 SectionEnd
 
 Section Install
+  ${If} $MGSMachineScope = 1
+    Call MGS_CheckMachineAppClosed
+    ${If} $R0 != 0
+      StrCpy $R7 "MaxGameStudio 可能仍在某个 Windows 用户会话中运行。请关闭应用后重试。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+  ${EndIf}
+
   !ifmacrodef NSIS_HOOK_PREINSTALL
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
@@ -716,7 +701,7 @@ Section Install
   ; Create file associations
   {{#each file_associations as |association| ~}}
     {{#each association.ext as |ext| ~}}
-       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "Open with ${PRODUCTNAME}" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
+       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$INSTDIR\${MAINBINARYNAME}.exe,0" "用 ${PRODUCTNAME} 打开" "$INSTDIR\${MAINBINARYNAME}.exe $\"%1$\""
     {{/each}}
   {{/each}}
 
@@ -734,15 +719,14 @@ Section Install
   ; Save $INSTDIR in registry for future installations
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR
 
-  !if "${INSTALLMODE}" == "both"
-    ; Save install mode to be selected by default for the next installation such as updating
-    ; or when uninstalling
-    WriteRegStr SHCTX "${UNINSTKEY}" $MultiUser.InstallMode 1
-  !endif
+  ${If} $MGSMachineScope = 1
+    WriteRegDWORD HKLM "${UNINSTKEY}" "AllUsers" 1
+  ${EndIf}
 
   ; Remove old main binary if it doesn't match new main binary name
   ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
-  ${If} $OldMainBinaryName != ""
+  ${If} $MGSMachineScope != 1
+  ${AndIf} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
     Delete "$INSTDIR\$OldMainBinaryName"
   ${EndIf}
@@ -801,19 +785,15 @@ Function .onInstSuccess
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
       ${GetOptions} $CMDLINE "/ARGS" $R0
-      nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
+      Call MGS_RunMainBinaryAsUser
     ${EndIf}
   ${EndIf}
 FunctionEnd
 
 Function un.onInit
   !insertmacro SetContext
-
-  !if "${INSTALLMODE}" == "both"
-    !insertmacro MULTIUSER_UNINIT
-  !endif
-
   !insertmacro MUI_UNGETLANGUAGE
+  Call un.MGS_InitUninstallScope
 
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
@@ -827,6 +807,15 @@ Function un.onInit
 FunctionEnd
 
 Section Uninstall
+  ${If} $MGSMachineScope = 1
+    Call un.MGS_CheckMachineAppClosed
+    ${If} $R0 != 0
+      MessageBox MB_ICONEXCLAMATION|MB_OK "MaxGameStudio 可能仍在某个 Windows 用户会话中运行。请关闭应用后重试。" /SD IDOK
+      SetErrorLevel 2
+      Abort
+    ${EndIf}
+  ${EndIf}
+
 
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
     !insertmacro NSIS_HOOK_PREUNINSTALL
@@ -902,25 +891,24 @@ Section Uninstall
   ${EndIf}
 
   ; Remove registry information for add/remove programs
-  !if "${INSTALLMODE}" == "both"
-    DeleteRegKey SHCTX "${UNINSTKEY}"
-  !else if "${INSTALLMODE}" == "perMachine"
-    DeleteRegKey HKLM "${UNINSTKEY}"
-  !else
-    DeleteRegKey HKCU "${UNINSTKEY}"
-  !endif
+  DeleteRegKey SHCTX "${UNINSTKEY}"
+  ${If} $MGSMachineScope = 1
+    DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
+  ${EndIf}
 
   ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
   ; This ensures the program does not launch automatically after uninstallation if it exists.
   ; If it doesn't exist, it does nothing.
   ; We do this when not updating (to preserve the registry value on updates)
-  ${If} $UpdateMode <> 1
+  ${If} $MGSMachineScope != 1
+  ${AndIf} $UpdateMode <> 1
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
   ${EndIf}
 
   ; Delete app data if the checkbox is selected
   ; and if not updating
-  ${If} $DeleteAppDataCheckboxState = 1
+  ${If} $MGSMachineScope != 1
+  ${AndIf} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     ; Clear the install location $INSTDIR from registry
     DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
@@ -947,18 +935,17 @@ Section Uninstall
   ${EndIf}
 SectionEnd
 
-Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
-FunctionEnd
-
 Function Skip
   Abort
 FunctionEnd
 
 Function SkipIfPassive
   ${IfThen} $PassiveMode = 1  ${|} Abort ${|}
+FunctionEnd
+
+Function MGS_SkipInputPages
+  ${IfThen} $MGSInnerInstaller = 1 ${|} Abort ${|}
+  Call SkipIfPassive
 FunctionEnd
 Function un.SkipIfPassive
   ${IfThen} $PassiveMode = 1  ${|} Abort ${|}

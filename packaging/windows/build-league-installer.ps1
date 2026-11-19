@@ -25,7 +25,8 @@ $builder = Join-Path $source 'node_modules\electron-builder\cli.js'
 $electronPackage = Join-Path $source 'node_modules\electron\package.json'
 $runtime = Join-Path $unpacked 'MaxGameStudioLeagueToolbox.exe'
 $asar = Join-Path $unpacked 'resources\app.asar'
-foreach ($file in @($builder, $electronPackage, $runtime, $asar)) {
+$inventory = Join-Path $unpacked 'maxgamestudio-runtime-hashes.json'
+foreach ($file in @($builder, $electronPackage, $runtime, $asar, $inventory)) {
   if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required League build input is missing: $file" }
 }
 $profileFile = Get-ChildItem -LiteralPath $unpacked -Recurse -Force | Where-Object {
@@ -60,9 +61,10 @@ $resources = Join-Path $scratch 'build'
 New-Item -ItemType Directory -Path $resources | Out-Null
 $encoding = [Text.UTF8Encoding]::new($false)
 try {
-  foreach ($name in @('installer.nsh', 'destination-guard.ps1')) {
+  foreach ($name in @('installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "league-standalone\$name") -Destination $resources
   }
+  Copy-Item -LiteralPath $inventory -Destination $resources
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'league-workbench-icon.ico') -Destination (Join-Path $resources 'icon.ico')
   [IO.File]::WriteAllText((Join-Path $scratch 'package.json'), ([ordered]@{
     name = $metadata.name
@@ -77,12 +79,14 @@ try {
     productName = 'MaxGameStudio League'
     electronVersion = $electron.version
     directories = @{ output = 'out'; buildResources = 'build' }
+    # The bundled NSIS 3.12 hardens temporary directories for elevated installers.
+    toolsets = @{ nsis = '1.2.1' }
     win = @{ target = @('nsis'); executableName = 'MaxGameStudioLeagueToolbox'; icon = 'build/icon.ico' }
     nsis = [ordered]@{
       artifactName = 'MaxGameStudioLeague_${version}_x64-setup.${ext}'
       oneClick = $false
       perMachine = $false
-      allowElevation = $false
+      allowElevation = $true
       packElevateHelper = $false
       selectPerMachineByDefault = $false
       allowToChangeInstallationDirectory = $false

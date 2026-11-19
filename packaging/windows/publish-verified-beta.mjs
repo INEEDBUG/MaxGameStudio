@@ -10,19 +10,21 @@ const repository = 'INEEDBUG/MaxGameStudio'
 const repoApi = `repos/${repository}`
 export const approvedBetas = [
   {
-    version: '3.2.0-beta.1',
-    tag: 'v3.2.0-beta.1',
-    installer: 'MaxGameStudio_3.2.0-beta.1_x64-setup.exe',
+    version: '3.2.0-beta.2',
+    previousVersion: '3.2.0-beta.1',
+    tag: 'v3.2.0-beta.2',
+    installer: 'MaxGameStudio_3.2.0-beta.2_x64-setup.exe',
     candidateSidecar: '.sig',
-    title: 'MaxGameStudio 3.2.0-beta.1',
+    title: 'MaxGameStudio 3.2.0-beta.2',
     feed: 'beta.json',
   },
   {
-    version: '1.0.0-beta.1',
-    tag: 'league-v1.0.0-beta.1',
-    installer: 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe',
+    version: '1.0.0-beta.2',
+    previousVersion: '1.0.0-beta.1',
+    tag: 'league-v1.0.0-beta.2',
+    installer: 'MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe',
     candidateSidecar: '.sha256',
-    title: 'MaxGameStudio League 1.0.0-beta.1',
+    title: 'MaxGameStudio League 1.0.0-beta.2',
     feed: 'league-beta.json',
   },
 ]
@@ -100,16 +102,22 @@ function stableState() {
   ]
 }
 
+export function validatePreviousBeta(value, beta) {
+  const product = beta.candidateSidecar === '.sig' ? 'maxgamestudio' : 'maxgamestudio-league'
+  const prefix = beta.candidateSidecar === '.sig' ? 'v' : 'league-v'
+  if (value.product !== product || value.channel !== 'beta' ||
+      ![beta.previousVersion, beta.version].includes(value.version) ||
+      (value.tag_name ?? value.tag) !== prefix + value.version) {
+    throw new Error(`Refusing to replace a different or unrecognized beta feed: ${beta.feed}.`)
+  }
+}
+
 function betaManifest(beta, base) {
   const file = api(`contents/${beta.feed}?ref=${base}`, { optional: true })
   if (!file) return null
   const text = Buffer.from(file.content, 'base64').toString('utf8')
   const value = JSON.parse(text)
-  const product = beta.candidateSidecar === '.sig' ? 'maxgamestudio' : 'maxgamestudio-league'
-  if (value.product !== product || value.channel !== 'beta' || value.version !== beta.version ||
-      (value.tag_name ?? value.tag) !== beta.tag) {
-    throw new Error(`Refusing to replace a different or unrecognized beta feed: ${beta.feed}.`)
-  }
+  validatePreviousBeta(value, beta)
   return text
 }
 
@@ -135,7 +143,7 @@ export function publishFeeds(callApi, base, files) {
 
 async function publish(directory) {
   if (!directory || process.env.GITHUB_ACTIONS !== 'true' || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
-      process.env.GITHUB_REPOSITORY !== repository || process.env.GITHUB_REF_NAME !== 'codex/desktop-utilities-beta' ||
+      process.env.GITHUB_REPOSITORY !== repository || process.env.GITHUB_REF_NAME !== 'codex/all-users-installers' ||
       !process.env.GH_TOKEN) {
     throw new Error('Publishing is limited to the authorized verifier workflow and repository.')
   }
@@ -156,6 +164,7 @@ async function publish(directory) {
 
   const [main, league] = approvedBetas
   const notesPath = new URL(`../../docs/releases/${main.tag}.zh-CN.md`, import.meta.url)
+  const leagueNotesPath = new URL(`../../docs/releases/${league.tag}.zh-CN.md`, import.meta.url)
   const mainNotes = readFileSync(notesPath, 'utf8')
   const userReleaseNotes = JSON.parse(readFileSync(new URL(`../../docs/update-notes/${main.tag}.json`, import.meta.url), 'utf8'))
   if (userReleaseNotes.releaseStatus !== 'beta') throw new Error('Main beta release notes are required.')
@@ -195,7 +204,7 @@ async function publish(directory) {
     if (!releases[index]) {
       gh(['release', 'create', beta.tag, ...filesByProduct[index].map((file) => file.path),
         '--repo', repository, '--title', beta.title, '--latest=false', '--prerelease', '--verify-tag',
-        ...(index === 0 ? ['--notes-file', fileURLToPath(notesPath)] : ['--notes', '独立英雄联盟工具箱 · Windows x64'])])
+        '--notes-file', fileURLToPath(index === 0 ? notesPath : leagueNotesPath)])
     }
     releases[index] = api(`releases/tags/${beta.tag}`)
     if (!existingTag(beta, record.sourceSha)) throw new Error(`Published tag missing: ${beta.tag}.`)

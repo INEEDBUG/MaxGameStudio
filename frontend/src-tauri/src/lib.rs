@@ -519,6 +519,13 @@ pub fn run() {
         // explicitly below so the native builder receives the absolute path.
         window.create = false;
     }
+    let updater = tauri_plugin_updater::Builder::new();
+    #[cfg(windows)]
+    let updater = if desktop_storage::machine_installation() {
+        updater.installer_arg("/ALLUSERS")
+    } else {
+        updater
+    };
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -529,7 +536,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(updater.build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(BackendProcess::new().expect("failed to create desktop session token"))

@@ -65,8 +65,9 @@ mod windows {
         },
         Storage::FileSystem::GetDriveTypeW,
         System::Registry::{
-            RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW, HKEY_CURRENT_USER,
-            KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+            RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+            HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+            RRF_SUBKEY_WOW6464KEY,
         },
         System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
     };
@@ -127,16 +128,21 @@ mod windows {
         std::mem::forget(guard);
         handle
     }
-    fn registry_string(value_name: &str) -> Result<Option<String>, String> {
-        let key = wide(OsStr::new(KEY));
+    fn read_registry_string(
+        hive: HKEY,
+        key: &str,
+        value_name: &str,
+        flags: u32,
+    ) -> Result<Option<String>, String> {
+        let key = wide(OsStr::new(key));
         let name = wide(OsStr::new(value_name));
         let mut bytes = 0;
         let status = unsafe {
             RegGetValueW(
-                HKEY_CURRENT_USER,
+                hive,
                 key.as_ptr(),
                 name.as_ptr(),
-                RRF_RT_REG_SZ,
+                RRF_RT_REG_SZ | flags,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 &mut bytes,
@@ -151,10 +157,10 @@ mod windows {
         let mut buffer = vec![0u16; (bytes as usize).div_ceil(2)];
         let status = unsafe {
             RegGetValueW(
-                HKEY_CURRENT_USER,
+                hive,
                 key.as_ptr(),
                 name.as_ptr(),
-                RRF_RT_REG_SZ,
+                RRF_RT_REG_SZ | flags,
                 std::ptr::null_mut(),
                 buffer.as_mut_ptr().cast(),
                 &mut bytes,
@@ -168,6 +174,27 @@ mod windows {
                 .trim_end_matches('\0')
                 .to_string(),
         ))
+    }
+    fn registry_string(value_name: &str) -> Result<Option<String>, String> {
+        read_registry_string(HKEY_CURRENT_USER, KEY, value_name, 0)
+    }
+
+    pub(super) fn machine_installation() -> bool {
+        let Ok(Some(registered)) = read_registry_string(
+            HKEY_LOCAL_MACHINE,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio",
+            "InstallLocation",
+            RRF_SUBKEY_WOW6464KEY,
+        ) else {
+            return false;
+        };
+        let Some(program) = std::env::current_exe().ok().and_then(|path| {
+            path.parent()
+                .and_then(|parent| fs::canonicalize(parent).ok())
+        }) else {
+            return false;
+        };
+        fs::canonicalize(registered.trim_matches('"')).is_ok_and(|path| path == program)
     }
     fn settings() -> Result<Value, String> {
         let Some(text) = registry_string("LocationV1")? else {
@@ -283,6 +310,17 @@ mod windows {
         }
         None
     }
+    pub(super) fn default_root(
+        appdata: &Path,
+        machine: bool,
+        suggest_drive: impl FnOnce() -> Option<PathBuf>,
+    ) -> PathBuf {
+        (!machine)
+            .then(suggest_drive)
+            .flatten()
+            .unwrap_or_else(|| appdata.join("MaxGameStudioData"))
+    }
+
     fn choose() -> Result<PathBuf, String> {
         let mut dialog =
             rfd::FileDialog::new().set_title("选择 MaxGameStudio 数据位置（推荐非系统盘）");
@@ -709,7 +747,9 @@ mod windows {
         let before = config.clone();
         let appdata = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA 不存在")?);
         let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA 不存在")?);
-        let suggested = suggest().unwrap_or_else(|| appdata.join("MaxGameStudioData"));
+        // A machine install defaults to the invoking user's private AppData.
+        // Explicit saved roots and recognized AppData legacy layouts still win.
+        let suggested = default_root(&appdata, machine_installation(), suggest);
         let installer_selection = registry_string("InstallerDataRootV1")?;
         let pending_selection = installer_selection
             .as_deref()
@@ -798,6 +838,11 @@ mod windows {
         drop(_lock);
         status()
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn machine_installation() -> bool {
+    windows::machine_installation()
 }
 
 pub(crate) fn initialize() -> Result<Option<PathBuf>, String> {
@@ -1223,6 +1268,26 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[test]
+    fn machine_default_does_not_probe_fixed_drives_and_user_default_still_prefers_them() {
+        let profile = Path::new(r"C:\Users\fixture\AppData\Roaming");
+        let separate_drive = PathBuf::from(r"D:\MaxGameStudioData\fixture");
+        assert_eq!(
+            windows::default_root(profile, true, || panic!(
+                "machine mode must not probe drives"
+            )),
+            profile.join("MaxGameStudioData")
+        );
+        assert_eq!(
+            windows::default_root(profile, false, || Some(separate_drive.clone())),
+            separate_drive
+        );
+        assert_eq!(
+            windows::default_root(profile, false, || None),
+            profile.join("MaxGameStudioData")
+        );
+    }
+
     #[test]
     fn new_install_creates_empty_unified_root_marker() {
         let (root, appdata, local, suggested) = layout_fixture();

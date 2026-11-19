@@ -63,11 +63,13 @@ Update-StandaloneSource $manifest 'appId: com.maxgamestudio.league' 'appId: com.
 Update-StandaloneSource $manifest 'executableName: MaxGameStudioLeague' 'executableName: MaxGameStudioLeagueToolbox'
 Update-StandaloneSource $manifest "    - 7z" "    - nsis"
 Update-StandaloneSource $manifest 'asar: true' @'
+toolsets:
+  nsis: '1.2.1'
 nsis:
   artifactName: 'MaxGameStudioLeague_${version}_x64-setup.${ext}'
   oneClick: false
   perMachine: false
-  allowElevation: false
+  allowElevation: true
   selectPerMachineByDefault: false
   allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: false

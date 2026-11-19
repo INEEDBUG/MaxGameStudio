@@ -5,7 +5,11 @@ Var MGSDataDirField
 Var MGSDataDirectoryConfirmed
 
 Function MGS_ShowDataDirectory
-  Call SkipIfPassive
+  !ifdef MGS_DUAL_SCOPE
+    Call MGS_SkipInputPages
+  !else
+    Call SkipIfPassive
+  !endif
   ClearErrors
   ${GetOptions} $CMDLINE "/UPDATE" $0
   IfErrors +2 0
@@ -17,7 +21,23 @@ Function MGS_ShowDataDirectory
   StrCmp $0 "error" 0 +2
     Abort
 
-  ${NSD_CreateLabel} 0 0 100% 28u "留空将沿用现有数据位置。首次安装时会自动选择，优先使用非系统盘的本地固定磁盘。"
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSMachineScope = 1
+    ${AndIf} $MGSDirectAdmin = 1
+      StrCpy $MGSDataDirField ""
+      ${NSD_CreateLabel} 0 0 100% 50u "安装程序已用管理员权限启动。个人数据位置将在各 Windows 用户首次正常启动时确定，也可以在应用设置中更改。已有的数据位置会保留。"
+      Pop $0
+      nsDialogs::Show
+      Return
+    ${EndIf}
+  !endif
+
+  StrCpy $0 "留空将沿用现有数据位置。首次安装时会自动选择，优先使用非系统盘的本地固定磁盘。"
+  !ifdef MGS_DUAL_SCOPE
+    StrCmp $MGSMachineScope 1 0 +2
+      StrCpy $0 "留空将沿用现有数据位置。首次启动的 Windows 用户默认使用各自的个人数据目录。自选目录按该位置的 Windows 权限访问。"
+  !endif
+  ${NSD_CreateLabel} 0 0 100% 28u "$0"
   Pop $0
   ${NSD_CreateDirRequest} 0 32u 72% 13u "$MGSSelectedDataDir"
   Pop $MGSDataDirField
@@ -40,6 +60,13 @@ Function MGS_BrowseDataDirectory
 FunctionEnd
 
 Function MGS_LeaveDataDirectory
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSDataDirField == ""
+      StrCpy $MGSSelectedDataDir ""
+      StrCpy $MGSDataDirectoryConfirmed 0
+      Return
+    ${EndIf}
+  !endif
   ${NSD_GetText} $MGSDataDirField $MGSSelectedDataDir
   StrCmp $MGSSelectedDataDir "" mgs_data_dir_done
 
@@ -68,6 +95,9 @@ Function MGS_LeaveDataDirectory
 
   mgs_data_dir_done:
   StrCpy $MGSDataDirectoryConfirmed "1"
+  !ifdef MGS_DUAL_SCOPE
+    Call MGS_RequestMachineInstallAccess
+  !endif
 FunctionEnd
 
 Function MGS_RecordDataDirectorySelection

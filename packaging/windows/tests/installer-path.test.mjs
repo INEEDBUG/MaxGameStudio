@@ -5,11 +5,234 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 // Native NSIS behavior, not a JavaScript reimplementation. Production registry
 // literals are remapped to an isolated disposable key before compilation.
 const compiler = process.env.MGS_TEST_MAKENSIS;
 const hook = readFileSync(new URL('../../../frontend/src-tauri/windows/upgrade-hooks.nsh', import.meta.url), 'utf8');
+
+test('scope selection resolves a matching machine update and rejects conflicting scope', { skip: !compiler || process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mgs-installer-scope-'));
+  const script = join(root, 'scope.nsi');
+  const probe = join(root, 'scope.exe');
+  const output = join(root, 'scope.txt');
+  const settings = readFileSync(new URL('../../../frontend/src-tauri/windows/install-scope.nsh', import.meta.url), 'utf8');
+  const resolver = settings.slice(settings.indexOf('Function MGS_ResolveCommandScope'), settings.indexOf('Function MGS_ApplyScope'));
+  const user = join(root, 'User Program');
+  const machine = join(root, 'Machine Program');
+  mkdirSync(user);
+  mkdirSync(machine);
+  writeFileSync(script, `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${probe}"
+!include LogicLib.nsh
+!include FileFunc.nsh
+Var MGSMachineProgramDir
+Var MGSUserProgramDir
+Var MGSMachineTarget
+Var MGSMachineScope
+Var MGSExplicitProgramDir
+Var MGSScopeRequested
+Var UpdateMode
+${resolver}
+Section
+  StrCpy $MGSMachineTarget "${machine}"
+  StrCpy $MGSMachineProgramDir "${machine}"
+  StrCpy $MGSUserProgramDir "${user}"
+  StrCpy $UpdateMode 1
+  Call MGS_ResolveCommandScope
+  FileOpen $9 "${output}" w
+  FileWrite $9 "$MGSMachineScope"
+  FileClose $9
+  SetErrorLevel $R0
+SectionEnd
+`);
+  const build = spawnSync(resolve(compiler), ['/V2', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  for (const [flags, target, exit, scope] of [
+    [[], machine, 0, '1'],
+    [[], user, 0, '0'],
+    [['/ALLUSERS'], '', 0, '1'],
+    [['/CURRENTUSER'], machine, 2, '0'],
+    [['/ALLUSERS'], user, 2, '0'],
+    [['/ALLUSERS', '/CURRENTUSER'], '', 2, '0'],
+  ]) {
+    const args = ['/S', ...flags];
+    if (target) args.push(`/D=${target}`);
+    const run = spawnSync(probe, args, { windowsHide: true, windowsVerbatimArguments: true, timeout: 15000 });
+    assert.equal(run.status, exit, String(run.error || args.join(' ')));
+    assert.equal(readFileSync(output, 'utf8'), scope, args.join(' '));
+  }
+});
+
+test('canceling or failing elevation stops the machine install before payload writes', { skip: !compiler || process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mgs-installer-consent-'));
+  const scenario = readFileSync(new URL('../../../frontend/src-tauri/windows/install-scope.nsh', import.meta.url), 'utf8');
+  const requestAccess = scenario.slice(scenario.indexOf('Function MGS_RequestMachineInstallAccess'), scenario.indexOf('Function MGS_FinalizeOriginalUser'));
+  const script = join(root, 'consent.nsi');
+  const probe = join(root, 'consent.exe');
+  const message = join(root, 'message.txt');
+  const marker = join(root, 'copied.txt');
+  const source = `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${probe}"
+!include LogicLib.nsh
+!include WinMessages.nsh
+!define UAC_IsAdmin "0 == 1"
+!macro UAC_RunElevated
+  ReadEnvStr $0 "MGS_UAC_RESULT"
+!macroend
+Var MGSMachineScope
+Var MGSInnerInstaller
+${requestAccess}
+Function MGS_ReserveInstallationDirectories
+  StrCpy $R0 0
+FunctionEnd
+Function MGS_CheckProgramAndDataDirectories
+  StrCpy $R0 0
+FunctionEnd
+Function CS2_AbortMigrationInstall
+  FileOpen $9 "${message}" w
+  FileWriteUTF16LE $9 "$R7"
+  FileClose $9
+  SetErrorLevel 2
+  Abort
+FunctionEnd
+Section
+  StrCpy $MGSMachineScope 1
+  Call MGS_RequestMachineInstallAccess
+  FileOpen $9 "${marker}" w
+  FileClose $9
+SectionEnd
+`;
+  writeFileSync(script, '\ufeff' + source);
+  const build = spawnSync(resolve(compiler), ['/V2', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  for (const [status, expected] of [['1223', '已取消管理员授权'], ['5', '错误 5']]) {
+    const run = spawnSync(probe, ['/S'], {
+      env: { ...process.env, MGS_UAC_RESULT: status },
+      windowsHide: true,
+      timeout: 15000,
+    });
+    assert.equal(run.status, 2, String(run.error || ''));
+    assert.ok(readFileSync(message, 'utf16le').includes(expected));
+    assert.equal(existsSync(marker), false);
+  }
+});
+
+test('directly elevated machine setup preserves the personal data request', { skip: !compiler || process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mgs-installer-admin-data-'));
+  const key = `Software\\MaxGameStudioInstallerTests\\${randomUUID()}`;
+  const scope = readFileSync(new URL('../../../frontend/src-tauri/windows/install-scope.nsh', import.meta.url), 'utf8');
+  const finalizer = scope.slice(scope.indexOf('Function MGS_FinalizeOriginalUser'), scope.indexOf('; Tasklist'));
+  const script = join(root, 'finalize.nsi');
+  const probe = join(root, 'finalize.exe');
+  const output = join(root, 'result.txt');
+  const source = `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${probe}"
+!include LogicLib.nsh
+!define UAC_IsAdmin "1 == 1"
+!define UNINSTKEY "${key}"
+!define MANUPRODUCTKEY "${key}"
+!define MAINBINARYNAME "no-installed-product"
+Var UpdateMode
+Var MGSUserProgramDir
+Var MGSMachineTarget
+${finalizer}
+Function MGS_RecordDataDirectorySelection
+  WriteRegStr HKCU "${key}" "InstallerDataRootV1" "would overwrite the approved request"
+FunctionEnd
+Section
+  WriteRegStr HKCU "${key}" "InstallerDataRootV1" "prior request"
+  Call MGS_FinalizeOriginalUser
+  ReadRegStr $0 HKCU "${key}" "InstallerDataRootV1"
+  DeleteRegKey HKCU "${key}"
+  FileOpen $9 "${output}" w
+  FileWrite $9 "$0"
+  FileClose $9
+SectionEnd
+`;
+  writeFileSync(script, '\ufeff' + source);
+  const build = spawnSync(resolve(compiler), ['/V2', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  const run = spawnSync(probe, ['/S'], { windowsHide: true, timeout: 15000 });
+  assert.equal(run.status, 0, String(run.error || ''));
+  assert.equal(readFileSync(output, 'utf8'), 'prior request');
+});
+
+test('machine WebView2 ignores a user-only runtime and rejects an unsigned embedded bootstrapper', { skip: !compiler || process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mgs-installer-webview-'));
+  const key = `Software\\MaxGameStudioInstallerTests\\${randomUUID()}`;
+  const dir = new URL('../../../frontend/src-tauri/windows/', import.meta.url);
+  const template = readFileSync(new URL('installer.nsi', dir), 'utf8');
+  const block = template.slice(template.indexOf('Function MGS_ReadWebView2Version'), template.indexOf('Section Install'))
+    .replace(/HKLM "SOFTWARE\\(?:WOW6432Node\\)?Microsoft\\EdgeUpdate\\Clients\\\$\{WEBVIEW2APPGUID\}"/g, `HKCU "${key}\\Machine"`)
+    .replaceAll('HKCU "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2APPGUID}"', `HKCU "${key}\\User"`);
+  const guard = readFileSync(new URL('directory-guard.nsh', dir), 'utf8');
+  const findPowerShell = guard.slice(guard.indexOf('Function MGS_FindWindowsPowerShell'));
+  const payload = join(root, 'not-microsoft.exe');
+  const script = join(root, 'webview.nsi');
+  const probe = join(root, 'webview.exe');
+  const marker = join(root, 'copied.txt');
+  const message = join(root, 'message.txt');
+  writeFileSync(payload, 'unsigned inert fixture');
+  const source = `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${probe}"
+!include LogicLib.nsh
+!include x64.nsh
+!define MGS_WINDOWS_DIR "${fileURLToPath(dir)}"
+!define MINIMUMWEBVIEW2VERSION ""
+!define INSTALLWEBVIEW2MODE "embedBootstrapper"
+!define WEBVIEW2BOOTSTRAPPERPATH "${payload}"
+!define WEBVIEW2INSTALLERARGS "/silent"
+Var MGSMachineScope
+Var UpdateMode
+LangString installingWebview2 1033 "fixture"
+LangString webview2AbortError 1033 "fixture"
+LangString webview2InstallSuccess 1033 "fixture"
+${findPowerShell}
+Function CS2_AbortMigrationInstall
+  DeleteRegKey HKCU "${key}"
+  FileOpen $9 "${message}" w
+  FileWriteUTF16LE $9 "$R7"
+  FileClose $9
+  SetErrorLevel 2
+  Abort
+FunctionEnd
+Section Setup
+  ReadEnvStr $MGSMachineScope "MGS_WEBVIEW_MACHINE_SCOPE"
+  WriteRegStr HKCU "${key}\\User" "pv" "100.0.0.0"
+SectionEnd
+${block}
+Section Payload
+  DeleteRegKey HKCU "${key}"
+  FileOpen $9 "${marker}" w
+  FileClose $9
+SectionEnd
+`;
+  assert.ok(!block.includes('Microsoft\\EdgeUpdate\\Clients'));
+  writeFileSync(script, '\ufeff' + source);
+  const build = spawnSync(resolve(compiler), ['/V2', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  const runMachine = spawnSync(probe, ['/S'], {
+    env: { ...process.env, MGS_WEBVIEW_MACHINE_SCOPE: '1' }, windowsHide: true, timeout: 25000,
+  });
+  assert.equal(runMachine.status, 2, String(runMachine.error || ''));
+  assert.ok(readFileSync(message, 'utf16le').includes('无法验证内置的 Microsoft WebView2'));
+  assert.equal(existsSync(marker), false);
+  const runUser = spawnSync(probe, ['/S'], {
+    env: { ...process.env, MGS_WEBVIEW_MACHINE_SCOPE: '0' }, windowsHide: true, timeout: 15000,
+  });
+  assert.equal(runUser.status, 0, String(runUser.error || ''));
+  assert.equal(existsSync(marker), true);
+});
 for (const scenario of ['registered', 'uninstall-fallback', 'missing-registration', 'stale-registration', 'explicit', 'fresh-explicit', 'manual-overlay', 'manual-uninstall-fallback']) {
   test(`updater install path: ${scenario}`, { skip: !compiler || process.platform !== 'win32' }, () => {
     const root = mkdtempSync(join(tmpdir(), 'mgs-installer-path-'));

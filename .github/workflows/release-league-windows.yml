@@ -3,7 +3,7 @@ name: Release League Toolbox for Windows
 on:
   push:
     branches:
-      - 'codex/desktop-utilities-beta'
+      - 'codex/all-users-installers'
     tags:
       - 'league-v*'
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
       version:
         description: Private League Toolbox build version
         required: true
-        default: '1.0.0-beta.1'
+        default: '1.0.0-beta.2'
       verify_live_resg:
         description: Verify the public RESG website in an isolated Electron profile
         type: boolean
@@ -35,7 +35,7 @@ jobs:
       YARN_IGNORE_PATH: '1'
       YARN_ENABLE_GLOBAL_CACHE: 'true'
       LEAGUE_PIN: 14557723706ccc0e0a9d62c470141d4cb7190fcd
-      LEAGUE_BRANCH_VERSION: '1.0.0-beta.1'
+      LEAGUE_BRANCH_VERSION: '1.0.0-beta.2'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,7 +60,7 @@ jobs:
           }
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $version = $env:REQUESTED_VERSION
-          } elseif ($env:GITHUB_REF_TYPE -eq 'branch' -and $env:GITHUB_REF_NAME -ceq 'codex/desktop-utilities-beta') {
+          } elseif ($env:GITHUB_REF_TYPE -eq 'branch' -and $env:GITHUB_REF_NAME -ceq 'codex/all-users-installers') {
             $version = $env:LEAGUE_BRANCH_VERSION
           } else {
             if ($env:GITHUB_REF_TYPE -ne 'tag' -or !$env:GITHUB_REF_NAME.StartsWith('league-v')) {

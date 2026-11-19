@@ -8,14 +8,14 @@ on:
       candidate_version:
         description: Exact version produced by the candidate run
         required: true
-        default: '3.2.0-beta.1'
+        default: '3.2.0-beta.2'
       league_run_id:
         description: Private League candidate run from the same commit as Main (preferred)
         required: false
       league_tag:
         description: Published League tag used only if no League run is specified (blank to omit)
         required: false
-        default: 'league-v1.0.0-beta.1'
+        default: 'league-v1.0.0-beta.2'
       publish_beta:
         description: Publish the two exact private beta installers after verification
         type: boolean
@@ -26,7 +26,7 @@ permissions:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     outputs:
       bundle: ${{ steps.seal_beta.outputs.bundle }}
     steps:
@@ -77,12 +77,12 @@ jobs:
           # The run path stays exact even when CLI workflowName resolves through the default branch.
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:LEAGUE_RUN_ID" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.event -ne 'push' -or
-              $run.path -cne '.github/workflows/release-league-windows.yml' -or $run.head_branch -cne 'codex/desktop-utilities-beta' -or
+              $run.path -cne '.github/workflows/release-league-windows.yml' -or $run.head_branch -cne 'codex/all-users-installers' -or
               $run.head_sha -cne $env:MGS_MAIN_CANDIDATE_SHA) {
             throw 'The private League and Main candidate builds must be successful builds of the same commit.'
           }
-          $artifact = 'league-toolbox-1.0.0-beta.1-windows-x64'
-          $filename = 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe'
+          $artifact = 'league-toolbox-1.0.0-beta.2-windows-x64'
+          $filename = 'MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe'
           gh run download $env:LEAGUE_RUN_ID --repo $env:GITHUB_REPOSITORY --name $artifact --dir league-candidate
           if ($LASTEXITCODE -ne 0) { throw 'Private League candidate download failed.' }
           $path = (Resolve-Path -LiteralPath (Join-Path league-candidate $filename)).Path
@@ -128,15 +128,15 @@ jobs:
           LEAGUE_RUN: ${{ inputs.league_run_id }}
         run: |
           if ($env:GITHUB_REPOSITORY -cne 'INEEDBUG/MaxGameStudio' -or
-              $env:GITHUB_REF_NAME -cne 'codex/desktop-utilities-beta' -or
-              $env:MGS_EXPECTED_VERSION -cne '3.2.0-beta.1' -or
+              $env:GITHUB_REF_NAME -cne 'codex/all-users-installers' -or
+              $env:MGS_EXPECTED_VERSION -cne '3.2.0-beta.2' -or
               $env:MAIN_RUN -notmatch '^\d+$' -or $env:LEAGUE_RUN -notmatch '^\d+$' -or
               $env:MGS_MAIN_CANDIDATE_SHA -cnotmatch '^[a-f0-9]{40}$' -or
               $env:MGS_MAIN_CANDIDATE_SHA -cne $env:MGS_LEAGUE_CANDIDATE_SHA) {
             throw 'Publishing requires both private beta builds from the same commit.'
           }
-          $main = 'MaxGameStudio_3.2.0-beta.1_x64-setup.exe'
-          $league = 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe'
+          $main = 'MaxGameStudio_3.2.0-beta.2_x64-setup.exe'
+          $league = 'MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe'
           if ((Split-Path -Leaf $env:MGS_CANDIDATE_INSTALLER) -cne $main -or
               (Split-Path -Leaf $env:MGS_LEAGUE_INSTALLER) -cne $league) {
             throw 'Expected the two approved beta installer names.'
@@ -171,6 +171,28 @@ jobs:
           }
           if ($env:MGS_LEAGUE_INSTALLER) { $options.LeagueInstaller = $env:MGS_LEAGUE_INSTALLER }
           ./packaging/windows/tests/verify-packaged-upgrade.ps1 @options
+      - name: Download the preceding League beta for scope upgrade acceptance
+        if: inputs.league_run_id != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $filename = 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe'
+          gh release download league-v1.0.0-beta.1 --repo $env:GITHUB_REPOSITORY --pattern $filename --dir league-baseline
+          if ($LASTEXITCODE -ne 0) { throw 'League baseline download failed.' }
+          $path = (Resolve-Path -LiteralPath (Join-Path league-baseline $filename)).Path
+          if ((Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant() -cne 'e8e06419c5209647ca8f03b5357560d4a03409bbcc2ae8db93cf7dbae044f61b') {
+            throw 'League baseline does not match the released beta.1 installer.'
+          }
+          "MGS_LEAGUE_BASELINE=$path" >> $env:GITHUB_ENV
+      - name: Verify all-users installation, scope upgrades and private profiles
+        if: inputs.league_run_id != ''
+        shell: pwsh
+        run: |
+          ./packaging/windows/tests/verify-all-users-install.ps1 `
+            -Installer $env:MGS_CANDIDATE_INSTALLER -BaselineInstaller $env:MGS_BASELINE_INSTALLER `
+            -ExpectedVersion $env:MGS_EXPECTED_VERSION -LeagueInstaller $env:MGS_LEAGUE_INSTALLER `
+            -LeagueBaselineInstaller $env:MGS_LEAGUE_BASELINE
       - name: Seal the exact verified beta files
         id: seal_beta
         if: success() && inputs.publish_beta
@@ -180,10 +202,10 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP 'verified-beta'
           New-Item -ItemType Directory -Path $destination | Out-Null
           $approved = @(
-            'MaxGameStudio_3.2.0-beta.1_x64-setup.exe',
-            'MaxGameStudio_3.2.0-beta.1_x64-setup.exe.sig',
-            'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe',
-            'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe.sha256'
+            'MaxGameStudio_3.2.0-beta.2_x64-setup.exe',
+            'MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sig',
+            'MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe',
+            'MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe.sha256'
           )
           foreach ($name in $approved) {
             $copy = Join-Path $destination $name
@@ -204,7 +226,7 @@ jobs:
           retention-days: 3
 
   publish:
-    if: inputs.publish_beta && needs.verify.result == 'success' && github.event_name == 'workflow_dispatch' && github.repository == 'INEEDBUG/MaxGameStudio' && github.ref_name == 'codex/desktop-utilities-beta'
+    if: inputs.publish_beta && needs.verify.result == 'success' && github.event_name == 'workflow_dispatch' && github.repository == 'INEEDBUG/MaxGameStudio' && github.ref_name == 'codex/all-users-installers'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15

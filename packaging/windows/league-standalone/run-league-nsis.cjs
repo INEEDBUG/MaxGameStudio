@@ -11,6 +11,38 @@ function patchInstallerTemplate(template) {
   return template.replace(startup, (match) => match.replace('$INSTDIR', () => '$TEMP'))
 }
 
+function patchScopeTemplates(templates) {
+  const section = join(templates, 'installSection.nsh')
+  const original = readFileSync(section, 'utf8')
+  const crossScopeUninstall = /^\$\{if\} \$installMode == "all"\r?\n  !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n  !insertmacro handleUninstallResult HKEY_CURRENT_USER\r?\n\$\{endIf\}\r?\n/gm
+  if ([...original.matchAll(crossScopeUninstall)].length !== 1) {
+    throw new Error('Expected one pinned cross-scope uninstall block.')
+  }
+  // In over-the-shoulder UAC the elevated HKCU belongs to the credential administrator.
+  writeFileSync(section, original.replace(crossScopeUninstall, ''), 'utf8')
+  for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
+    const path = join(templates, filename)
+    const text = readFileSync(path, 'utf8')
+    const failure = /MessageBox mb_IconStop\|mb_TopMost\|mb_SetForeground "Unable to elevate, error \$0"/g
+    if ([...text.matchAll(failure)].length !== 1) throw new Error(`Missing pinned elevation prompt in ${filename}.`)
+    let localized = text.replace(failure, () =>
+      'MessageBox mb_IconStop|mb_TopMost|mb_SetForeground "无法获取管理员权限（错误 $0）。" /SD IDOK')
+    if (filename === 'multiUserUi.nsh') {
+      const secondaryLogon = '"Logon service not running, aborting!"'
+      if (text.split(secondaryLogon).length !== 2) throw new Error('Missing pinned Secondary Logon prompt.')
+      localized = localized.replace(secondaryLogon, '"Windows 登录服务未运行，无法请求管理员权限。"')
+    } else {
+      const cancelled = /(\$\{Case\} 1223[^\r\n]*\r?\n)( +)(\$\{Break\})/
+      const failed = /(\$\{Default\}\r?\n)( +)(MessageBox mb_IconStop\|mb_TopMost\|mb_SetForeground)/
+      if (!cancelled.test(localized) || !failed.test(localized)) throw new Error('Missing pinned silent UAC branches.')
+      localized = localized
+        .replace(cancelled, '$1$2SetErrorLevel 1223\n$2$3')
+        .replace(failed, (_, before, indent, message) => `${before}${indent}SetErrorLevel $0\n${indent}${message}`)
+    }
+    writeFileSync(path, localized, 'utf8')
+  }
+}
+
 if (require.main === module) {
   const [, , cli, scratch, ...cliArgs] = process.argv
   const builder = resolve(cli)
@@ -25,9 +57,10 @@ if (require.main === module) {
   const patched = patchInstallerTemplate(readFileSync(join(nsis.nsisTemplatesDir, 'installer.nsi'), 'utf8'))
   cpSync(nsis.nsisTemplatesDir, templates, { recursive: true, force: false, errorOnExist: true })
   writeFileSync(join(templates, 'installer.nsi'), patched, 'utf8')
+  patchScopeTemplates(templates)
   nsis.nsisTemplatesDir = templates
   process.argv = [process.argv[0], builder, ...cliArgs]
   require(builder)
 }
 
-module.exports = { patchInstallerTemplate }
+module.exports = { patchInstallerTemplate, patchScopeTemplates }

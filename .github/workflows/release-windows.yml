@@ -179,6 +179,12 @@ jobs:
         run: |
           $env:MGS_TEST_MAKENSIS = Join-Path $env:LOCALAPPDATA "tauri/NSIS/makensis.exe"
           if (-not (Test-Path -LiteralPath $env:MGS_TEST_MAKENSIS)) { throw "NSIS compiler missing; native installer tests must not be skipped" }
+          $compilerVersion = (& $env:MGS_TEST_MAKENSIS /VERSION | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '^v(\d+\.\d+(?:\.\d+)?)$' -or
+              [version]$Matches[1] -lt [version]'3.11') {
+            throw 'The all-users installer requires NSIS 3.11 or newer.'
+          }
+          Write-Host "Installer compiler: $compilerVersion"
           node --test packaging/windows/tests/installer-path.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "Native installer directory tests failed" }
 

@@ -1,0 +1,50 @@
+NSIS UAC plug-in, copyright (C) 2007 Anders Kjersem.
+https://nsis.sourceforge.io/UAC_plug-in
+
+UAC.dll is the unmodified x86 Unicode DLL from electron-builder's original
+nsis-resources-3.4.1 release archive.
+https://github.com/electron-userland/electron-builder-binaries/releases/tag/nsis-resources-3.4.1
+DLL SHA-256: 2f7f8fc05dc4fd0d5cda501b47e4433357e887bbfed7292c028d99c73b52dc08
+
+UAC.nsh is from app-builder-lib 26.15.6, templates/nsis/include/UAC.nsh.
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.6/packages/app-builder-lib/templates/nsis/include/UAC.nsh
+Header SHA-256: abd701f2898f987041baa9d7ece9d0f8ee806eb5f7d85a4f39b6c60b8d638769
+
+Zlib/libpng license
+
+This software is provided 'as-is', without any express or implied warranty.
+In no event will the authors be held liable for any damages arising from the
+use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software in
+   a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+electron-builder is distributed under the MIT License.
+Copyright (c) 2015 Loopline Systems
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

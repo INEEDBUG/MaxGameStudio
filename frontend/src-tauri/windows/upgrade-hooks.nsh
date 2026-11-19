@@ -23,6 +23,7 @@
 ; Capture this directory while the hook is included so macro expansion later
 ; does not change __FILEDIR__ to the generated NSIS directory.
 !define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\..\target\release"
+!define MGS_WINDOWS_DIR "${__FILEDIR__}"
 !define CS2_LEGACY_TAURI_PRODUCT "CS2 Ultimate Insight Studio"
 !define CS2_LEGACY_TAURI_UNINSTALL_KEY "CS2 Ultimate Insight Studio"
 !define CS2_CURRENT_TAURI_PRODUCT "MaxGameStudio"
@@ -77,6 +78,10 @@ Function MGS_ResolveUpdateDirectory
 FunctionEnd
 
 Function MGS_SelectFreshInstallDrive
+  !ifdef MGS_DUAL_SCOPE
+    StrCmp $MGSMachineScope 1 0 +2
+      Return
+  !endif
   Call MGS_ResolveUpdateDirectory
   Push $0
   Push $1
@@ -835,13 +840,22 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSMachineScope != 1
+  !endif
   Call MGS_ResolveUpdateDirectory
+  !ifdef MGS_DUAL_SCOPE
+    ${EndIf}
+  !endif
   StrCmp $MGSVerifiedProgramDir "" +4
   StrCmp $INSTDIR $MGSVerifiedProgramDir +3
     StrCpy $R7 "安装目录已变化，请重新启动安装程序。"
     Call CS2_AbortMigrationInstall
   ; A silent fresh installation has no directory page or GUI-init callback.
   ; Require an explicit /D instead of silently choosing the system disk.
+  !ifdef MGS_DUAL_SCOPE
+    StrCmp $MGSMachineScope 1 mgs_silent_path_done
+  !endif
   IfSilent 0 mgs_silent_path_done
   ClearErrors
   ${GetOptions} $CMDLINE "/UPDATE" $0
@@ -856,6 +870,9 @@ FunctionEnd
   StrCpy $R7 "首次静默安装需要通过 /D= 指定程序目录。尚未复制应用文件。"
   Call CS2_AbortMigrationInstall
   mgs_silent_path_done:
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSMachineScope != 1
+  !endif
   Call CS2_PrepareRunningApps
 
   ; Same-directory legacy installs must be retired before any file copy —
@@ -870,6 +887,9 @@ FunctionEnd
   StrCpy $CS2ElectronScope "samedir"
   Call CS2_RemoveLegacyElectron
   SetOutPath $INSTDIR
+  !ifdef MGS_DUAL_SCOPE
+    ${EndIf}
+  !endif
 
   ; Delete every previous patched-parser generation before NSIS copies the
   ; newly staged runtime. This also makes same-version repair installs clean.
@@ -899,12 +919,18 @@ FunctionEnd
   ; Keep existing data in place. An explicit data page selection is only a
   ; request, validated and migrated by the application's storage bootstrap.
   ; Retain any different-dir Electron installation as a recoverable fallback.
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSMachineScope != 1
+  !endif
   StrCpy $CS2LegacyTauriScope "differentdir"
   Call CS2_RemoveLegacyTauri
 
   ; The generated installer has already created/updated the MaxGameStudio
   ; shortcut at this point. Remove only the exact old-brand shortcut paths.
   Call CS2_RemoveLegacyBrandShortcuts
+  !ifdef MGS_DUAL_SCOPE
+    ${EndIf}
+  !endif
 
   ; Legacy uninstallers run after the first validation and can remove files
   ; asynchronously on some upgrade paths.  Never show the success page until
@@ -922,7 +948,18 @@ FunctionEnd
     MessageBox MB_ICONEXCLAMATION|MB_OK "旧版内嵌工作台的程序文件未全部清理。已保留原配置。" /SD IDOK
   ${EndIf}
   mgs_retire_embedded_league_done:
-  Call MGS_RecordDataDirectorySelection
+  !ifdef MGS_DUAL_SCOPE
+    ${If} $MGSInnerInstaller = 1
+      !insertmacro UAC_AsUser_Call Function MGS_FinalizeOriginalUser 0
+    ${ElseIf} $MGSMachineScope = 1
+      Call MGS_FinalizeOriginalUser
+      SetShellVarContext all
+    ${Else}
+      Call MGS_RecordDataDirectorySelection
+    ${EndIf}
+  !else
+    Call MGS_RecordDataDirectorySelection
+  !endif
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

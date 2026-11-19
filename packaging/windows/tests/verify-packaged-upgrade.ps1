@@ -62,7 +62,7 @@ function Install-Package([string]$Exe, [string]$Arguments, [int]$ExpectedExit = 
   Write-Host "INSTALL_ATTEMPT: $([IO.Path]::GetFileName($Exe)) $Arguments (expected $ExpectedExit)"
   $process = Start-Process -FilePath $Exe -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
   if ($process.ExitCode -ne $ExpectedExit) {
-    if ([IO.Path]::GetFileName($Exe) -ceq 'MaxGameStudio_3.2.0-beta.1_x64-setup.exe') {
+    if ([IO.Path]::GetFileName($Exe) -ceq "MaxGameStudio_${ExpectedVersion}_x64-setup.exe") {
       $registered = Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue
       Write-Host ("MAIN_INSTALL_DIAGNOSTIC: {0}" -f (@{
         registeredDirectory = $registered.InstallLocation; registeredVersion = $registered.DisplayVersion

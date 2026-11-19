@@ -1,0 +1,2 @@
+UAC.nsh -text -whitespace
+UAC.dll binary

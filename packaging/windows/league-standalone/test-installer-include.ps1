@@ -1,13 +1,25 @@
-param([Parameter(Mandatory = $true)][string]$Makensis)
+param(
+  [Parameter(Mandatory = $true)][string]$Makensis,
+  [Parameter(Mandatory = $true)][string]$SourceDir,
+  [Parameter(Mandatory = $true)][string]$PluginDirectory
+)
 
 $ErrorActionPreference = 'Stop'
 $compiler = (Resolve-Path -LiteralPath $Makensis).Path
-$include = Join-Path $PSScriptRoot 'installer.nsh'
+$headers = (Resolve-Path (Join-Path $SourceDir 'node_modules/app-builder-lib/templates/nsis/include')).Path
+$plugins = (Resolve-Path -LiteralPath $PluginDirectory).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('mgs-nsis-test-' + [Guid]::NewGuid().ToString('n'))
 New-Item -ItemType Directory -Path $scratch | Out-Null
+$include = Join-Path $scratch 'installer.nsh'
+foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1') {
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $scratch
+}
+$inventory = Join-Path $scratch 'maxgamestudio-runtime-hashes.json'
+[IO.File]::WriteAllText($inventory, '{}')
 $script = Join-Path $scratch 'include-test.nsi'
 $out = Join-Path $scratch 'include-test.exe'
 $originalAppData = $env:APPDATA
+$originalUserProfile = $env:USERPROFILE
 $env:APPDATA = Join-Path $scratch 'fixture-appdata'
 $main = Join-Path $env:APPDATA 'MaxGameStudio'
 New-Item -ItemType Directory -Path $main -Force | Out-Null
@@ -17,6 +29,16 @@ RequestExecutionLevel user
 Name "League installer include test"
 OutFile "${LEAGUE_OUTPUT}"
 InstallDir "$TEMP\MaxGameStudioLeagueIncludeTest"
+!addincludedir "${LEAGUE_HEADERS}"
+!addplugindir "${LEAGUE_PLUGINS}"
+!include "LogicLib.nsh"
+!include "UAC.nsh"
+Var installMode
+Var hasPerUserInstallation
+Var hasPerMachineInstallation
+!macro setInstallModePerAllUsers
+  StrCpy $installMode "all"
+!macroend
 !include "${LEAGUE_CUSTOM_NSIS}"
 !include "MUI2.nsh"
 !ifndef BUILD_UNINSTALLER
@@ -36,6 +58,11 @@ Function .onInit
   Call setInstallSectionSpaceRequired
 
   SetOutPath $INSTDIR
+  StrCpy $installMode "CurrentUser"
+  ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_MACHINE"
+  ${If} $0 == "1"
+    StrCpy $installMode "all"
+  ${EndIf}
   !insertmacro customInit
 FunctionEnd
 !endif
@@ -52,7 +79,7 @@ try {
   node -e "const fs = require('node:fs'); const { patchInstallerTemplate } = require(process.argv[1]); const script = process.argv[2]; fs.writeFileSync(script, patchInstallerTemplate(fs.readFileSync(script, 'utf8')));" $launcher $script
   if ($LASTEXITCODE -ne 0) { throw 'Could not patch the NSIS test startup template.' }
   foreach ($mode in @('uninstaller', 'installer')) {
-    $flags = @('/V2', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out")
+    $flags = @('/V2', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out", "/DLEAGUE_HEADERS=$headers", "/DLEAGUE_PLUGINS=$plugins")
     if ($mode -eq 'uninstaller') { $flags += '/DBUILD_UNINSTALLER' }
     & $compiler @flags $script
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $out -PathType Leaf)) {
@@ -80,14 +107,26 @@ try {
   if ($accepted.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $empty 'fixture-payload.txt'))) {
     throw "NSIS did not accept an independent empty folder (exit ${accepted.ExitCode})."
   }
-  Write-Host 'League NSIS rejected occupied and overlapping paths without writing there, and accepted a new independent directory.'
+  $shared = Join-Path $scratch 'unprotected-machine-program'
+  $env:MGS_LEAGUE_FIXTURE_MACHINE = '1'
+  $env:USERPROFILE = $null
+  $blocked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$shared" -WindowStyle Hidden -Wait -PassThru
+  if ($blocked.ExitCode -ne 2 -or (Test-Path -LiteralPath $shared)) {
+    throw "NSIS accepted an unprotected machine installation directory (exit $($blocked.ExitCode))."
+  }
+  Write-Host 'League NSIS rejected occupied, overlapping and unprotected machine paths before writing. Accepted a new independent private program directory.'
 } finally {
+  $env:MGS_LEAGUE_FIXTURE_MACHINE = $null
   $env:APPDATA = $originalAppData
-  foreach ($child in 'wrong-folder\main-marker.txt', 'wrong-folder\fixture-payload.txt', 'wrong-folder', 'empty-program\fixture-payload.txt', 'empty-program', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox\fixture-payload.txt', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox', 'fixture-appdata\MaxGameStudio', 'fixture-appdata') {
+  $env:USERPROFILE = $originalUserProfile
+  foreach ($child in 'wrong-folder\main-marker.txt', 'wrong-folder\fixture-payload.txt', 'wrong-folder', 'empty-program\fixture-payload.txt', 'empty-program', 'unprotected-machine-program\fixture-payload.txt', 'unprotected-machine-program', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox\fixture-payload.txt', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox', 'fixture-appdata\MaxGameStudio', 'fixture-appdata') {
     $file = Join-Path $scratch $child
     if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
   }
   if (Test-Path -LiteralPath $out -PathType Leaf) { Remove-Item -LiteralPath $out }
   Remove-Item -LiteralPath $script
+  foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'maxgamestudio-runtime-hashes.json') {
+    Remove-Item -LiteralPath (Join-Path $scratch $name)
+  }
   Remove-Item -LiteralPath $scratch
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { approvedBetas, publishFeeds, validateRecord, verifyRelease } from './publish-verified-beta.mjs'
+import { approvedBetas, publishFeeds, validatePreviousBeta, validateRecord, verifyRelease } from './publish-verified-beta.mjs'
 
 const sha256 = 'a'.repeat(64)
 const accepted = {
@@ -49,4 +49,19 @@ test('changes only the beta feeds in one fast-forward commit', () => {
   assert.deepEqual(calls[1][1].body.tree.map(({ path }) => path), ['beta.json', 'league-beta.json'])
   assert.deepEqual(calls[2][1].body.parents, ['stable-commit'])
   assert.deepEqual(calls[3], ['git/refs/heads/updater', { method: 'PATCH', body: { sha: 'new-commit', force: false } }])
+})
+
+test('promotes each known beta predecessor without accepting another product or channel', () => {
+  for (const [index, beta] of approvedBetas.entries()) {
+    const product = index === 0 ? 'maxgamestudio' : 'maxgamestudio-league'
+    const previousVersion = index === 0 ? '3.2.0-beta.1' : '1.0.0-beta.1'
+    const prefix = index === 0 ? 'v' : 'league-v'
+    const old = { product, channel: 'beta', version: previousVersion, tag: prefix + previousVersion }
+    assert.doesNotThrow(() => validatePreviousBeta(old, beta))
+    assert.doesNotThrow(() => validatePreviousBeta({ ...old, version: beta.version, tag: beta.tag }, beta))
+    assert.throws(() => validatePreviousBeta({ ...old, product: index === 0 ? 'maxgamestudio-league' : 'maxgamestudio' }, beta))
+    assert.throws(() => validatePreviousBeta({ ...old, channel: 'stable' }, beta))
+    assert.throws(() => validatePreviousBeta({ ...old, tag: prefix + '0.0.1-beta.1' }, beta))
+    assert.throws(() => validatePreviousBeta({ ...old, version: '9.0.0-beta.1', tag: prefix + '9.0.0-beta.1' }, beta))
+  }
 })
