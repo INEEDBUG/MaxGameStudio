@@ -145,11 +145,9 @@ function Test-ScopePage($Product, $User, [string]$InstallerPath) {
   }
 }
 
+. (Join-Path $PSScriptRoot 'fixture-process-stop.ps1')
 function Stop-TestProcess([Diagnostics.Process]$Process) {
-  if ($Process.HasExited) { return }
-  if ($Process.CloseMainWindow() -and $Process.WaitForExit(3000)) { return }
-  & "$env:WINDIR\System32\taskkill.exe" /PID "$($Process.Id)" /T /F | Out-Null
-  if (!$Process.WaitForExit(5000)) { throw 'Could not stop the owned fixture process.' }
+  Stop-CiFixtureProcess $Process -TryClose -GracefulMilliseconds 3000
 }
 
 function Wait-Fixture([string]$Failure, [scriptblock]$Condition, [Diagnostics.Process]$Process) {

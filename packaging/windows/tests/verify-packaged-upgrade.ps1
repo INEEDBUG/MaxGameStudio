@@ -134,11 +134,9 @@ function Write-IdleResourceSample([Diagnostics.Process]$App, [string]$Product) {
   $sampledProducts[$Product] = $true
 }
 
+. (Join-Path $PSScriptRoot 'fixture-process-stop.ps1')
 function Stop-FixtureApp([Diagnostics.Process]$App, [switch]$TryClose) {
-  if ($App.HasExited) { return }
-  if ($TryClose -and $App.CloseMainWindow() -and $App.WaitForExit(5000)) { return }
-  & "$env:SystemRoot\System32\taskkill.exe" /PID "$($App.Id)" /T /F | Out-Null
-  if (-not $App.WaitForExit(5000)) { throw 'Could not stop the fixture application.' }
+  Stop-CiFixtureProcess $App -TryClose:$TryClose
 }
 
 function Assert-FileHash([string]$Path, [string]$Hash) {
