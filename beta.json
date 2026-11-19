@@ -1,30 +1,27 @@
 {
-  "version": "3.2.0-beta.1",
+  "version": "3.2.0-beta.2",
   "product": "maxgamestudio",
-  "tag_name": "v3.2.0-beta.1",
+  "tag_name": "v3.2.0-beta.2",
   "channel": "beta",
-  "notes": "# MaxGameStudio 3.2.0-beta.1\n\n本测试版可覆盖 3.1.4 修复正式版，默认保留原安装位置、配置与数据库。安装向导为简体中文，可选择程序和数据目录；主动迁移数据时保留源目录。\n\n- 新增本机 Steam 已保存账户切换，退出游戏和 Steam 云同步完成后使用。无需保存密码到本软件。\n- 首页提供 Steam 账户与常用工具，加入真实游戏图标，减少装饰。\n- 英雄联盟工具箱改为独立安装。主程序移除其入口与 Electron 载荷。两个软件使用独立更新通道。\n- 下载任务为空时停止快速轮询，首页继续按需启动 Python。\n\n同仓库的 League 测试版使用 `league-v1.0.0-beta.1` 标签，可单独下载和卸载。旧版内嵌工具箱的配置保留，供独立工具箱迁移。\n\n开发机没有 Steam 与英雄联盟客户端。发布前覆盖 Steam 的模拟换号、安装覆盖和 RESG 公开英雄页面；真实登录、Steam Guard 与实际游戏对局仍请在自己的电脑验收。\n",
-  "pub_date": "2026-11-18T22:33:20Z",
+  "notes": "# MaxGameStudio 3.2.0-beta.2\n\n本次测试版更新安装流程，主程序和英雄联盟工具箱仍独立安装、独立更新。\n\n- 安装向导可选择“仅为我安装”或“为所有用户安装”。选择全用户后继续时，才向 Windows 申请管理员权限。\n- 安装器的选项、权限失败和取消提示使用简体中文。Windows 自己的权限确认窗口使用系统显示语言。\n- 全用户安装共享程序文件，各 Windows 账户仍使用自己的数据位置。已有配置、数据库和 Steam 账户信息继续保留；更换数据目录仍保留源数据。\n- 个人版升级到全用户版时，在安装成功后处理原用户的程序注册和快捷方式，避免继续打开旧版本。未知文件与个人数据不作为安装垃圾删除。\n\n独立工具箱使用 `league-v1.0.0-beta.2` 标签，仅通过工具箱自己的更新通道推送。主程序的更新不会触发工具箱更新。\n\n建议正常双击安装包，由安装器在需要时申请权限。手动以管理员身份启动时，个人数据位置的选择推迟到该用户正常启动后，旧个人版保留为恢复来源，向导会给出中文提示。\n\n开发机没有 Steam 和英雄联盟客户端。本次验收聚焦安装、覆盖升级、存储位置、两个产品的更新边界与卸载保留数据；真实游戏登录与对局仍需要在装有游戏的电脑上测试。\n",
+  "pub_date": "2026-11-19T13:58:36Z",
   "update_mode": "normal",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT3AyRGtWR3doSGpuUk56ZjdnSlRmMll2UitNYXJtRzFPMStiS0VqMUFFeks4OVYrYy9ERGpOOVpjWUNzd0U3TzdXcTJHanV4cWFlakplY0J1amFqQ0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDQwNzc1CWZpbGU6TWF4R2FtZVN0dWRpb18zLjIuMC1iZXRhLjFfeDY0LXNldHVwLmV4ZQpMdm1lTVEySmtRWldLdzNtOG5wZXZCeklIbGFMZDBrMm5FS2RqcklLY2dEek1IUFJpNkF4S29PWndZc0ZxODcyYnNNSU50ak5OYnQycW5ZVFA0SW5Bdz09Cg==",
-      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.1/MaxGameStudio_3.2.0-beta.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSSXZ3UmJxZ1luT2ptZUd2c1JQTXJnektreUtzZ1pQbGtWUFRLZVpFRlBVMlpsR2E3MExWMTEwUkRWd3BBRlRmK3QvZE1JNkRpQXh6TXV3VVhqSXVHRTdhcHRjeFh4OFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDk2MzUyCWZpbGU6TWF4R2FtZVN0dWRpb18zLjIuMC1iZXRhLjJfeDY0LXNldHVwLmV4ZQpIRXlVVzNaaFZHZEFsWTF2TzFvYkhKV1JuNEgwdGMyZEhjV2NhTVJvRGFEc2R6aW9nTDhFTUxaWDJUMHpEdmRhc1RCdEV4S21yKzJPMnRuVnNyamZDUT09Cg==",
+      "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe"
     }
   },
   "user_release_notes": {
-    "version": "3.2.0-beta.1",
+    "version": "3.2.0-beta.2",
     "fixed": [
-      "更新只识别对应产品的安装包，主程序与英雄联盟工具箱独立更新。"
+      "安装向导支持选择为所有用户安装，继续时自动申请管理员权限。",
+      "补齐安装范围、权限失败和取消操作的中文提示。"
     ],
-    "added": [
-      "Steam 已保存账户一键切换。",
-      "中文安装向导支持选择程序和数据目录，覆盖正式版时沿用原数据。"
-    ],
+    "added": [],
     "optimized": [
-      "首页重绘，加入对应游戏图标和常用入口。",
-      "英雄联盟工具箱独立安装，主程序移除内嵌 Electron 运行环境。",
-      "空闲下载停止快速轮询，首页与 Steam 页无需启动 Python。"
+      "覆盖升级保留原数据位置，全用户安装时各 Windows 账户分别保存数据。",
+      "主程序和英雄联盟工具箱继续使用各自的更新通道。"
     ]
   }
 }
