@@ -1,0 +1,61 @@
+name: Retain current application releases
+
+on:
+  workflow_run:
+    workflows: [Release Windows, Release League Toolbox for Windows, Verify packaged Windows upgrade]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Archive and delete excess releases after preview and verification
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: maxgamestudio-release-retention
+  cancel-in-progress: false
+
+jobs:
+  retain:
+    if: >-
+      github.repository == 'INEEDBUG/MaxGameStudio' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify retention and download link rules
+        run: node --test packaging/windows/release-retention.test.mjs packaging/windows/release-readme.test.mjs
+      - name: Preview current release retention
+        id: preview
+        run: node packaging/windows/release-retention.mjs plan "$RUNNER_TEMP/release-retention.json" "$RUNNER_TEMP/release-recovery"
+      - name: Download and checksum recovery assets
+        if: steps.preview.outputs.allowed == 'true' && (github.event_name == 'workflow_run' || inputs.apply)
+        run: node packaging/windows/release-retention.mjs backup "$RUNNER_TEMP/release-retention.json" "$RUNNER_TEMP/release-recovery"
+      - name: Preserve a short-lived recovery archive
+        if: steps.preview.outputs.allowed == 'true' && (github.event_name == 'workflow_run' || inputs.apply)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-recovery
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Refresh downloads and retire excess releases
+        if: steps.preview.outputs.allowed == 'true' && (github.event_name == 'workflow_run' || inputs.apply)
+        run: node packaging/windows/release-retention.mjs apply "$RUNNER_TEMP/release-retention.json" "$RUNNER_TEMP/release-recovery"
