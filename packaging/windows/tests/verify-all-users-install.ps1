@@ -47,10 +47,16 @@ $league = @{
   Default = (Join-Path $env:ProgramFiles 'MaxGameStudioLeagueToolbox'); Old = (Join-Path $root 'League per-user program')
 }
 $shell = New-Object -ComObject WScript.Shell
+. (Join-Path $PSScriptRoot 'main-install-diagnostic.ps1')
 
 function Invoke-Installer([string]$Exe, [string]$Arguments, [switch]$Rejected) {
+  Write-Host "SCOPE_INSTALL_ATTEMPT: $([IO.Path]::GetFileName($Exe)) $Arguments expectedReject=$Rejected"
   $process = Start-Process -FilePath $Exe -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
   if (($Rejected -and $process.ExitCode -eq 0) -or (!$Rejected -and $process.ExitCode -ne 0)) {
+    if ($Exe -ceq $Installer) {
+      try { Write-MainInstallDiagnostic -Setup $Installer -Program $main.Default -ArpKey $main.Arp }
+      catch { Write-Host "MAIN_DIAGNOSTIC_ERROR: $($_.Exception.Message)" }
+    }
     throw "Unexpected installer result for $([IO.Path]::GetFileName($Exe)): exit $($process.ExitCode)."
   }
 }
