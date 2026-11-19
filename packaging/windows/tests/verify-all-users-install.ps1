@@ -1,9 +1,13 @@
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$BaselineInstaller,
+  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$BaselineVersion,
+  [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$BaselineSha256,
   [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+-beta\.\d+$')][string]$ExpectedVersion,
   [Parameter(Mandatory)][string]$LeagueInstaller,
-  [Parameter(Mandatory)][string]$LeagueBaselineInstaller
+  [Parameter(Mandatory)][string]$LeagueBaselineInstaller,
+  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+-beta\.\d+$')][string]$LeagueBaselineVersion,
+  [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$LeagueBaselineSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,8 +20,8 @@ $administrator = [Security.Principal.WindowsBuiltInRole]::Administrator
 if (!([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole($administrator)) {
   throw 'The hosted runner must be an administrator to exercise silent machine installation.'
 }
-if ((Get-FileHash -LiteralPath $BaselineInstaller).Hash -ne '583201413a2b31d94f3009766a22dfa6cda65ddb6eba3847d3895eefdf863c1e' -or
-    (Get-FileHash -LiteralPath $LeagueBaselineInstaller).Hash -ne 'e8e06419c5209647ca8f03b5357560d4a03409bbcc2ae8db93cf7dbae044f61b') {
+if ((Get-FileHash -LiteralPath $BaselineInstaller).Hash -ne $BaselineSha256 -or
+    (Get-FileHash -LiteralPath $LeagueBaselineInstaller).Hash -ne $LeagueBaselineSha256) {
   throw 'The published release-baseline identity did not match the expected published installers.'
 }
 if ([IO.Path]::GetFileName($Installer) -cne "MaxGameStudio_$($ExpectedVersion)_x64-setup.exe" -or
@@ -381,9 +385,9 @@ New-Item -ItemType Directory -Path $root, $mainData | Out-Null
 
 # NSIS parses /D from the end of the native command line, including spaces.
 Invoke-Installer $BaselineInstaller "/S /D=$($main.Old)"
-Assert-Installed $main HKCU '3.1.4' $main.Old
+Assert-Installed $main HKCU $BaselineVersion $main.Old
 Invoke-Installer $LeagueBaselineInstaller "/S /D=$($league.Old)"
-Assert-Installed $league HKCU '1.0.0-beta.1' $league.Old
+Assert-Installed $league HKCU $LeagueBaselineVersion $league.Old
 
 # Replay the real data-page handoff for the baseline, then let the packaged
 # app commit the new dedicated fixture profile before any scope transition.
@@ -481,13 +485,13 @@ try {
   }
 
   foreach ($product in $main, $league) {
-    $baselineVersion = if ($product.Name -eq 'Main') { '3.1.4' } else { '1.0.0-beta.1' }
+    $expectedPriorVersion = if ($product.Name -eq 'Main') { $BaselineVersion } else { $LeagueBaselineVersion }
     $block = Join-Path $product.Default 'foreign-fixture.txt'
     New-Item -ItemType Directory -Path $product.Default | Out-Null
     [IO.File]::WriteAllText($block, 'occupied machine destination')
     $blockHash = (Get-FileHash -LiteralPath $block).Hash
     Invoke-ScopeTransition $product -Rejected
-    Assert-Installed $product HKCU $baselineVersion $product.Old
+    Assert-Installed $product HKCU $expectedPriorVersion $product.Old
     Assert-Hash $block $blockHash
     $contents = @(Get-ChildItem -LiteralPath $product.Default -Force)
     if ((Test-Path -LiteralPath "HKLM:\$($product.Arp)") -or
@@ -502,7 +506,7 @@ try {
     if ($mediumCaller) {
       Assert-RetiredUserInstall $product
     } else {
-      Assert-Installed $product HKCU $baselineVersion $product.Old
+      Assert-Installed $product HKCU $expectedPriorVersion $product.Old
     }
     Write-InstalledSize $product
   }
@@ -513,7 +517,9 @@ try {
   $machineMainHash = (Get-FileHash -LiteralPath $machineMain).Hash
   $machineLeagueHash = (Get-FileHash -LiteralPath $machineLeague).Hash
   $machineLeagueArchiveHash = (Get-FileHash -LiteralPath $machineLeagueArchive).Hash
-  if ($machineMainHash -eq $oldMainHash -or $machineLeagueArchiveHash -eq $oldLeagueHash) {
+  # A same-version League scope reinstall can legitimately contain identical app.asar bytes.
+  if ($machineMainHash -eq $oldMainHash -or
+      ($leagueVersion -ne $LeagueBaselineVersion -and $machineLeagueArchiveHash -eq $oldLeagueHash)) {
     throw 'The machine programs did not contain the candidate application payloads.'
   }
 
@@ -527,8 +533,8 @@ try {
     if ($mediumCaller) { Assert-RetiredUserInstall $product }
   }
   if (!$mediumCaller) {
-    Assert-Installed $main HKCU '3.1.4' $main.Old
-    Assert-Installed $league HKCU '1.0.0-beta.1' $league.Old
+    Assert-Installed $main HKCU $BaselineVersion $main.Old
+    Assert-Installed $league HKCU $LeagueBaselineVersion $league.Old
     Assert-Hash (Join-Path $main.Old $main.Exe) $oldMainHash
     Assert-Hash (Join-Path $league.Old 'resources\app.asar') $oldLeagueHash
   }

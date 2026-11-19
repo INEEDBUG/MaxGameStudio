@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_run_id:
-        description: Candidate run ID, or published-3.1.4 for a repair-package retest
+        description: Candidate run ID, or published-stable to retest the current stable installer
         required: true
       candidate_version:
         description: Exact version produced by the candidate run
@@ -13,9 +13,9 @@ on:
         description: Private League candidate run from the same commit as Main (preferred)
         required: false
       league_tag:
-        description: Published League tag used only if no League run is specified (blank to omit)
+        description: Published League tag or published-beta (current beta) when no League run is specified (blank to omit)
         required: false
-        default: 'league-v1.0.0-beta.2'
+        default: 'published-beta'
       publish_beta:
         description: Publish the two exact private beta installers after verification
         type: boolean
@@ -39,21 +39,34 @@ jobs:
       - name: Verify the standard-user launcher and profile environment
         shell: pwsh
         run: ./packaging/windows/tests/verify-standard-user-launch.ps1
-      - name: Download stable repair package and completed candidate
+      - name: Verify baseline selection
+        run: node --test packaging/windows/release-baseline.test.mjs
+      - name: Download the current stable baseline and completed candidate
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_VERSION: ${{ inputs.candidate_version }}
         run: |
-          $baselineFile = 'MaxGameStudio_3.1.4_x64-repair-setup.exe'
-          gh release download v3.1.4 --repo $env:GITHUB_REPOSITORY --pattern $baselineFile --dir baseline
-          if ($LASTEXITCODE -ne 0) { throw 'Published repair package download failed' }
-          $baseline = (Resolve-Path -LiteralPath (Join-Path baseline $baselineFile)).Path
-          "MGS_BASELINE_INSTALLER=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          if ($env:CANDIDATE_RUN_ID -eq 'published-3.1.4') {
-            "MGS_CANDIDATE_INSTALLER=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "MGS_EXPECTED_VERSION=3.1.4" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $metadata = node packaging/windows/release-baseline.mjs main-stable
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current Main stable baseline.' }
+          $baseline = $metadata | ConvertFrom-Json
+          if ($env:CANDIDATE_RUN_ID -eq 'published-3.1.4' -and $baseline.version -ne '3.1.4') {
+            throw 'published-3.1.4 was an alias while 3.1.4 was current. Use published-stable to retest the current stable release.'
+          }
+          gh release download $baseline.tag --repo $env:GITHUB_REPOSITORY --pattern $baseline.name --dir baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Published Main stable baseline download failed.' }
+          $path = (Resolve-Path -LiteralPath (Join-Path baseline $baseline.name)).Path
+          if ((Get-Item -LiteralPath $path).Length -ne $baseline.size -or
+              (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $baseline.sha256) {
+            throw 'Downloaded Main baseline does not match the published installer metadata.'
+          }
+          "MGS_BASELINE_INSTALLER=$path" >> $env:GITHUB_ENV
+          "MGS_BASELINE_VERSION=$($baseline.version)" >> $env:GITHUB_ENV
+          "MGS_BASELINE_SHA256=$($baseline.sha256)" >> $env:GITHUB_ENV
+          if ($env:CANDIDATE_RUN_ID -in 'published-stable', 'published-3.1.4') {
+            "MGS_CANDIDATE_INSTALLER=$path" >> $env:GITHUB_ENV
+            "MGS_EXPECTED_VERSION=$($baseline.version)" >> $env:GITHUB_ENV
             exit 0
           }
           if ($env:CANDIDATE_RUN_ID -notmatch '^\d+$') { throw 'Invalid candidate run ID' }
@@ -99,30 +112,42 @@ jobs:
           "MGS_LEAGUE_INSTALLER=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MGS_LEAGUE_CANDIDATE_SHA=$($run.head_sha)" >> $env:GITHUB_ENV
       - name: Download and verify the published League installer
-        if: inputs.league_run_id == '' && inputs.candidate_run_id != 'published-3.1.4' && inputs.league_tag != ''
+        if: inputs.league_run_id == '' && inputs.candidate_run_id != 'published-stable' && inputs.candidate_run_id != 'published-3.1.4' && inputs.league_tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           LEAGUE_TAG: ${{ inputs.league_tag }}
         run: |
           $tag = $env:LEAGUE_TAG
-          if ($tag -cnotmatch '^league-v(\d+\.\d+\.\d+(?:-beta\.\d+)?)$') { throw 'Invalid League release tag.' }
-          $version = $Matches[1]
-          $filename = "MaxGameStudioLeague_$($version)_x64-setup.exe"
-          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag -or $release.draft -or $release.prerelease -ne ($version -like '*-beta.*')) {
-            throw 'Expected the exact published League release.'
-          }
-          $assets = @($release.assets | Where-Object { $_.name -ceq $filename })
-          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$filename"
-          if ($assets.Count -ne 1 -or $assets[0].browser_download_url -cne $url -or $assets[0].digest -notmatch '^sha256:[a-f0-9]{64}$') {
-            throw 'The exact League installer or its SHA-256 is missing.'
+          if ($tag -eq 'published-beta') {
+            $metadata = node packaging/windows/release-baseline.mjs league-beta
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current published League beta.' }
+            $published = $metadata | ConvertFrom-Json
+            $tag = $published.tag
+            $filename = $published.name
+            $digest = "sha256:$($published.sha256)"
+            $size = $published.size
+          } else {
+            if ($tag -cnotmatch '^league-v(\d+\.\d+\.\d+(?:-beta\.\d+)?)$') { throw 'Invalid League release tag.' }
+            $version = $Matches[1]
+            $filename = "MaxGameStudioLeague_$($version)_x64-setup.exe"
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag -or $release.draft -or $release.prerelease -ne ($version -like '*-beta.*')) {
+              throw 'Expected the exact published League release.'
+            }
+            $assets = @($release.assets | Where-Object { $_.name -ceq $filename })
+            $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$filename"
+            if ($assets.Count -ne 1 -or $assets[0].browser_download_url -cne $url -or $assets[0].digest -notmatch '^sha256:[a-f0-9]{64}$') {
+              throw 'The exact League installer or its SHA-256 is missing.'
+            }
+            $digest = $assets[0].digest
+            $size = $assets[0].size
           }
           gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $filename --dir league
           if ($LASTEXITCODE -ne 0) { throw 'League installer download failed.' }
           $path = (Resolve-Path -LiteralPath (Join-Path league $filename)).Path
           $sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-          if ("sha256:$sha" -ne $assets[0].digest -or (Get-Item -LiteralPath $path).Length -ne $assets[0].size) {
+          if ("sha256:$sha" -ne $digest -or (Get-Item -LiteralPath $path).Length -ne $size) {
             throw 'Downloaded League installer does not match GitHub release metadata.'
           }
           "MGS_LEAGUE_INSTALLER=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -174,32 +199,41 @@ jobs:
           $options = @{
             Installer = $env:MGS_CANDIDATE_INSTALLER
             BaselineInstaller = $env:MGS_BASELINE_INSTALLER
+            BaselineVersion = $env:MGS_BASELINE_VERSION
+            BaselineSha256 = $env:MGS_BASELINE_SHA256
             ExpectedVersion = $env:MGS_EXPECTED_VERSION
           }
           if ($env:MGS_LEAGUE_INSTALLER) { $options.LeagueInstaller = $env:MGS_LEAGUE_INSTALLER }
           ./packaging/windows/tests/verify-packaged-upgrade.ps1 @options
-      - name: Download the preceding League beta for scope upgrade acceptance
+      - name: Download current League beta baseline for scope upgrade acceptance
         if: inputs.league_run_id != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $filename = 'MaxGameStudioLeague_1.0.0-beta.1_x64-setup.exe'
-          gh release download league-v1.0.0-beta.1 --repo $env:GITHUB_REPOSITORY --pattern $filename --dir league-baseline
-          if ($LASTEXITCODE -ne 0) { throw 'League baseline download failed.' }
-          $path = (Resolve-Path -LiteralPath (Join-Path league-baseline $filename)).Path
-          if ((Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant() -cne 'e8e06419c5209647ca8f03b5357560d4a03409bbcc2ae8db93cf7dbae044f61b') {
-            throw 'League baseline does not match the released beta.1 installer.'
+          $metadata = node packaging/windows/release-baseline.mjs league-beta
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current League beta baseline.' }
+          $baseline = $metadata | ConvertFrom-Json
+          gh release download $baseline.tag --repo $env:GITHUB_REPOSITORY --pattern $baseline.name --dir league-baseline
+          if ($LASTEXITCODE -ne 0) { throw 'League beta baseline download failed.' }
+          $path = (Resolve-Path -LiteralPath (Join-Path league-baseline $baseline.name)).Path
+          if ((Get-Item -LiteralPath $path).Length -ne $baseline.size -or
+              (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $baseline.sha256) {
+            throw 'Downloaded League baseline does not match the published installer metadata.'
           }
           "MGS_LEAGUE_BASELINE=$path" >> $env:GITHUB_ENV
+          "MGS_LEAGUE_BASELINE_VERSION=$($baseline.version)" >> $env:GITHUB_ENV
+          "MGS_LEAGUE_BASELINE_SHA256=$($baseline.sha256)" >> $env:GITHUB_ENV
       - name: Verify all-users installation, scope upgrades and private profiles
         if: inputs.league_run_id != ''
         shell: pwsh
         run: |
           ./packaging/windows/tests/verify-all-users-install.ps1 `
             -Installer $env:MGS_CANDIDATE_INSTALLER -BaselineInstaller $env:MGS_BASELINE_INSTALLER `
+            -BaselineVersion $env:MGS_BASELINE_VERSION -BaselineSha256 $env:MGS_BASELINE_SHA256 `
             -ExpectedVersion $env:MGS_EXPECTED_VERSION -LeagueInstaller $env:MGS_LEAGUE_INSTALLER `
-            -LeagueBaselineInstaller $env:MGS_LEAGUE_BASELINE
+            -LeagueBaselineInstaller $env:MGS_LEAGUE_BASELINE -LeagueBaselineVersion $env:MGS_LEAGUE_BASELINE_VERSION `
+            -LeagueBaselineSha256 $env:MGS_LEAGUE_BASELINE_SHA256
       - name: Seal the exact verified beta files
         id: seal_beta
         if: success() && inputs.publish_beta

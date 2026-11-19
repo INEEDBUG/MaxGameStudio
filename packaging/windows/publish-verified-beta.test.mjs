@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { approvedBetas, publishFeeds, validatePreviousBeta, validateRecord, verifyRelease } from './publish-verified-beta.mjs'
+import { approvedBetas, publishFeeds, stableState, validatePreviousBeta, validateRecord, verifyRelease } from './publish-verified-beta.mjs'
 
 const sha256 = 'a'.repeat(64)
 const accepted = {
@@ -11,6 +11,36 @@ const accepted = {
     [[installer, sha256], [installer + candidateSidecar, sha256]]
   ))
 }
+
+test('beta promotion protects the public stable snapshot for later releases too', () => {
+  const version = '3.4.1'
+  const tag = 'v' + version
+  const name = 'MaxGameStudio_' + version + '_x64-setup.exe'
+  const url = 'https://github.com/INEEDBUG/MaxGameStudio/releases/download/' + tag + '/' + name
+  const manifest = {
+    version, product: 'maxgamestudio', channel: 'stable', tag_name: tag,
+    platforms: { 'windows-x86_64': { url, signature: 'signature-metadata' } },
+  }
+  const responses = {
+    'releases/latest': {
+      id: 734,
+      tag_name: tag,
+      draft: false,
+      prerelease: false,
+      assets: [{ name, size: 160, digest: 'sha256:' + sha256, state: 'uploaded', browser_download_url: url }],
+    },
+    'contents/latest.json?ref=updater': {
+      sha: 'b'.repeat(40),
+      encoding: 'base64',
+      content: Buffer.from(JSON.stringify(manifest)).toString('base64'),
+    },
+    'contents/league-latest.json?ref=updater': null,
+  }
+  const read = (path) => responses[path]
+  assert.deepEqual(stableState(read), [734, 'b'.repeat(40), null])
+  responses['releases/latest'].tag_name = 'v3.4.0'
+  assert.throws(() => stableState(read), /does not match the updater baseline/)
+})
 
 test('accepts only the exact versions and files sealed for this verifier run', () => {
   assert.doesNotThrow(() => validateRecord(accepted, '100'))

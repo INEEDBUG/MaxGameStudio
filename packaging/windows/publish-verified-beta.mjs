@@ -4,6 +4,8 @@ import { createReadStream, readFileSync, readdirSync, statSync, writeFileSync } 
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { decodeReleaseBaselineFeed, selectReleaseBaseline } from './release-baseline.mjs'
+
 import { createGithubUpdaterManifest, readUpdaterSignature } from '../../frontend/scripts/updater-manifest.mjs'
 
 const repository = 'INEEDBUG/MaxGameStudio'
@@ -92,13 +94,14 @@ function existingTag(beta, sourceSha) {
   return true
 }
 
-function stableState() {
-  const latest = api('releases/latest')
-  if (latest.tag_name !== 'v3.1.4') throw new Error('The expected stable Release is no longer latest.')
+export function stableState(read = api) {
+  const latest = read('releases/latest')
+  const stableFeed = read('contents/latest.json?ref=updater')
+  selectReleaseBaseline('main-stable', decodeReleaseBaselineFeed(stableFeed), latest)
   return [
     latest.id,
-    api('contents/latest.json?ref=updater').sha,
-    api('contents/league-latest.json?ref=updater', { optional: true })?.sha ?? null,
+    stableFeed.sha,
+    read('contents/league-latest.json?ref=updater', { optional: true })?.sha ?? null,
   ]
 }
 

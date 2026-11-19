@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$BaselineInstaller,
+  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$BaselineVersion,
+  [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$BaselineSha256,
   [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+(?:-(?:beta|rc)\.\d+)?$')][string]$ExpectedVersion,
   [string]$LeagueInstaller
 )
@@ -10,11 +12,12 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
   throw 'Packaged upgrade acceptance is restricted to ephemeral GitHub-hosted runners.'
 }
-$baselineHash = '583201413a2b31d94f3009766a22dfa6cda65ddb6eba3847d3895eefdf863c1e'
-if ((Get-FileHash -LiteralPath $BaselineInstaller).Hash -ne $baselineHash) {
-  throw 'The baseline is not the published 3.1.4 repair package.'
+if ((Get-FileHash -LiteralPath $BaselineInstaller).Hash -ne $BaselineSha256) {
+  throw 'The baseline does not match the verified published Main installer SHA-256.'
 }
-Write-Host ("Candidate installer SHA256: " + (Get-FileHash -LiteralPath $Installer).Hash)
+$candidateHash = (Get-FileHash -LiteralPath $Installer).Hash
+$retestPublishedBaseline = $ExpectedVersion -eq $BaselineVersion -and $candidateHash -eq $BaselineSha256
+Write-Host "Candidate installer SHA256: $candidateHash"
 $productKey = 'HKCU:\Software\cs2insightagent\MaxGameStudio'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MaxGameStudio'
 $storageKey = 'HKCU:\Software\MaxGameStudio\Storage'
@@ -24,7 +27,7 @@ $binaryName = 'cs2-insight-agent-desktop.exe'
 $defaultProgram = Join-Path $env:LOCALAPPDATA "MaxGameStudio\$binaryName"
 $pathsThatMustBeEmpty = @($productKey, $uninstallKey, $storageKey, $shortcutPath, $root, $defaultProgram)
 if ($LeagueInstaller) {
-  if ($ExpectedVersion -eq '3.1.4' -or
+  if ($retestPublishedBaseline -or
       [IO.Path]::GetFileName($LeagueInstaller) -cnotmatch '^MaxGameStudioLeague_(\d+\.\d+\.\d+(?:-beta\.\d+)?)_x64-setup\.exe$') {
     throw 'Coexistence requires a current Main candidate and the exact standalone League installer.'
   }
@@ -205,12 +208,15 @@ if ($LeagueInstaller) {
 Install-Package $BaselineInstaller "/S /D=$oldDirectory"
 $installed = Join-Path $oldDirectory $binaryName
 $oldUninstall = Get-ItemProperty -LiteralPath $uninstallKey
-if ($oldUninstall.DisplayVersion -ne '3.1.4' -or $oldUninstall.InstallLocation.Trim('"') -ne $oldDirectory) {
-  throw 'The stable repair package did not register in the fixture directory.'
+if ($oldUninstall.DisplayVersion -ne $BaselineVersion -or $oldUninstall.InstallLocation.Trim('"') -ne $oldDirectory) {
+  throw 'The published stable installer did not register the expected version in the fixture directory.'
 }
 $oldHash = (Get-FileHash -LiteralPath $installed).Hash
 $embedded = Join-Path $oldDirectory 'league-runtime\MaxGameStudioLeague.exe'
-if (-not (Test-Path -LiteralPath $embedded -PathType Leaf)) { throw 'Expected embedded executable in the stable baseline.' }
+$hadEmbedded = Test-Path -LiteralPath $embedded -PathType Leaf
+if ($BaselineVersion -eq '3.1.4' -and !$hadEmbedded) {
+  throw 'Expected embedded League executable in the 3.1.4 repair baseline.'
+}
 
 $python = Join-Path $oldDirectory 'python\python.exe'
 $fixture = Join-Path $root 'fixture.py'
@@ -246,8 +252,8 @@ New-ItemProperty -LiteralPath $storageKey -Name LocationV1 -Value $location | Ou
 & 'C:\Program Files\7-Zip\7z.exe' e $Installer "-o$expectedDirectory" $binaryName -y | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the candidate executable.' }
 # The candidate takes the normal manual overlay route (no /D or /UPDATE).
-# The published repair retest still exercises the stable updater's /P /UPDATE.
-if ($ExpectedVersion -eq '3.1.4') {
+# Reinstalling the exact published baseline exercises the stable updater's /P /UPDATE.
+if ($retestPublishedBaseline) {
   Install-Package $Installer '/P /UPDATE'
 } else {
   # Exercise the exact uninstall-key fallback when the publisher key was lost.
@@ -257,7 +263,7 @@ if ($ExpectedVersion -eq '3.1.4') {
 }
 $installedHash = (Get-FileHash -LiteralPath $installed).Hash
 $expectedHash = (Get-FileHash -LiteralPath (Join-Path $expectedDirectory $binaryName)).Hash
-if ($installedHash -ne $expectedHash -or ($ExpectedVersion -ne '3.1.4' -and $installedHash -eq $oldHash)) {
+if ($installedHash -ne $expectedHash -or (!$retestPublishedBaseline -and $installedHash -eq $oldHash)) {
   throw 'The original executable was not replaced by the selected candidate.'
 }
 if ((Get-ItemPropertyValue -LiteralPath $productKey -Name '(default)') -ne $oldDirectory) {
@@ -278,8 +284,10 @@ if ((Get-FileHash -LiteralPath (Join-Path $data 'cs2-insight.config.json')).Hash
 & $python -I -B $fixture verify $data
 if ($LASTEXITCODE -ne 0) { throw 'Candidate runtime cannot read the retained config and SQLite row.' }
 
-if ($ExpectedVersion -ne '3.1.4') {
-  if (Test-Path -LiteralPath $embedded) { throw 'Embedded League still occupies the program directory.' }
+if (!$retestPublishedBaseline) {
+  if ($hadEmbedded -and (Test-Path -LiteralPath $embedded)) {
+    throw 'Embedded League from the baseline still occupies the program directory.'
+  }
 
   # The native NSIS fixture checks the page's registry write separately. Seed
   # the same handoff here so the packaged executable verifies it end to end.
@@ -309,7 +317,7 @@ if ($ExpectedVersion -ne '3.1.4') {
     Stop-FixtureApp $app -TryClose
   }
 }
-Write-Host 'PACKAGED_UPGRADE_VERIFIED: repair package overlaid in place, registry and shortcut agree, and the synthetic data is readable.'
+Write-Host "PACKAGED_UPGRADE_VERIFIED: stable $BaselineVersion overlaid with $ExpectedVersion, registry and shortcut agree, and the synthetic data is readable."
 
 if ($LeagueInstaller) {
   $mainFiles = @{}
