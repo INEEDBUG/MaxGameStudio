@@ -1,4 +1,6 @@
 $ErrorActionPreference = 'Stop'
+# NSIS can inherit a PowerShell 7 module path. Use the modules for this Windows PowerShell process.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 . (Join-Path $PSScriptRoot 'retire-user-install.ps1')
 
 Add-Type -TypeDefinition @'

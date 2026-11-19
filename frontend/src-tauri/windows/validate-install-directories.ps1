@@ -5,6 +5,9 @@ param(
   [switch]$MachineFilesOnly
 )
 
+# NSIS can inherit PowerShell 7 module paths before starting Windows
+# PowerShell. Resolve built-in commands from this engine's own modules.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 $ErrorActionPreference = 'Stop'
 
 try {

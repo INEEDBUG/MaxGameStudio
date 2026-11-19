@@ -60,6 +60,16 @@ Function .onInit
   SetOutPath $INSTDIR
   StrCpy $installMode "CurrentUser"
   ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_MACHINE"
+  ${If} $0 == "check"
+    StrCpy $LeagueProgramPath $INSTDIR
+    Call LeagueCheckMachineDestination
+    ${If} $R7 == "0"
+      SetErrorLevel 0
+    ${Else}
+      SetErrorLevel 2
+    ${EndIf}
+    Quit
+  ${EndIf}
   ${If} $0 == "1"
     StrCpy $installMode "all"
   ${EndIf}
@@ -88,6 +98,15 @@ try {
     Write-Host "League NSIS include compiled in $mode mode."
     if ($mode -eq 'uninstaller') { Remove-Item -LiteralPath $out }
   }
+  $machine = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'MaxGameStudioLeagueToolbox'
+  $machineExisted = Test-Path -LiteralPath $machine
+  $env:MGS_LEAGUE_FIXTURE_MACHINE = 'check'
+  $checked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$machine" -WindowStyle Hidden -Wait -PassThru
+  if ($checked.ExitCode -ne 0 -or (Test-Path -LiteralPath $machine) -ne $machineExisted) {
+    throw "The read-only NSIS machine bridge did not approve its dedicated protected destination (exit $($checked.ExitCode))."
+  }
+  $env:MGS_LEAGUE_FIXTURE_MACHINE = $null
+  Write-Host 'League NSIS machine bridge approved the protected default without creating a directory.'
   $occupied = Join-Path $scratch 'wrong-folder'
   $empty = Join-Path $scratch 'empty-program'
   $overlap = Join-Path $main 'Overlapping Toolbox'

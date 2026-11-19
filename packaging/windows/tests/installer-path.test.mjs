@@ -434,3 +434,84 @@ SectionEnd
     assert.equal(readFileSync(join(path, 'fixture-payload.txt'), 'utf8'), 'permitted');
   }
 });
+
+test('machine preflight and signature check ignore incompatible inherited modules', { skip: !compiler || process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mgs-machine-guard-'));
+  const registry = `Software\\MaxGameStudioInstallerTests\\${randomUUID()}`;
+  const product = `MaxGameStudioGuardFixture-${randomUUID()}`;
+  const modulePath = join(root, 'Modules');
+  const securityModule = join(modulePath, 'Microsoft.PowerShell.Security');
+  mkdirSync(securityModule, { recursive: true });
+  writeFileSync(join(securityModule, 'Microsoft.PowerShell.Security.psd1'),
+    "@{ RootModule = 'Incompatible.psm1'; ModuleVersion = '7.0.0'; FunctionsToExport = @('Get-Acl', 'Get-AuthenticodeSignature') }");
+  writeFileSync(join(securityModule, 'Incompatible.psm1'),
+    "throw 'The fixture module is incompatible with Windows PowerShell.'\nfunction Get-Acl {}\nfunction Get-AuthenticodeSignature {}");
+
+  const windows = new URL('../../../frontend/src-tauri/windows/', import.meta.url);
+  const validator = join(root, 'validate-install-directories.ps1');
+  writeFileSync(validator, readFileSync(new URL('validate-install-directories.ps1', windows), 'utf8')
+    .replace("Join-Path $programFiles 'MaxGameStudio'", `Join-Path $programFiles '${product}'`)
+    .replaceAll('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', `${registry}\\Uninstall`)
+    .replaceAll('Software\\b1d9ab62-895c-574e-a779-36d3f2ee3611', `${registry}\\League`)
+    .replaceAll('Software\\cs2insightagent\\MaxGameStudio', `${registry}\\Main`)
+    .replaceAll('Software\\MaxGameStudio\\Storage', `${registry}\\Storage`));
+  const wrapper = readFileSync(new URL('directory-guard.nsh', windows), 'utf8')
+    .replace('${__FILEDIR__}\\validate-install-directories.ps1', validator)
+    .replace('Global\\MaxGameStudio.InstallDirectoryOwnership', 'Global\\MGSInstallerTest.' + randomUUID());
+  const script = join(root, 'guard.nsi');
+  const probe = join(root, 'guard.exe');
+  const trace = join(root, 'guard.txt');
+  const source = `Unicode true
+RequestExecutionLevel user
+SilentInstall silent
+OutFile "${probe}"
+!include LogicLib.nsh
+!include x64.nsh
+!define MGS_DUAL_SCOPE
+Var MGSSelectedDataDir
+Var MGSMachineScope
+Var MGSInnerInstaller
+${wrapper}
+Section
+  SetRegView 64
+  SetShellVarContext all
+  StrCpy $INSTDIR "$PROGRAMFILES64\\${product}"
+  StrCpy $MGSSelectedDataDir ""
+  StrCpy $MGSMachineScope 1
+  ReadEnvStr $MGSInnerInstaller "MGS_MACHINE_GUARD_INNER"
+  Call MGS_ReserveInstallationDirectories
+  StrCmp $R0 0 +3
+    SetErrorLevel 3
+    Quit
+  Call MGS_CheckProgramAndDataDirectories
+  FileOpen $9 "${trace}" w
+  FileWriteUTF16LE $9 "Windows PowerShell: $R6, status: $R0$\\r$\\n$R1"
+  FileClose $9
+  SetErrorLevel $R0
+SectionEnd
+Section Uninstall
+  Call un.MGS_ReserveInstallationDirectories
+SectionEnd
+`;
+  writeFileSync(script, '\ufeff' + source);
+  const build = spawnSync(resolve(compiler), ['/V2', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  for (const inner of ['0', '1']) {
+    const run = spawnSync(probe, ['/S'], {
+      env: {
+        ...process.env, APPDATA: join(root, 'Roaming'), LOCALAPPDATA: join(root, 'Local'),
+        PSModulePath: modulePath, MGS_MACHINE_GUARD_INNER: inner,
+      },
+      windowsHide: true, timeout: 25000,
+    });
+    const detail = existsSync(trace) ? readFileSync(trace, 'utf16le').trim() : String(run.error || '');
+    assert.equal(run.status, 0, `machine inner=${inner}: ${detail}`);
+  }
+
+  const powershell = join(process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const signatureScript = fileURLToPath(new URL('verify-webview2-bootstrapper.ps1', windows));
+  const signature = spawnSync(powershell, [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', signatureScript, '-Bootstrapper', probe,
+  ], { env: { ...process.env, PSModulePath: modulePath }, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  assert.equal(signature.status, 2, signature.stdout + signature.stderr);
+});
