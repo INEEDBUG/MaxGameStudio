@@ -1,5 +1,3 @@
-# MaxGameStudio English README
+# MaxGameStudio
 
-The English README is now the repository default: [README.md](./README.md).
-
-For Simplified Chinese, see [README.zh-CN.md](./README.zh-CN.md).
+[English README](./README.md) · [简体中文 README](./README.zh-CN.md)
