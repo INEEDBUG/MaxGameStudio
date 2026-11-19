@@ -282,7 +282,7 @@ FunctionEnd
 ; damaged files from the freshly installed runtime.
 Function CS2_ValidateBundledRuntime
   ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
+  ExecWait '"$INSTDIR\python\python.exe" -I -B "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
   ${If} ${Errors}
     StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
     Call CS2_AbortMigrationInstall
