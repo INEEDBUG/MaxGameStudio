@@ -36,6 +36,9 @@ jobs:
       - name: Verify the fixture process cleanup boundary
         shell: pwsh
         run: ./packaging/windows/tests/fixture-process-stop.test.ps1
+      - name: Verify the standard-user launcher and profile environment
+        shell: pwsh
+        run: ./packaging/windows/tests/verify-standard-user-launch.ps1
       - name: Download stable repair package and completed candidate
         shell: pwsh
         env:

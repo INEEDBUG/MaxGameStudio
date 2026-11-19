@@ -105,7 +105,7 @@ function Test-ScopePage($Product, $User, [string]$InstallerPath) {
   if (!$level -or $level.level -cne 'asInvoker') {
     throw "$($Product.Name) installer must start at the caller's level before the scope choice."
   }
-  $gui = Start-StandardProcess $User $InstallerPath (Split-Path -Parent $InstallerPath) -Visible
+  $gui = Start-StandardProcess $User $InstallerPath (Split-Path -Parent $InstallerPath) -Stage "$($Product.Name)-scope-page" -Visible
   try {
     Assert-StandardProcessOwner $gui $User
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -146,6 +146,7 @@ function Test-ScopePage($Product, $User, [string]$InstallerPath) {
 }
 
 . (Join-Path $PSScriptRoot 'fixture-process-stop.ps1')
+. (Join-Path $PSScriptRoot 'standard-user-fixture.ps1')
 function Stop-TestProcess([Diagnostics.Process]$Process) {
   Stop-CiFixtureProcess $Process -TryClose -GracefulMilliseconds 3000
 }
@@ -161,45 +162,10 @@ function Wait-Fixture([string]$Failure, [scriptblock]$Condition, [Diagnostics.Pr
   throw $Failure
 }
 
-function New-FixtureUser([string]$Role) {
-  # Keep the generated credential in SecureString and never pass it as an argument.
-  $name = 'MGSci-' + $Role + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-  $password = [Security.SecureString]::new()
-  foreach ($character in [char[]]'Ar2!') { $password.AppendChar($character) }
-  $alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-  for ($i = 0; $i -lt 28; $i++) {
-    $password.AppendChar($alphabet[[Security.Cryptography.RandomNumberGenerator]::GetInt32($alphabet.Length)])
-  }
-  $password.MakeReadOnly()
-  $user = New-LocalUser -Name $name -Password $password
-  $accounts.Add($user.SID)
-  $group = Get-LocalGroup -SID 'S-1-5-32-545'
-  if (!(Get-LocalGroupMember -Group $group | Where-Object { $_.SID -eq $user.SID })) {
-    Add-LocalGroupMember -Group $group -Member $user
-  }
-  return @{ Name = $name; SID = $user.SID.Value; Credential = [PSCredential]::new("$env:COMPUTERNAME\$name", $password) }
-}
-
 function Assert-StandardProcessOwner([Diagnostics.Process]$Process, $User) {
   if (![MgsAllUsersNative]::IsStandardUser($Process.Handle, $User.SID)) {
     throw 'The test process did not start under the expected standard-user token.'
   }
-}
-
-function Start-StandardProcess($User, [string]$Exe, [string]$Directory, [string]$Arguments = '', [switch]$Visible) {
-  $info = [Diagnostics.ProcessStartInfo]::new($Exe, $Arguments)
-  $info.WorkingDirectory = $Directory
-  $info.UseShellExecute = $false
-  $info.UserName = $User.Name
-  $info.Domain = $env:COMPUTERNAME
-  $info.Password = $User.Credential.Password
-  $info.LoadUserProfile = $true
-  if (!$Visible) {
-    $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    $info.CreateNoWindow = $true
-  }
-  # Keep Environment untouched so Windows constructs it from the target profile.
-  return [Diagnostics.Process]::Start($info)
 }
 
 function Test-BusyMainMachine([Diagnostics.Process]$Running) {
@@ -225,7 +191,7 @@ function Test-BusyMainMachine([Diagnostics.Process]$Running) {
 }
 
 function Open-StandardProfiles($User, [switch]$CheckMachineBusy) {
-  $standardMain = Start-StandardProcess $User (Join-Path $main.Default $main.Exe) $main.Default
+  $standardMain = Start-StandardProcess $User (Join-Path $main.Default $main.Exe) $main.Default -Stage 'main-first-run'
   try {
     Assert-StandardProcessOwner $standardMain $User
     $hku = "Registry::HKEY_USERS\$($User.SID)"
@@ -246,7 +212,7 @@ function Open-StandardProfiles($User, [switch]$CheckMachineBusy) {
     Stop-TestProcess $standardMain
   }
 
-  $standardLeague = Start-StandardProcess $User (Join-Path $league.Default $league.Exe) $league.Default
+  $standardLeague = Start-StandardProcess $User (Join-Path $league.Default $league.Exe) $league.Default -Stage 'league-first-run'
   try {
     Assert-StandardProcessOwner $standardLeague $User
     $profileKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($User.SID)"
@@ -297,47 +263,6 @@ function Test-StandardScopePages($User) {
       Remove-Item -LiteralPath $folder
     }
   }
-}
-
-function Test-StandardUserAccess($User, [string[]]$Own, [string[]]$Other) {
-  # The encoded script contains only fixture paths and a SID. The password is
-  # passed only through PSCredential to the Windows logon API.
-  $ownPaths = ($Own | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
-  $otherPaths = ($Other | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
-  $probe = @'
-$ErrorActionPreference = 'Stop'
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-if ($identity.User.Value -ne '@USER_SID@' -or
-    ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  exit 10
-}
-$profileKey = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($identity.User.Value)"
-$profile = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $profileKey -Name ProfileImagePath))
-if ($env:USERPROFILE -ne $profile -or $env:APPDATA -ne (Join-Path $profile 'AppData\Roaming')) { exit 14 }
-foreach ($file in @(@OWN_PATHS@)) {
-  [IO.File]::WriteAllText($file, 'synthetic private profile')
-  if ([IO.File]::ReadAllText($file) -cne 'synthetic private profile') { exit 11 }
-}
-foreach ($file in @(@OTHER_PATHS@)) {
-  try {
-    $handle = [IO.File]::OpenRead($file)
-    $handle.Dispose()
-    exit 12
-  } catch {
-    if ($_.Exception.GetBaseException() -isnot [UnauthorizedAccessException]) { exit 13 }
-  }
-}
-exit 0
-'@
-  $probe = $probe.Replace('@USER_SID@', $User.SID).Replace('@OWN_PATHS@', $ownPaths).Replace('@OTHER_PATHS@', $otherPaths)
-  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
-  $windowsPowerShell = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-  $process = Start-StandardProcess $User $windowsPowerShell "$env:WINDIR\System32" "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"
-  if (!$process.WaitForExit(30000)) {
-    Stop-TestProcess $process
-    throw 'Timed out validating private profile access.'
-  }
-  if ($process.ExitCode -ne 0) { throw "Standard-user profile access check failed (exit $($process.ExitCode))." }
 }
 
 function Invoke-MediumFixture([string]$Label, [string]$Exe = '', [string]$Arguments = '', [int]$Seconds = 12) {
@@ -502,8 +427,8 @@ $oldLeagueHash = (Get-FileHash -LiteralPath (Join-Path $league.Old 'resources\ap
 
 $accounts = [Collections.Generic.List[Security.Principal.SecurityIdentifier]]::new()
 try {
-  $first = New-FixtureUser 'A'
-  $second = New-FixtureUser 'B'
+  $first = New-FixtureUser 'A' $accounts
+  $second = New-FixtureUser 'B' $accounts
   Test-StandardUserAccess $first @() @()
   Test-StandardUserAccess $second @() @()
   Test-StandardScopePages $first
