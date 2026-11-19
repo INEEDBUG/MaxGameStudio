@@ -7,6 +7,14 @@ function Write-MainInstallDiagnostic {
     registered = Test-Path -LiteralPath "HKLM:\$ArpKey"
     administrator = ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   } | ConvertTo-Json -Compress))
+  if (Test-Path -LiteralPath $Program -PathType Container) {
+    $remaining = @(Get-ChildItem -LiteralPath $Program -Force -Recurse)
+    $files = @($remaining | Where-Object { !$_.PSIsContainer })
+    Write-Host ('MAIN_REMAINING_SUMMARY: ' + (@{ entries = $remaining.Count; files = $files.Count; bytes = ($files | Measure-Object Length -Sum).Sum } | ConvertTo-Json -Compress))
+    foreach ($item in ($remaining | Select-Object -First 25)) {
+      Write-Host ('MAIN_REMAINING_ENTRY: ' + (@{ path = $item.FullName.Substring($Program.Length); directory = $item.PSIsContainer; bytes = $item.Length; attributes = [string]$item.Attributes } | ConvertTo-Json -Compress))
+    }
+  }
   $windowsPowerShell = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
   $validator = Join-Path $PSScriptRoot '../../../frontend/src-tauri/windows/validate-install-directories.ps1'
   foreach ($mode in @('direct', 'inner')) {
