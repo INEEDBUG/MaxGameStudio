@@ -5,10 +5,22 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+native-http = ["dep:futures-util", "dep:http-body-util", "dep:hyper", "dep:hyper-util", "dep:tokio"]
+
 [dependencies]
 form_urlencoded = "=1.2.2"
+futures-util = { version = "=0.3.32", default-features = false, features = ["std"], optional = true }
+http-body-util = { version = "=0.1.3", optional = true }
+hyper = { version = "=1.9.0", features = ["http1", "server"], optional = true }
+hyper-util = { version = "=0.1.20", features = ["tokio"], optional = true }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 subtle = "=2.6.1"
 tempfile = "=3.27.0"
+tokio = { version = "=1.52.3", features = ["net", "rt", "sync", "time"], optional = true }
+
+[[bin]]
+name = "maxgamestudio-native-http"
+required-features = ["native-http"]

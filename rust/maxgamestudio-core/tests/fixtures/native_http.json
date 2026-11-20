@@ -1,0 +1,635 @@
+{
+  "version": "3.2.0-parity",
+  "cases": [
+    {
+      "name": "health is public",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "a desktop token does not gate health",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "X-CS2-Insight-Token": "synthetic-token"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "empty readiness",
+      "method": "GET",
+      "path": "/api/gsi/status",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ready": false,
+        "last_payload_at": 0.0,
+        "last_ready_at": 0.0,
+        "last_payload": {}
+      }
+    },
+    {
+      "name": "empty guest GSI",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ok": true,
+        "ready": false
+      }
+    },
+    {
+      "name": "explicit null is allowed",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "null",
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ok": true,
+        "ready": false
+      }
+    },
+    {
+      "name": "ready guest GSI",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"map\":{\"name\":\"fixture_map\"},\"player\":{\"name\":\"\u73a9\u5bb6\"}}",
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ok": true,
+        "ready": true
+      }
+    },
+    {
+      "name": "guest status observes ready payload",
+      "method": "GET",
+      "path": "/api/gsi/status",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ready": true,
+        "last_payload_at": "<positive monotonic time>",
+        "last_ready_at": "<positive monotonic time>",
+        "last_payload": {
+          "map": {
+            "name": "fixture_map"
+          },
+          "player": {
+            "name": "\u73a9\u5bb6"
+          }
+        }
+      }
+    },
+    {
+      "name": "loading payload does not reset overall readiness",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"player\":{\"activity\":\"loading\"}}",
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ok": true,
+        "ready": false
+      }
+    },
+    {
+      "name": "status keeps the previous ready timestamp",
+      "method": "GET",
+      "path": "/api/gsi/status",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ready": true,
+        "last_payload_at": "<positive monotonic time>",
+        "last_ready_at": "<positive monotonic time>",
+        "last_payload": {
+          "player": {
+            "activity": "loading"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid object payload",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "[]",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid boolean payload",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "true",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid string payload",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "\"text\"",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed JSON",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"map\":",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "json_invalid",
+            "loc": [
+              "body",
+              7
+            ],
+            "msg": "JSON decode error",
+            "input": {},
+            "ctx": {
+              "error": "Expecting value"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "JSON followed by junk",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{}more",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "json_invalid",
+            "loc": [
+              "body",
+              2
+            ],
+            "msg": "JSON decode error",
+            "input": {},
+            "ctx": {
+              "error": "Extra data"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "body without content type",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {},
+      "body": "{}",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "plain text body",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "body": "{\"map\": {\"round\": 0}}",
+      "status": 422,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary",
+            "input": "{\"map\": {\"round\": 0}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid requests leave stored readiness unchanged",
+      "method": "GET",
+      "path": "/api/gsi/status",
+      "headers": {},
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ready": true,
+        "last_payload_at": "<positive monotonic time>",
+        "last_ready_at": "<positive monotonic time>",
+        "last_payload": {
+          "player": {
+            "activity": "loading"
+          }
+        }
+      }
+    },
+    {
+      "name": "vendor JSON type",
+      "method": "POST",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Content-Type": "application/vnd.fixture+json; charset=UTF-8"
+      },
+      "body": "{}",
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "ok": true,
+        "ready": false
+      }
+    },
+    {
+      "name": "health HEAD",
+      "method": "HEAD",
+      "path": "/api/health",
+      "headers": {},
+      "body": null,
+      "status": 405,
+      "response_headers": {
+        "allow": "GET",
+        "content-type": "application/json"
+      },
+      "response_text": ""
+    },
+    {
+      "name": "incorrect method has Allow",
+      "method": "PUT",
+      "path": "/api/gsi/cs2",
+      "headers": {},
+      "body": null,
+      "status": 405,
+      "response_headers": {
+        "allow": "POST",
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": "Method Not Allowed"
+      }
+    },
+    {
+      "name": "unknown route does not claim success",
+      "method": "GET",
+      "path": "/api/demos",
+      "headers": {},
+      "body": null,
+      "status": 404,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "name": "desktop response allows its own origin",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "http://tauri.localhost"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json",
+        "access-control-allow-origin": "http://tauri.localhost",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "https desktop origin",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "https://tauri.localhost"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json",
+        "access-control-allow-origin": "https://tauri.localhost",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "tauri protocol origin",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "tauri://localhost"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json",
+        "access-control-allow-origin": "tauri://localhost",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "Vite localhost origin",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "http://localhost:5173"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json",
+        "access-control-allow-origin": "http://localhost:5173",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "Vite numeric loopback origin",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "http://127.0.0.1:5173"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json",
+        "access-control-allow-origin": "http://127.0.0.1:5173",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "unknown origin is not readable by the browser",
+      "method": "GET",
+      "path": "/api/health",
+      "headers": {
+        "Origin": "https://example.invalid"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "content-type": "application/json"
+      },
+      "response_json": {
+        "status": "ok",
+        "version": "3.2.0-parity"
+      }
+    },
+    {
+      "name": "allowed preflight mirrors requested headers",
+      "method": "OPTIONS",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Origin": "http://tauri.localhost",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-CS2-Insight-Token"
+      },
+      "body": null,
+      "status": 200,
+      "response_headers": {
+        "vary": "Origin",
+        "access-control-allow-methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+        "access-control-max-age": "600",
+        "access-control-allow-origin": "http://tauri.localhost",
+        "access-control-allow-headers": "Content-Type, X-CS2-Insight-Token",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "response_text": "OK"
+    },
+    {
+      "name": "disallowed preflight origin",
+      "method": "OPTIONS",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Origin": "https://example.invalid",
+        "Access-Control-Request-Method": "POST"
+      },
+      "body": null,
+      "status": 400,
+      "response_headers": {
+        "vary": "Origin",
+        "access-control-allow-methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+        "access-control-max-age": "600",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "response_text": "Disallowed CORS origin"
+    },
+    {
+      "name": "disallowed preflight method",
+      "method": "OPTIONS",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Origin": "http://tauri.localhost",
+        "Access-Control-Request-Method": "TRACE"
+      },
+      "body": null,
+      "status": 400,
+      "response_headers": {
+        "vary": "Origin",
+        "access-control-allow-methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+        "access-control-max-age": "600",
+        "access-control-allow-origin": "http://tauri.localhost",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "response_text": "Disallowed CORS method"
+    },
+    {
+      "name": "disallowed private network preflight",
+      "method": "OPTIONS",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Origin": "http://tauri.localhost",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Private-Network": "true"
+      },
+      "body": null,
+      "status": 400,
+      "response_headers": {
+        "vary": "Origin",
+        "access-control-allow-methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+        "access-control-max-age": "600",
+        "access-control-allow-origin": "http://tauri.localhost",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "response_text": "Disallowed CORS private-network"
+    },
+    {
+      "name": "ordinary options has no preflight",
+      "method": "OPTIONS",
+      "path": "/api/gsi/cs2",
+      "headers": {
+        "Origin": "http://tauri.localhost"
+      },
+      "body": null,
+      "status": 405,
+      "response_headers": {
+        "allow": "POST",
+        "content-type": "application/json",
+        "access-control-allow-origin": "http://tauri.localhost",
+        "vary": "Origin"
+      },
+      "response_json": {
+        "detail": "Method Not Allowed"
+      }
+    }
+  ]
+}
