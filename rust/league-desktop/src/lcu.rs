@@ -1,6 +1,7 @@
 //! Narrow HTTPS reads from an already verified local League client.
 
-use maxgamestudio_league_core::resg::select_resg_champion;
+use crate::aram_automation::{AramOptions, ScheduledAction, SelectionLists};
+use maxgamestudio_league_core::{auto_select::AutoSelectAction, resg::select_resg_champion};
 use reqwest::{redirect::Policy, Client, RequestBuilder, StatusCode};
 use rustls::pki_types::{pem::PemObject, CertificateDer};
 use rustls::{client::Resumption, crypto::ring, ClientConfig, RootCertStore};
@@ -42,6 +43,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 #[path = "player_search.rs"]
 pub(crate) mod player_search;
+
+#[path = "game_data.rs"]
+pub(crate) mod game_data;
 
 /// Borrow the port and token that trusted desktop discovery verified for the same client generation.
 pub(crate) struct LcuTarget<'a> {
@@ -114,6 +118,10 @@ pub(crate) struct GameflowSession {
 }
 
 impl GameflowSession {
+    pub(crate) fn is_aram(&self) -> bool {
+        matches!(self.game_mode(), Some("ARAM" | "KIWI"))
+    }
+
     pub(crate) fn is_hextech_aram(&self) -> bool {
         self.game_mode() == Some("KIWI")
     }
@@ -169,6 +177,11 @@ enum ReadEndpoint {
     CurrentSummoner,
     GameflowSession,
     ChampSelect,
+    ChampionGrid,
+    Pickable,
+    Bannable,
+    Subset,
+    GameData(game_data::GameDataEndpoint),
 }
 
 impl ReadEndpoint {
@@ -178,6 +191,11 @@ impl ReadEndpoint {
             Self::CurrentSummoner => "/lol-summoner/v1/current-summoner",
             Self::GameflowSession => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
+            Self::ChampionGrid => "/lol-champ-select/v1/all-grid-champions",
+            Self::Pickable => "/lol-champ-select/v1/pickable-champion-ids",
+            Self::Bannable => "/lol-champ-select/v1/bannable-champion-ids",
+            Self::Subset => "/lol-lobby-team-builder/champ-select/v1/subset-champion-list",
+            Self::GameData(endpoint) => endpoint.path(),
         }
     }
 
@@ -186,6 +204,9 @@ impl ReadEndpoint {
             Self::Phase => 1024,
             Self::CurrentSummoner => 16 * 1024,
             Self::GameflowSession | Self::ChampSelect => 256 * 1024,
+            Self::ChampionGrid => 512 * 1024,
+            Self::Pickable | Self::Bannable | Self::Subset => 16 * 1024,
+            Self::GameData(endpoint) => endpoint.body_limit(),
         }
     }
 }
@@ -253,6 +274,89 @@ impl LcuTransport {
             .read(target, ReadEndpoint::ChampSelect)
             .await?
             .unwrap_or(Value::Null))
+    }
+
+    pub(crate) async fn read_selection_lists(
+        &self,
+        target: &LcuTarget<'_>,
+        options: &AramOptions,
+        has_subset: bool,
+    ) -> Result<SelectionLists, LcuError> {
+        let mut lists = SelectionLists {
+            grid: self
+                .read(target, ReadEndpoint::ChampionGrid)
+                .await?
+                .unwrap_or(Value::Null),
+            ..Default::default()
+        };
+        if options.want_pick() {
+            lists.pickable = self
+                .read(target, ReadEndpoint::Pickable)
+                .await?
+                .unwrap_or(Value::Null);
+            if has_subset {
+                lists.subset = self
+                    .read(target, ReadEndpoint::Subset)
+                    .await?
+                    .unwrap_or(Value::Null);
+            }
+        }
+        if options.want_ban() {
+            lists.bannable = self
+                .read(target, ReadEndpoint::Bannable)
+                .await?
+                .unwrap_or(Value::Null);
+        }
+        Ok(lists)
+    }
+
+    pub(crate) async fn apply_selection(
+        &self,
+        target: &LcuTarget<'_>,
+        step: ScheduledAction,
+    ) -> Result<(), LcuError> {
+        let address = format!("https://127.0.0.1:{}", target.port);
+        let champion = step.champion;
+        let patch = |id: i64, body: Value| {
+            self.client
+                .patch(format!(
+                    "{address}/lol-champ-select/v1/session/actions/{id}"
+                ))
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.to_string())
+        };
+        let request = match step.action {
+            AutoSelectAction::Intent { action_id } => {
+                patch(action_id, json!({"championId": champion}))
+            }
+            AutoSelectAction::Pick {
+                action_id,
+                completed,
+            } => patch(
+                action_id,
+                json!({"championId": champion, "type": "pick", "completed": completed}),
+            ),
+            AutoSelectAction::Ban {
+                action_id,
+                completed,
+            } => patch(
+                action_id,
+                json!({"championId": champion, "type": "ban", "completed": completed}),
+            ),
+            AutoSelectAction::BenchSwap => self.client.post(format!(
+                "{address}/lol-champ-select/v1/session/bench/swap/{champion}"
+            )),
+        };
+        let response = request
+            .basic_auth("riot", Some(target.token))
+            .timeout(Duration::from_secs(1))
+            .send()
+            .await
+            .map_err(request_error)?;
+        if !response.status().is_success() {
+            return Err(LcuError::UnexpectedStatus(response.status().as_u16()));
+        }
+        Ok(())
     }
 
     fn request(&self, target: &LcuTarget<'_>, read: ReadEndpoint) -> RequestBuilder {

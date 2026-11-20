@@ -1,14 +1,18 @@
 //! Disconnect-safe snapshots from the local League client for the existing renderer.
 
 use crate::{
+    aram_automation::{AramOptions, AramSchedule, SelectionScope},
     client_discovery::{discover_clients, ClientInstance, LocalClient},
     desktop::emit,
-    lcu::{player_search::PlayerSearchShard, LcuError, LcuTransport},
+    lcu::{player_search::PlayerSearchShard, GameflowSession, LcuError, LcuTransport},
     resg_window::{ResgAction, ResgWindow},
 };
 pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
-use serde_json::{json, Value};
-use std::{sync::Mutex, time::Duration};
+use serde_json::{json, Map, Value};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tauri::{AppHandle, Manager};
 
 const CLIENT_DISCOVERY: &str = "league-client-ux-main";
@@ -28,6 +32,11 @@ struct ActiveClient {
     summoner: Value,
     resg: Option<ResgTarget>,
     shard: Option<PlayerSearchShard>,
+}
+
+struct Sample {
+    client: ActiveClient,
+    selection: Option<(GameflowSession, Value)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,6 +114,52 @@ struct RuntimeState {
     manual_client: Option<ClientInstance>,
     manually_disconnected: bool,
     snapshot: Snapshot,
+    aram_options: AramOptions,
+    aram_paused: bool,
+    aram: AramSchedule,
+    data_client: Option<ClientInstance>,
+    data_ticket: u64,
+    data_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    game_data: Map<String, Value>,
+}
+
+pub(crate) fn empty_game_data() -> Value {
+    json!({
+        "champions":{},"augments":{},"perks":{},"perkstyles":{"schemaVersion":0,"styles":{}},
+        "queues":{},"items":{},"summonerSpells":{},"gameModeMutators":{},"maps":{},
+    })
+}
+
+impl RuntimeState {
+    fn refresh_game_data(&mut self, app: &AppHandle) {
+        let active = self.snapshot.active.as_ref().map(|client| client.instance);
+        if self.data_client == active {
+            return;
+        }
+        self.data_client = active;
+        self.data_ticket += 1;
+        if let Some(task) = self.data_task.take() {
+            task.abort();
+        }
+        let defaults = empty_game_data();
+        for (key, _) in std::mem::take(&mut self.game_data) {
+            publish_property(
+                app,
+                CLIENT,
+                "gameData",
+                &key,
+                &defaults[&key],
+                self.revision,
+            );
+        }
+        if let Some(client) = active {
+            self.data_task = Some(tauri::async_runtime::spawn(load_game_data(
+                app.clone(),
+                client,
+                self.data_ticket,
+            )));
+        }
+    }
 }
 
 pub(crate) struct ClientRuntime {
@@ -114,11 +169,12 @@ pub(crate) struct ClientRuntime {
 }
 
 impl ClientRuntime {
-    pub(crate) fn new(auto_connect: bool) -> Result<Self, LcuError> {
+    pub(crate) fn new(auto_connect: bool, aram_options: AramOptions) -> Result<Self, LcuError> {
         Ok(Self {
             transport: LcuTransport::new()?,
             state: Mutex::new(RuntimeState {
                 auto_connect,
+                aram_options,
                 ..Default::default()
             }),
             wake: tokio::sync::Notify::new(),
@@ -131,6 +187,14 @@ impl ClientRuntime {
         name: &str,
     ) -> Result<Option<(u64, Value)>, &'static str> {
         let state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        if (namespace, name) == (CLIENT, "gameData") {
+            let mut fields = empty_game_data();
+            fields
+                .as_object_mut()
+                .expect("known game data fields")
+                .extend(state.game_data.clone());
+            return Ok(Some((state.revision, fields)));
+        }
         Ok(state
             .snapshot
             .fields(namespace, name)
@@ -143,6 +207,40 @@ impl ClientRuntime {
 
     pub(crate) fn refresh_soon(&self) {
         self.wake.notify_one();
+    }
+
+    pub(crate) fn replace_aram_options(&self, options: AramOptions) -> Result<(), &'static str> {
+        let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        state.aram_options = options;
+        state.aram.cancel();
+        state.generation += 1;
+        self.refresh_soon();
+        Ok(())
+    }
+
+    pub(crate) fn aram_paused(&self) -> Result<(u64, bool), &'static str> {
+        let state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        Ok((state.revision, state.aram_paused))
+    }
+
+    pub(crate) fn pause_aram(&self, app: &AppHandle, paused: bool) -> Result<(), &'static str> {
+        let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        if state.aram_paused != paused {
+            state.aram_paused = paused;
+            state.aram.cancel();
+            state.generation += 1;
+            state.revision += 1;
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = emit(
+                    &main,
+                    "mobx-utils-main",
+                    "update-state-prop/auto-select-main:state",
+                    json!(["temporarilyDisabled", paused, {"action":"update","raw":false,"revision":state.revision}]),
+                );
+            }
+            self.refresh_soon();
+        }
+        Ok(())
     }
 
     pub(crate) async fn lookup_player(&self, shard: &str, input: &str) -> Result<Value, String> {
@@ -223,12 +321,14 @@ impl ClientRuntime {
         state.generation += 1;
         state.manual_client = selection;
         state.manually_disconnected = selection.is_none();
+        state.aram.reset();
         let previous = Snapshot {
             active: state.snapshot.active.take(),
             known_clients: state.snapshot.known_clients.clone(),
         };
         state.revision += 1;
         publish_changes(app, &previous, &state.snapshot, state.revision);
+        state.refresh_game_data(app);
         self.wake.notify_one();
         Ok(())
     }
@@ -239,7 +339,8 @@ impl ClientRuntime {
         resg_enabled: bool,
         previous_chart: Option<ResgTarget>,
         previous_shard: Option<(String, PlayerSearchShard)>,
-    ) -> Result<Option<ActiveClient>, LcuError> {
+        automate: bool,
+    ) -> Result<Option<Sample>, LcuError> {
         if !client.alive() {
             return Ok(None);
         }
@@ -270,6 +371,22 @@ impl ClientRuntime {
                 .and_then(Result::ok)
             };
         }
+        let should_read = phase == "ChampSelect"
+            && session.as_ref().is_some_and(|game| {
+                (automate && game.is_aram()) || (resg_enabled && game.is_hextech_aram())
+            });
+        let selection = if should_read {
+            // The optional reads should leave time to publish connected state.
+            tokio::time::timeout(
+                Duration::from_millis(750),
+                self.transport.read_champ_select(&target),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+        } else {
+            None
+        };
         let mut resg = None;
         if let Some(game) = session
             .as_ref()
@@ -280,21 +397,14 @@ impl ClientRuntime {
                 .as_ref()
                 .and_then(|data| data.game_id)
                 .filter(|&id| id != 0);
-            let selection = if phase == "ChampSelect" {
-                // An optional chart request cannot hold up the connection status.
-                tokio::time::timeout(
-                    Duration::from_millis(750),
-                    self.transport.read_champ_select(&target),
-                )
-                .await
-                .ok()
-                .and_then(Result::ok)
+            let chart_selection = if phase == "ChampSelect" {
+                selection.as_ref()
             } else {
-                Some(Value::Null)
+                Some(&Value::Null)
             };
-            resg = if let Some(selection) = selection {
+            resg = if let Some(selection) = chart_selection {
                 let puuid = summoner.as_ref().map(|player| player.puuid.as_str());
-                game.resg_champion(&selection, puuid)
+                game.resg_champion(selection, puuid)
                     .map(|champion_id| ResgTarget {
                         instance: client.instance,
                         game_id,
@@ -309,18 +419,26 @@ impl ClientRuntime {
                 })
             };
         }
-        Ok(client.alive().then(|| ActiveClient {
-            instance: client.instance,
-            phase,
-            session: json!(session),
-            summoner: json!(summoner),
-            resg,
-            shard,
+        Ok(client.alive().then(|| {
+            let client = ActiveClient {
+                instance: client.instance,
+                phase,
+                session: json!(session),
+                summoner: json!(summoner),
+                resg,
+                shard,
+            };
+            let selection = if automate {
+                session.zip(selection)
+            } else {
+                None
+            };
+            Sample { client, selection }
         }))
     }
 
     async fn refresh(&self, app: &AppHandle, resg_enabled: bool) {
-        let (generation, manual, connected, auto_connect, previous_chart, previous_shard) = {
+        let (generation, manual, connected, auto_connect, previous_chart, previous_shard, options) = {
             let Ok(state) = self.state.lock() else {
                 return;
             };
@@ -340,6 +458,8 @@ impl ClientRuntime {
                         client.shard.clone()?,
                     ))
                 }),
+                (!state.aram_paused && state.aram_options.any_enabled())
+                    .then(|| state.aram_options.clone()),
             )
         };
         let clients = tauri::async_runtime::spawn_blocking(discover_clients)
@@ -355,7 +475,7 @@ impl ClientRuntime {
                 .and_then(find_client)
                 .or_else(|| (auto_connect && clients.len() == 1).then(|| &clients[0]))
         };
-        let active = match candidate {
+        let sample = match candidate {
             Some(client) => tokio::time::timeout(
                 Duration::from_secs(4),
                 self.sample(
@@ -363,6 +483,7 @@ impl ClientRuntime {
                     resg_enabled,
                     previous_chart,
                     previous_shard.filter(|_| Some(client.instance) == connected),
+                    options.is_some(),
                 ),
             )
             .await
@@ -371,16 +492,23 @@ impl ClientRuntime {
             .flatten(),
             None => None,
         };
+        let (active, selection) = match sample {
+            Some(sample) => (Some(sample.client), sample.selection),
+            None => (None, None),
+        };
         let mut known_clients: Vec<_> = clients.iter().map(|client| client.instance).collect();
         known_clients.sort_unstable();
         let snapshot = Snapshot {
             known_clients,
             active,
         };
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        if generation == state.generation {
+        {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            if state.generation != generation {
+                return;
+            }
             if snapshot.active.is_some()
                 || state
                     .manual_client
@@ -393,7 +521,127 @@ impl ClientRuntime {
                 publish_changes(app, &state.snapshot, &snapshot, state.revision);
                 state.snapshot = snapshot;
             }
+            state.refresh_game_data(app);
+            if state
+                .snapshot
+                .active
+                .as_ref()
+                .is_none_or(|client| client.phase != "ChampSelect")
+            {
+                state.aram.reset();
+            } else if selection.is_none() {
+                state.aram.cancel();
+            }
         }
+        if let (Some(client), Some(options), Some((flow, select))) = (candidate, options, selection)
+        {
+            self.automate_aram(generation, client, &flow, &select, &options)
+                .await;
+        }
+    }
+
+    async fn automate_aram(
+        &self,
+        generation: u64,
+        client: &LocalClient,
+        flow: &GameflowSession,
+        select: &Value,
+        options: &AramOptions,
+    ) {
+        let cancel = || {
+            if let Ok(mut state) = self.state.lock() {
+                if state.generation == generation {
+                    state.aram.cancel();
+                }
+            }
+        };
+        let Some(scope) = SelectionScope::from_sample(client.instance, flow, select) else {
+            return cancel();
+        };
+        let Ok(target) = client.target() else {
+            return cancel();
+        };
+        let Ok(Ok(lists)) = tokio::time::timeout(
+            Duration::from_millis(1200),
+            self.transport.read_selection_lists(
+                &target,
+                options,
+                select["allowSubsetChampionPicks"] == true,
+            ),
+        )
+        .await
+        else {
+            return cancel();
+        };
+        let due = {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            if state.generation != generation || state.aram_paused {
+                return;
+            }
+            state
+                .aram
+                .observe(scope, flow, select, &lists, options, Instant::now())
+        };
+        let Some(due) = due else {
+            return;
+        };
+        let latest = tokio::time::timeout(Duration::from_millis(650), async {
+            if self.transport.read_phase(&target).await?.as_deref() != Some("ChampSelect") {
+                return Ok(Value::Null);
+            }
+            self.transport.read_champ_select(&target).await
+        })
+        .await;
+        let Ok(Ok(latest)) = latest else {
+            return cancel();
+        };
+        if SelectionScope::from_sample(client.instance, flow, &latest) != Some(due.scope)
+            || !due.still_applies(select, &latest, &lists.subset)
+        {
+            return cancel();
+        }
+        let Ok(target) = client.target() else {
+            return cancel();
+        };
+        let authorized = self.state.lock().is_ok_and(|mut state| {
+            state.generation == generation && !state.aram_paused && state.aram.mark_attempted(due)
+        });
+        if authorized {
+            let _ = self.transport.apply_selection(&target, due).await;
+        }
+    }
+}
+
+async fn load_game_data(app: AppHandle, instance: ClientInstance, ticket: u64) {
+    let runtime = app.state::<ClientRuntime>();
+    let Ok(Some(client)) = tauri::async_runtime::spawn_blocking(move || {
+        discover_clients()
+            .ok()?
+            .into_iter()
+            .find(|client| client.instance == instance)
+    })
+    .await
+    else {
+        return;
+    };
+    let Ok(target) = client.target() else {
+        return;
+    };
+    let Ok(read) = runtime.transport.read_game_data(&target).await else {
+        return;
+    };
+    let Ok(mut state) = runtime.state.lock() else {
+        return;
+    };
+    if state.data_ticket != ticket || state.data_client != Some(instance) || !client.alive() {
+        return;
+    }
+    state.revision += 1;
+    state.game_data = read.fields;
+    for (key, value) in &state.game_data {
+        publish_property(&app, CLIENT, "gameData", key, value, state.revision);
     }
 }
 
@@ -403,7 +651,11 @@ pub(crate) async fn monitor(app: AppHandle) {
     loop {
         runtime.refresh(&app, resg.enabled()).await;
         let _ = resg.reconcile(&app, ResgAction::Synchronize);
-        let _ = tokio::time::timeout(Duration::from_secs(2), runtime.wake.notified()).await;
+        let interval = runtime
+            .state
+            .lock()
+            .map_or(Duration::from_secs(2), |state| state.aram.next_poll());
+        let _ = tokio::time::timeout(interval, runtime.wake.notified()).await;
     }
 }
 
@@ -419,14 +671,24 @@ fn publish_changes(app: &AppHandle, before: &Snapshot, after: &Snapshot, revisio
             if before.get(&key) == Some(&value) {
                 continue;
             }
-            let event = format!("update-state-prop/{namespace}:{name}");
-            let args =
-                json!([key, value, { "action": "update", "raw": false, "revision": revision }]);
-            for label in ["main", "aux", "opgg"] {
-                if let Some(window) = app.get_webview_window(label) {
-                    let _ = emit(&window, "mobx-utils-main", &event, args.clone());
-                }
-            }
+            publish_property(app, namespace, name, &key, &value, revision);
+        }
+    }
+}
+
+fn publish_property(
+    app: &AppHandle,
+    namespace: &str,
+    name: &str,
+    key: &str,
+    value: &Value,
+    revision: u64,
+) {
+    let event = format!("update-state-prop/{namespace}:{name}");
+    let args = json!([key, value, { "action": "update", "raw": false, "revision": revision }]);
+    for label in ["main", "aux", "opgg"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = emit(&window, "mobx-utils-main", &event, args.clone());
         }
     }
 }

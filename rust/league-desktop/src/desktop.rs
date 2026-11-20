@@ -369,9 +369,20 @@ async fn league_call(
                 let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
                 let value = bootstrap::set_aram_config(&db, key, group, patch)
                     .map_err(|error| error.to_string())?;
+                client.replace_aram_options(
+                    bootstrap::aram_options(&db).map_err(io::Error::other)?,
+                )?;
                 let revision = revision.next();
                 drop(db);
                 settings_changed(app, AUTO_SELECT, key, &value, revision)?;
+                Ok(Value::Null)
+            }
+            (AUTO_SELECT, "setTemporarilyDisabled") if window.label() == "main" => {
+                let paused = args
+                    .first()
+                    .and_then(Value::as_bool)
+                    .ok_or("缺少自动选禁暂停状态。")?;
+                client.pause_aram(app, paused)?;
                 Ok(Value::Null)
             }
             (
@@ -469,6 +480,11 @@ async fn league_call(
                             state["closeAction"] = ShellPreference::CloseAction
                                 .read(&db, profile.system_locale)
                                 .map_err(|error| error.to_string())?;
+                        }
+                        if (namespace, name) == (AUTO_SELECT, "state") {
+                            let (revision, paused) = client.aram_paused()?;
+                            state["temporarilyDisabled"] = json!(paused);
+                            return Ok(state_fields(state, Some(revision)));
                         }
                         Ok(state_fields(
                             state,
@@ -613,7 +629,7 @@ pub(crate) fn run() -> tauri::Result<()> {
             let profile = DesktopProfile::prepare(app)
                 .map_err(|error| io::Error::other(format!("工具箱数据无法准备。{error}")))?;
             let webview_directory = profile.webview_directory()?;
-            let (auto_connect, resg_preferences) = {
+            let (auto_connect, resg_preferences, aram_options) = {
                 let db = profile
                     .database
                     .lock()
@@ -626,10 +642,11 @@ pub(crate) fn run() -> tauri::Result<()> {
                 (
                     auto_connect,
                     bootstrap::resg_preferences(&db).map_err(io::Error::other)?,
+                    bootstrap::aram_options(&db).map_err(io::Error::other)?,
                 )
             };
             app.manage(profile);
-            app.manage(ClientRuntime::new(auto_connect)?);
+            app.manage(ClientRuntime::new(auto_connect, aram_options)?);
             app.manage(ResgWindow::new(resg_preferences));
             app.manage(SettingsRevision::default());
             app.manage(updater::LeagueUpdater::default());

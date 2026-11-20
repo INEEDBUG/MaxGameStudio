@@ -56,10 +56,7 @@ pub(super) fn initial_state(
         ("extra-assets-main", "gtimg") => json!({"heroList":null,"kiwiAugments":null}),
         ("extra-assets-main", "opgg") => json!({"aramBalance":null}),
         (CLIENT, "initialization") => json!({"progress":null}),
-        (CLIENT, "gameData") => json!({
-            "champions":{},"augments":{},"perks":{},"perkstyles":{"schemaVersion":0,"styles":{}},
-            "queues":{},"items":{},"summonerSpells":{},"gameModeMutators":{},"maps":{},
-        }),
+        (CLIENT, "gameData") => crate::client_runtime::empty_game_data(),
         (CLIENT, "honor") => json!({"ballot":null}),
         // The pinned Vue store already has native Sets for the three champion-ID lists.
         (CLIENT, "champSelect") => json!({
@@ -317,6 +314,14 @@ fn aram_config(db: &LeagueProfileDatabase, key: &str) -> Result<Value, ProfileDa
     };
     merge_aram(&mut config, legacy, false)?;
     Ok(json!({"aram":config}))
+}
+
+pub(super) fn aram_options(
+    db: &LeagueProfileDatabase,
+) -> Result<crate::aram_automation::AramOptions, ProfileDatabaseError> {
+    let pick = aram_config(db, "pickConfig")?;
+    let ban = aram_config(db, "banConfig")?;
+    Ok(crate::aram_automation::AramOptions::from_saved(&pick, &ban))
 }
 
 pub(super) fn set_aram_config(
