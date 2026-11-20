@@ -1,4 +1,5 @@
 pub mod auto_select;
+pub mod league_session;
 pub mod profile_database;
 pub mod profile_location;
 pub mod profile_migration;

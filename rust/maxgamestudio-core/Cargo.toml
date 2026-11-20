@@ -6,7 +6,9 @@ license.workspace = true
 publish = false
 
 [dependencies]
+form_urlencoded = "=1.2.2"
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+subtle = "=2.6.1"
 tempfile = "=3.27.0"

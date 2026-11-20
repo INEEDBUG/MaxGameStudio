@@ -12,6 +12,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use maxgamestudio_core::session_auth::SESSION_TOKEN_HEADER;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -161,7 +162,7 @@ fn backend_http(method: &str, path: &str, session_token: &str) -> Option<String>
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\nX-CS2-Insight-Token: {session_token}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\n{SESSION_TOKEN_HEADER}: {session_token}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).ok()?;
     let mut response = String::new();
