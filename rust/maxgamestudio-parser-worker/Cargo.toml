@@ -1,0 +1,24 @@
+[package]
+name = "maxgamestudio-parser-worker"
+version = "0.1.0"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "maxgamestudio-parser-worker"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+parser = { path = "../../src/parser" }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.150"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[profile.dev.package.parser]
+overflow-checks = false
