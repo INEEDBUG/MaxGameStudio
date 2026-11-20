@@ -1,5 +1,4 @@
-use super::{demo_query::DemoRoute, detail, HttpResponse};
-use http_body_util::{BodyExt, Full};
+use super::{buffered_body, demo_query::DemoRoute, detail, HttpResponse};
 use hyper::{
     body::Bytes,
     header::{CACHE_CONTROL, CONTENT_TYPE},
@@ -42,7 +41,7 @@ pub(super) fn image(route: DemoRoute, uri: &Uri) -> HttpResponse {
     Response::builder()
         .header(CONTENT_TYPE, "image/png")
         .header(CACHE_CONTROL, "public, max-age=86400")
-        .body(Full::new(Bytes::from_static(data)).boxed_unsync())
+        .body(buffered_body(Bytes::from_static(data)))
         .expect("bundled radar response")
 }
 

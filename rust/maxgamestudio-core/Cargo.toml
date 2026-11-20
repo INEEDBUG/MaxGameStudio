@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 
 [features]
-native-http = ["dep:base64", "dep:futures-util", "dep:http-body-util", "dep:hyper", "dep:hyper-util", "dep:parquet", "dep:percent-encoding", "dep:sha2", "dep:tokio", "dep:tokio-websockets", "dep:windows-sys"]
+native-http = ["dep:base64", "dep:futures-util", "dep:http-body-util", "dep:hyper", "dep:hyper-util", "dep:parquet", "dep:percent-encoding", "dep:sha2", "dep:tokio", "dep:tokio-websockets", "dep:tower-http", "dep:windows-sys"]
 
 [dependencies]
 base64 = { version = "=0.22.1", optional = true }
@@ -25,6 +25,7 @@ subtle = "=2.6.1"
 tempfile = "=3.27.0"
 tokio = { version = "=1.52.3", features = ["io-util", "net", "process", "rt", "sync", "time"], optional = true }
 tokio-websockets = { version = "=0.13.3", default-features = false, features = ["client", "fastrand", "sha1_smol"], optional = true }
+tower-http = { version = "=0.6.8", default-features = false, features = ["fs"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_Threading"], optional = true }

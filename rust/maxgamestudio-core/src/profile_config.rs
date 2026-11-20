@@ -73,7 +73,14 @@ impl ProfileConfig {
     }
 
     pub(crate) fn obs_settings(&self) -> io::Result<crate::obs_wire::ObsSettings> {
-        serde_json::from_value(self.read(false)?["obs"].take()).map_err(io::Error::from)
+        let mut stored = self.load()?;
+        serde_json::from_value(
+            stored
+                .known
+                .remove("obs")
+                .expect("normalized OBS configuration"),
+        )
+        .map_err(io::Error::from)
     }
 
     pub(crate) fn view(&self) -> io::Result<Value> {

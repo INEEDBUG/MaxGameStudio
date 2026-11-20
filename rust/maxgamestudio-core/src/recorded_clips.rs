@@ -1,6 +1,6 @@
 //! Read recorded clip records from the existing shared SQLite database.
 
-use rusqlite::{params, types::ValueRef, Connection, OpenFlags, Row};
+use rusqlite::{params, types::ValueRef, Connection, OpenFlags, Params, Row};
 use serde_json::{Map, Number, Value};
 use std::{
     fmt, fs, io,
@@ -34,6 +34,25 @@ impl From<rusqlite::Error> for RecordedClipsError {
 /// Return a page ordered by the database ID, before applying metadata overrides.
 /// The HTTP caller validates the page size and offset.
 pub(crate) fn list(path: &Path, limit: i64, offset: i64) -> Result<Vec<Value>, RecordedClipsError> {
+    read(
+        path,
+        "ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+        params![limit, offset],
+    )
+}
+
+pub(crate) fn output_path(path: &Path, id: i64) -> Result<Option<String>, RecordedClipsError> {
+    Ok(read(path, "WHERE id = ?1", [id])?
+        .into_iter()
+        .next()
+        .map(|item| item["output_path"].as_str().unwrap_or_default().to_owned()))
+}
+
+fn read(
+    path: &Path,
+    selection: &str,
+    bindings: impl Params,
+) -> Result<Vec<Value>, RecordedClipsError> {
     match fs::metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(RecordedClipsError::File(error)),
@@ -65,9 +84,9 @@ pub(crate) fn list(path: &Path, limit: i64, offset: i64) -> Result<Vec<Value>, R
         let mut statement = transaction.prepare(&format!(
             "SELECT id, clip_id, demo_path, demo_filename, player_name, output_path,
              duration_sec, status, created_at, {metadata_column} AS clip_meta
-             FROM recorded_clips ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+             FROM recorded_clips {selection}"
         ))?;
-        let rows = statement.query_map(params![limit, offset], row_to_json)?;
+        let rows = statement.query_map(bindings, row_to_json)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     transaction.commit()?;

@@ -76,18 +76,13 @@ pub(super) fn parse_id(path: &str) -> Result<i64, Vec<Value>> {
         .split('/')
         .next()
         .expect("demo ID");
+    parse_path_integer(id, "demo_id")
+}
+
+pub(super) fn parse_path_integer(id: &str, name: &str) -> Result<i64, Vec<Value>> {
     integer_from_text(id)
         .and_then(|id| id.as_i64())
-        .ok_or_else(|| {
-            vec![issue(
-                "path",
-                "demo_id",
-                id,
-                INTEGER_TYPE,
-                INTEGER_MESSAGE,
-                None,
-            )]
-        })
+        .ok_or_else(|| vec![issue("path", name, id, INTEGER_TYPE, INTEGER_MESSAGE, None)])
 }
 
 pub(super) fn parse_list(query: &str, kind: DemoListKind) -> Result<DemoListQuery, Vec<Value>> {

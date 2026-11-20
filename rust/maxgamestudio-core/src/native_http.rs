@@ -75,7 +75,7 @@ const ALLOWED_ORIGINS: &[&str] = &[
 ];
 const PREFLIGHT_METHODS: &[&str] = &["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"];
 
-type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
+type HttpBody = UnsyncBoxBody<Bytes, io::Error>;
 type HttpResponse = Response<HttpBody>;
 
 struct State {
@@ -105,6 +105,7 @@ struct ProfileState {
     disk: Arc<Semaphore>,
     parser_worker: Option<ParserWorker>,
     demo_parser: Semaphore,
+    obs_writes: Semaphore,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
 }
@@ -140,6 +141,7 @@ impl NativeHttpServer {
             disk: Arc::new(Semaphore::new(1)),
             parser_worker,
             demo_parser: Semaphore::new(1),
+            obs_writes: Semaphore::new(1),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir
@@ -411,7 +413,7 @@ async fn route(
             return Response::builder()
                 .status(StatusCode::TEMPORARY_REDIRECT)
                 .header(LOCATION, location)
-                .body(Full::new(Bytes::new()).boxed_unsync())
+                .body(buffered_body(Bytes::new()))
                 .expect("loopback redirect");
         }
         return detail(StatusCode::NOT_FOUND, "Not Found");
@@ -438,12 +440,19 @@ async fn route(
     let demo_rename =
         matches!(route, Route::Demos(DemoRoute::Detail)) && request.method() == Method::PATCH;
     let cache_clear = matches!(route, Route::ReplayCache) && request.method() == Method::DELETE;
-    if request.method().as_str() != allowed && !config_update && !demo_rename && !cache_clear {
+    let storage_update = matches!(route, Route::Recordings(recordings::Route::Storage))
+        && request.method() == Method::PATCH;
+    if request.method().as_str() != allowed
+        && !config_update
+        && !demo_rename
+        && !cache_clear
+        && !storage_update
+    {
         let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
-        let allowed = if matches!(route, Route::ReplayCache) {
-            "GET, DELETE"
-        } else {
-            allowed
+        let allowed = match route {
+            Route::ReplayCache => "GET, DELETE",
+            Route::Recordings(recordings::Route::Storage) => "GET, PATCH",
+            _ => allowed,
         };
         response
             .headers_mut()
@@ -466,10 +475,11 @@ async fn route(
             .await
         }
         Route::Recordings(route) => {
-            recordings::read(
+            recordings::respond(
                 state.profile.as_ref().expect("profile route"),
                 route,
                 request,
+                extended_request,
             )
             .await
         }
@@ -565,7 +575,7 @@ fn replay_packet_response(packet: Result<Option<Vec<u8>>, ReplayCacheError>) -> 
                 .header(CONTENT_TYPE, "application/vnd.cs2-insight.replay-v1")
                 .header(CACHE_CONTROL, "no-store")
                 .header("x-cs2-replay-protocol", "1")
-                .body(Full::new(Bytes::from(bytes)).boxed_unsync())
+                .body(buffered_body(bytes))
                 .expect("valid binary replay response"),
         Ok(None) => detail(
                 StatusCode::CONFLICT,
@@ -950,6 +960,12 @@ fn reply(status: StatusCode, content_type: &'static str, body: String) -> HttpRe
     Response::builder()
         .status(status)
         .header(CONTENT_TYPE, content_type)
-        .body(Full::new(Bytes::from(body)).boxed_unsync())
+        .body(buffered_body(body))
         .expect("valid response")
+}
+
+fn buffered_body(bytes: impl Into<Bytes>) -> HttpBody {
+    Full::new(bytes.into())
+        .map_err(|error| match error {})
+        .boxed_unsync()
 }
