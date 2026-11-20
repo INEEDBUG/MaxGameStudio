@@ -4,12 +4,14 @@ mod demo_body;
 mod demo_events;
 mod demo_query;
 mod demo_watch;
+mod replay_body;
 
 use crate::{
     demo_library::{DemoEdit, DemoLibrary, DemoReadError},
     gsi_ready::GsiReady,
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
+    replay_cache::{load_packet, ReplayCacheError, REQUIRED_PARSER_VERSION},
     runtime_session::RuntimeSession,
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
     wire_json::json_decode_error,
@@ -83,6 +85,7 @@ pub struct NativeProfile {
     pub config_path: Option<PathBuf>,
     pub bundle_data_dir: Option<PathBuf>,
     pub legacy_config_path: Option<PathBuf>,
+    pub temp_dir: Option<PathBuf>,
     pub instance_id: String,
     pub session_token: String,
 }
@@ -94,6 +97,7 @@ struct ProfileState {
     session: RuntimeSession,
     disk: Arc<Semaphore>,
     demo_events: DemoEvents,
+    upload_dir: PathBuf,
 }
 
 pub struct NativeHttpServer {
@@ -125,6 +129,10 @@ impl NativeHttpServer {
             session: RuntimeSession::default(),
             disk: Arc::new(Semaphore::new(1)),
             demo_events: DemoEvents::new(),
+            upload_dir: profile
+                .temp_dir
+                .unwrap_or_else(std::env::temp_dir)
+                .join("cs2_insight_demos"),
         };
         Self::bind_inner(port, version, Some(Arc::new(state)))
     }
@@ -332,6 +340,7 @@ enum Route {
     BackupStatus,
     RuntimeState,
     Demos(DemoRoute),
+    ReplayBinary,
 }
 
 impl Route {
@@ -346,6 +355,7 @@ impl Route {
             "/api/config/data-dir-info" if has_profile => Some(Self::DataDirInfo),
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
+            "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
             _ if has_profile => DemoRoute::from_path(path).map(Self::Demos),
             _ => None,
         }
@@ -397,7 +407,7 @@ async fn route(
         }
     }
     let allowed = match route {
-        Route::Gsi | Route::Demos(DemoRoute::InspectPath) => "POST",
+        Route::Gsi | Route::ReplayBinary | Route::Demos(DemoRoute::InspectPath) => "POST",
         Route::Demos(DemoRoute::Remark) => "PATCH",
         _ => "GET",
     };
@@ -418,6 +428,9 @@ async fn route(
         ),
         Route::GsiStatus => json_reply(StatusCode::OK, json!(state.gsi.status())),
         Route::Gsi => notify_gsi(state, request).await,
+        Route::ReplayBinary => {
+            replay_response(state.profile.as_ref().expect("profile route"), request).await
+        }
         Route::Demos(route) => {
             demo_response(
                 state.profile.as_ref().expect("profile route"),
@@ -429,6 +442,40 @@ async fn route(
         }
         _ => profile_route(state, route, request).await,
     }
+}
+
+async fn replay_response(profile: &Arc<ProfileState>, request: Request<Incoming>) -> HttpResponse {
+    let input = match model_body(request, "Replay request body is too large").await {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request = match replay_body::parse(input) {
+        Ok(request) => request,
+        Err(errors) => return validation_reply(errors),
+    };
+    if let Err(error) = request.validate_range() {
+        return detail(StatusCode::UNPROCESSABLE_ENTITY, &error);
+    }
+    profile_disk(profile, move |profile| {
+        match load_packet(profile.config.data_dir(), &profile.upload_dir, &request) {
+            Ok(Some(bytes)) => Response::builder()
+                .header(CONTENT_TYPE, "application/vnd.cs2-insight.replay-v1")
+                .header(CACHE_CONTROL, "no-store")
+                .header("x-cs2-replay-protocol", "1")
+                .body(Full::new(Bytes::from(bytes)).boxed_unsync())
+                .expect("valid binary replay response"),
+            Ok(None) => detail(
+                StatusCode::CONFLICT,
+                "Binary replay cache is missing and cold repair is unavailable in the native runtime; analyze the demo again in the compatible backend",
+            ),
+            Err(ReplayCacheError::EmptyPath) => detail(StatusCode::BAD_REQUEST, "Demo 路径为空"),
+            Err(ReplayCacheError::MissingDemo(path)) => detail(StatusCode::NOT_FOUND, &format!("未找到 Demo 文件: {path}")),
+            Err(ReplayCacheError::Unavailable(error)) => {
+                eprintln!("Native binary replay cache read failed: {error}");
+                detail(StatusCode::SERVICE_UNAVAILABLE, "Binary replay unavailable: Exception")
+            }
+        }
+    }).await
 }
 
 async fn demo_response(
@@ -586,9 +633,9 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
                 "demoparser_runtime": {
                     "ready": false,
                     "installed_version": null,
-                    "required_version": "0.41.4+cs2insight7",
-                    "missing_methods": ["decode_smoke_voxel_journal", "write_replay_parquet", "read_replay_parquet_round", "read_replay_parquet_round_binary"],
-                    "import_error": "Native replay integration is unavailable",
+                    "required_version": REQUIRED_PARSER_VERSION,
+                    "missing_methods": ["decode_smoke_voxel_journal", "write_replay_parquet", "read_replay_parquet_round"],
+                    "import_error": "Native replay parsing and cache generation are unavailable",
                 },
             }),
         );

@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config_path: path_env("CS2_INSIGHT_CONFIG"),
                 bundle_data_dir: path_env("CS2_INSIGHT_BUNDLE_DATA_DIR"),
                 legacy_config_path: None,
+                temp_dir: path_env("CS2_INSIGHT_TEMP_DIR"),
                 instance_id: env::var("CS2_INSIGHT_INSTANCE_ID").unwrap_or_default(),
                 session_token: env::var("CS2_INSIGHT_SESSION_TOKEN").unwrap_or_default(),
             },

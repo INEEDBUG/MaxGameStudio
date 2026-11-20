@@ -31,14 +31,19 @@ pub(super) fn watch_path(input: Value) -> Result<(String, usize), Vec<Value>> {
     }
 }
 
-fn model(input: &Value) -> Result<&Map<String, Value>, Vec<Value>> {
+pub(super) fn model(input: &Value) -> Result<&Map<String, Value>, Vec<Value>> {
     input.as_object().ok_or_else(|| vec![json!({
         "type": "model_attributes_type", "loc": ["body"],
         "msg": "Input should be a valid dictionary or object to extract fields from", "input": input,
     })])
 }
 
-fn text<'a>(value: &'a Value, field: &str, min: usize, max: usize) -> Result<&'a str, Value> {
+pub(super) fn text<'a>(
+    value: &'a Value,
+    field: &str,
+    min: usize,
+    max: usize,
+) -> Result<&'a str, Value> {
     let input = value.as_str().ok_or_else(|| {
         field_issue(
             field,
@@ -113,7 +118,7 @@ fn depth_value(value: &Value) -> Result<usize, Value> {
     Ok(number as usize)
 }
 
-fn field_issue(
+pub(super) fn field_issue(
     field: &str,
     input: &Value,
     kind: &str,

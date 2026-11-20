@@ -1,5 +1,9 @@
 #![cfg(feature = "native-http")]
 
+#[path = "fixtures/replay_fixture.rs"]
+mod replay_fixture;
+
+use replay_fixture::ReplayFixture;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -61,6 +65,7 @@ impl RunningServer {
             .env_remove("CS2_INSIGHT_DATA_DIR")
             .env_remove("CS2_INSIGHT_CONFIG")
             .env_remove("CS2_INSIGHT_BUNDLE_DATA_DIR")
+            .env_remove("CS2_INSIGHT_TEMP_DIR")
             .env_remove("CS2_INSIGHT_LIBRARY_SSE_DEBOUNCE_SEC");
         if let Some((data, bundle)) = profile {
             command
@@ -72,6 +77,7 @@ impl RunningServer {
                         .unwrap_or_else(|| data.join("custom-config.json")),
                 )
                 .env("CS2_INSIGHT_BUNDLE_DATA_DIR", bundle)
+                .env("CS2_INSIGHT_TEMP_DIR", data.join("fixture-temp"))
                 .env("CS2_INSIGHT_INSTANCE_ID", " fixture-process ");
         }
         let child = command
@@ -829,6 +835,255 @@ fn demo_watch_inspection_counts_without_opening_candidates_or_mutating_catalog()
     );
     assert!(!scratch.path().join("cs2-insight.db").exists());
     assert!(!scratch.path().join("custom-config.json").exists());
+    server.stop();
+}
+
+const REPLAY_ROUTE: &str = "/api/demo/replay/binary";
+
+fn binary_replay(server: &RunningServer, payload: &Value) -> Vec<u8> {
+    let body = payload.to_string();
+    let mut socket = TcpStream::connect_timeout(&server.addr, RESPONSE_TIMEOUT).unwrap();
+    socket.set_read_timeout(Some(RESPONSE_TIMEOUT)).unwrap();
+    let request = format!(
+        "POST {REPLAY_ROUTE} HTTP/1.1\r\nHost: {}\r\nX-CS2-Insight-Token: synthetic-token\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        server.addr,
+        body.len(),
+    );
+    socket.write_all(request.as_bytes()).unwrap();
+    let mut response = Vec::new();
+    socket.read_to_end(&mut response).unwrap();
+    let head_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let headers = std::str::from_utf8(&response[..head_end])
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(
+        headers.starts_with("http/1.1 200 "),
+        "{headers}: {}",
+        String::from_utf8_lossy(&response[head_end + 4..])
+    );
+    assert!(headers.contains("content-type: application/vnd.cs2-insight.replay-v1"));
+    assert!(headers.contains("cache-control: no-store"));
+    assert!(headers.contains("x-cs2-replay-protocol: 1"));
+    response.split_off(head_end + 4)
+}
+
+fn replay_header(bytes: &[u8]) -> (Value, usize) {
+    assert_eq!(&bytes[..8], b"CS2RPL01");
+    assert_eq!(&bytes[8..12], &[1, 0, 0, 0]);
+    let end = 16 + u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let header = serde_json::from_slice(&bytes[16..end]).unwrap();
+    (header, end.next_multiple_of(4))
+}
+
+#[test]
+fn replay_reads_exact_round_from_primary_or_legacy_cache_without_writes() {
+    let scratch = tempfile::tempdir().unwrap();
+    let fixture = ReplayFixture::new(scratch.path());
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    let request = fixture.request();
+    assert_eq!(
+        profile_request(&server, "POST", REPLAY_ROUTE, &request, false).0,
+        401
+    );
+    let (status, miss) = profile_request(&server, "POST", REPLAY_ROUTE, &request, true);
+    assert_eq!(status, 409);
+    assert!(miss["detail"]
+        .as_str()
+        .unwrap()
+        .contains("analyze the demo again"));
+    assert!(!scratch.path().join(replay_fixture::CURRENT).exists());
+    assert!(!scratch.path().join(replay_fixture::LEGACY).exists());
+
+    let (legacy_parquet, legacy_meta) = fixture.write(scratch.path(), replay_fixture::LEGACY);
+    assert!(fs::metadata(&legacy_parquet).unwrap().len() < 16_384);
+    let (current_parquet, current_meta) = fixture.write(scratch.path(), replay_fixture::CURRENT);
+    let mut wrong = fixture.metadata.clone();
+    wrong["version"] = json!(4);
+    fs::write(&current_meta, wrong.to_string()).unwrap();
+    let legacy_before = [
+        fs::read(&legacy_parquet).unwrap(),
+        fs::read(&legacy_meta).unwrap(),
+    ];
+    let mut upload_name = request.clone();
+    upload_name["path"] = json!(fixture.demo.file_name().unwrap().to_str().unwrap());
+    let packet = binary_replay(&server, &upload_name);
+    let (header, data) = replay_header(&packet);
+    assert_eq!(header["cache_key"], fixture.key);
+    assert_eq!(header["round_number"], 2);
+    assert_eq!(header["frame_count"], 6);
+    assert_eq!(header["row_count"], 4);
+    assert_eq!(header["protocol"], "cs2-replay-binary-v1");
+    assert_eq!(
+        header["cache"],
+        json!({"frames":"parquet_binary_hit","effects":"parquet_hit","parsed":false})
+    );
+    assert_eq!(
+        header["effect_tracks"],
+        json!([
+            {"kind":"smoke","start_tick":98,"end_tick":100,"payload":{"name":"烟"}},
+            {"kind":"fire","start_tick":112,"end_tick":118}
+        ])
+    );
+    assert_eq!(header["shots"], json!([{"tick":102,"player":"玩家"}]));
+    assert_eq!(header["events"], json!([{"type":"kill","tick":109}]));
+    assert!(header["strings"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("Bench")));
+    assert!(header["strings"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("Not sampled")));
+    let mut words = packet[data..]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(i32::from_le_bytes);
+    assert_eq!(
+        words.by_ref().take(6).collect::<Vec<_>>(),
+        replay_fixture::TICKS
+    );
+    assert_eq!(words.take(7).collect::<Vec<_>>(), [0, 1, 2, 2, 3, 4, 4]);
+    assert_eq!(
+        [
+            fs::read(&legacy_parquet).unwrap(),
+            fs::read(&legacy_meta).unwrap()
+        ],
+        legacy_before
+    );
+
+    let mut primary = fixture.metadata.clone();
+    primary["effect_warnings"] = json!(["primary cache"]);
+    fs::write(&current_meta, primary.to_string()).unwrap();
+    assert_eq!(
+        replay_header(&binary_replay(&server, &request)).0["effect_warnings"],
+        json!(["primary cache"])
+    );
+    let mut another_range = request.clone();
+    another_range["end_tick"] = json!(113);
+    assert_eq!(
+        profile_request(&server, "POST", REPLAY_ROUTE, &another_range, true).0,
+        409
+    );
+    let mut different_fps = request.clone();
+    different_fps["fps"] = json!(30);
+    assert_eq!(
+        profile_request(&server, "POST", REPLAY_ROUTE, &different_fps, true).0,
+        409
+    );
+
+    let malformed = b"fixture damaged parquet";
+    fs::write(&current_parquet, malformed).unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", REPLAY_ROUTE, &request, true),
+        (
+            503,
+            json!({"detail":"Binary replay unavailable: Exception"})
+        )
+    );
+    assert_eq!(fs::read(current_parquet).unwrap(), malformed);
+    assert_eq!(
+        fs::read_to_string(current_meta).unwrap(),
+        primary.to_string()
+    );
+    fs::write(
+        &fixture.demo,
+        b"fixture source replacement makes the old cache stale",
+    )
+    .unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", REPLAY_ROUTE, &request, true).0,
+        409
+    );
+    server.stop();
+}
+
+#[test]
+fn replay_validates_range_and_demo_path_before_reading_cache() {
+    let scratch = tempfile::tempdir().unwrap();
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    for (request, code, detail) in [
+        (
+            json!({"path":"nonexisting.dem","start_tick":"20","end_tick":"20"}),
+            422,
+            "end_tick must be greater than start_tick",
+        ),
+        (
+            json!({"path":"nonexisting.dem","start_tick":0,"end_tick":38401}),
+            422,
+            "Replay range cannot exceed 10 minutes",
+        ),
+        (
+            json!({"path":" ","start_tick":1,"end_tick":2}),
+            400,
+            "Demo 路径为空",
+        ),
+        (
+            json!({"path":"fixture-missing-replay.dem","start_tick":1,"end_tick":2}),
+            404,
+            "未找到 Demo 文件: fixture-missing-replay.dem",
+        ),
+    ] {
+        assert_eq!(
+            profile_request(&server, "POST", REPLAY_ROUTE, &request, true),
+            (code, json!({"detail":detail}))
+        );
+    }
+    let (code, body) = profile_request(
+        &server,
+        "POST",
+        REPLAY_ROUTE,
+        &json!({"path":"","start_tick":-1,"end_tick":0,"tick_rate":257,"fps":0}),
+        true,
+    );
+    assert_eq!(code, 422);
+    assert_eq!(
+        body["detail"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|error| error["type"].clone())
+            .collect::<Vec<_>>(),
+        json!([
+            "string_too_short",
+            "greater_than_equal",
+            "greater_than",
+            "less_than_equal",
+            "greater_than_equal"
+        ])
+        .as_array()
+        .unwrap()
+        .clone()
+    );
+    assert!(!scratch.path().join(replay_fixture::CURRENT).exists());
+    server.stop();
+}
+
+#[test]
+#[ignore = "requires the pinned demoparser2 wheel and MGS_REPLAY_PYTHON"]
+fn replay_packet_bytes_match_the_shipped_parser_wheel() {
+    let scratch = tempfile::tempdir().unwrap();
+    let fixture = ReplayFixture::new(scratch.path());
+    fixture.write(scratch.path(), replay_fixture::LEGACY);
+    let python = std::env::var_os("MGS_REPLAY_PYTHON").expect("cached Python 3.12 interpreter");
+    let expected = Command::new(python)
+        .arg("-B")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/replay_binary_python.py"))
+        .arg(scratch.path())
+        .arg(&fixture.demo)
+        .output()
+        .unwrap();
+    assert!(
+        expected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&expected.stderr)
+    );
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    assert_eq!(binary_replay(&server, &fixture.request()), expected.stdout);
     server.stop();
 }
 

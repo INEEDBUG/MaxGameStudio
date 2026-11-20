@@ -9,6 +9,10 @@ pub mod native_http;
 mod profile_config;
 #[cfg(feature = "native-http")]
 mod profile_platform;
+#[cfg(feature = "native-http")]
+mod replay_cache;
+#[cfg(feature = "native-http")]
+mod replay_packet;
 pub mod runtime_session;
 pub mod session_auth;
 pub mod training_db;
