@@ -1,18 +1,23 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{Read, Write},
-    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Mutex,
     },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(not(feature = "native-runtime"))]
 use maxgamestudio_core::session_auth::SESSION_TOKEN_HEADER;
+#[cfg(not(feature = "native-runtime"))]
+use std::{
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    process::{Child, Command, Stdio},
+    time::Duration,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -21,22 +26,32 @@ use tauri::{
 
 mod cs2_local_settings;
 mod desktop_storage;
-mod valorant_crosshair;
 mod steam_accounts;
 mod training;
+mod valorant_crosshair;
+
+#[cfg(feature = "native-runtime")]
+mod native_backend;
+
+#[cfg(all(windows, feature = "native-runtime"))]
+mod storage_migration;
 
 pub fn desktop_logs_dir() -> Option<PathBuf> {
     desktop_storage::directory("data/logs").ok()
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(feature = "native-runtime")))]
 use std::os::windows::process::CommandExt;
 
+#[cfg(all(windows, not(feature = "native-runtime")))]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct BackendProcess {
     operation: Mutex<()>,
+    #[cfg(not(feature = "native-runtime"))]
     child: Mutex<Option<ManagedBackend>>,
+    #[cfg(feature = "native-runtime")]
+    native: Mutex<Option<native_backend::NativeBackend>>,
     session_token: String,
 }
 
@@ -144,18 +159,23 @@ impl BackendProcess {
     fn new() -> Result<Self, String> {
         Ok(Self {
             operation: Mutex::new(()),
+            #[cfg(not(feature = "native-runtime"))]
             child: Mutex::new(None),
+            #[cfg(feature = "native-runtime")]
+            native: Mutex::new(None),
             session_token: new_session_token()?,
         })
     }
 }
 
+#[cfg(not(feature = "native-runtime"))]
 struct ManagedBackend {
     child: Child,
     instance_id: String,
     data_root: PathBuf,
 }
 
+#[cfg(not(feature = "native-runtime"))]
 fn backend_http(method: &str, path: &str, session_token: &str) -> Option<String> {
     let address = SocketAddr::from(([127, 0, 0, 1], 19871));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350)).ok()?;
@@ -239,6 +259,7 @@ fn writable_data_root(_app: &AppHandle) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(not(feature = "native-runtime"))]
 fn runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
     let bundled_root = app
         .path()
@@ -258,6 +279,7 @@ fn runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(bundled_root)
 }
 
+#[cfg(not(feature = "native-runtime"))]
 fn python_executable(root: &Path) -> Option<PathBuf> {
     let candidates = if cfg!(debug_assertions) {
         vec![
@@ -294,8 +316,46 @@ pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
     if app.state::<AppLifecycle>().quitting.load(Ordering::SeqCst) {
         return Err("MaxGameStudio 正在退出，已取消后端启动".to_string());
     }
+    start_managed_backend(app, &state)
+}
+
+#[cfg(feature = "native-runtime")]
+fn start_managed_backend(app: &AppHandle, state: &BackendProcess) -> Result<(), String> {
+    use maxgamestudio_core::native_http::{NativeHttpServer, NativeProfile, DEFAULT_PORT};
+
+    let mut backend = state.native.lock().map_err(|_| "后端服务状态不可用")?;
+    if backend
+        .as_ref()
+        .is_some_and(native_backend::NativeBackend::running)
     {
-        let state = app.state::<BackendProcess>();
+        return Ok(());
+    }
+    let data_dir = writable_data_root(app)?;
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
+    let bundle_data = resources.join("data");
+    let server = NativeHttpServer::bind_profile(
+        DEFAULT_PORT,
+        app.package_info().version.to_string(),
+        NativeProfile {
+            config_path: Some(data_dir.join("cs2-insight.config.json")),
+            data_dir,
+            bundle_data_dir: bundle_data.is_dir().then_some(bundle_data),
+            legacy_config_path: None,
+            instance_id: new_instance_id(),
+            session_token: state.session_token.clone(),
+        },
+    )
+    .map_err(|error| format!("无法启动本地 Rust 服务：{error}"))?;
+    *backend = Some(native_backend::NativeBackend::start(server));
+    Ok(())
+}
+
+#[cfg(not(feature = "native-runtime"))]
+fn start_managed_backend(app: &AppHandle, state: &BackendProcess) -> Result<(), String> {
+    {
         let mut guard = state
             .child
             .lock()
@@ -451,6 +511,30 @@ pub(crate) fn stop_backend(app: &AppHandle) {
     let Ok(_operation) = state.operation.lock() else {
         return;
     };
+    stop_managed_backend(&state);
+}
+
+#[cfg(feature = "native-runtime")]
+fn stop_managed_backend(state: &BackendProcess) {
+    let Ok(mut guard) = state.native.lock() else {
+        return;
+    };
+    let Some(backend) = guard.take() else {
+        return;
+    };
+    drop(guard);
+    if let Err(error) = backend.stop() {
+        if let Some(logs_dir) = desktop_logs_dir() {
+            append_desktop_log(
+                &logs_dir,
+                &format!("[desktop] Rust backend stop failed: {error}"),
+            );
+        }
+    }
+}
+
+#[cfg(not(feature = "native-runtime"))]
+fn stop_managed_backend(state: &BackendProcess) {
     let session_token = state.session_token.clone();
     let Ok(mut guard) = state.child.lock() else {
         return;
@@ -605,8 +689,7 @@ pub fn run() {
             }
             tray.build(app)?;
 
-            // Python is started only by ensure_backend when a service route
-            // is opened. A failure must not close the independent shell.
+            // Start the service on demand after a service route opens.
             Ok(())
         })
         .build(context)
@@ -680,7 +763,7 @@ mod tests {
     fn cancelling_startup_does_not_show_backend_failure() {
         let source = include_str!("lib.rs");
         let setup = source
-            .split_once(".setup(|app|")
+            .split_once(".setup(move |app|")
             .unwrap()
             .1
             .split_once(".build(context)")

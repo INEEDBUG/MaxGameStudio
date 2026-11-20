@@ -702,6 +702,17 @@ mod windows {
         }
     }
 
+    #[cfg(feature = "native-runtime")]
+    fn migrate_installed_data(
+        _program_root: &Path,
+        source: &StorageLayout,
+        target: &Path,
+    ) -> Result<(), String> {
+        crate::storage_migration::migrate(&source.root, source.legacy.as_ref(), target)
+            .map_err(|error| format!("数据迁移没有完成：{error}"))
+    }
+
+    #[cfg(not(feature = "native-runtime"))]
     fn migrate_installed_data(
         program_root: &Path,
         source: &StorageLayout,
