@@ -1,0 +1,532 @@
+{
+  "cases": [
+    {
+      "name": "current champion precedes an old pick action",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 22
+          }
+        ],
+        "actions": [
+          [
+            {
+              "actorCellId": 4,
+              "type": "pick",
+              "championId": 12
+            }
+          ]
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": 22
+    },
+    {
+      "name": "pick action fills an empty current slot",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 0
+          }
+        ],
+        "actions": [
+          [
+            {
+              "actorCellId": 4,
+              "type": "pick",
+              "championId": 12
+            }
+          ]
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": 12
+    },
+    {
+      "name": "pick action ignores another player and a ban",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": -1
+          }
+        ],
+        "actions": [
+          [
+            {
+              "actorCellId": 3,
+              "type": "pick",
+              "championId": 12
+            },
+            {
+              "actorCellId": 4,
+              "type": "ban",
+              "championId": 23
+            },
+            {
+              "actorCellId": 4,
+              "type": "pick",
+              "championId": 27
+            }
+          ]
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": 27
+    },
+    {
+      "name": "no local member",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [],
+        "actions": [
+          [
+            {
+              "actorCellId": 4,
+              "type": "pick",
+              "championId": 12
+            }
+          ]
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "normal ARAM uses its own provider",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "ARAM"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 22
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "unrelated queue",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "CLASSIC"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 22
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "lobby waits",
+      "phase": "Lobby",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 22
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "missing queue",
+      "phase": "ChampSelect",
+      "session": null,
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 22
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "invalid fractional ID",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 27.5
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "unknown high ID",
+      "phase": "ChampSelect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": {
+        "localPlayerCellId": 4,
+        "myTeam": [
+          {
+            "cellId": 3,
+            "championId": 150
+          },
+          {
+            "cellId": 4,
+            "championId": 100000
+          }
+        ],
+        "actions": [
+          []
+        ]
+      },
+      "puuid": "fixture-self",
+      "expected": null
+    },
+    {
+      "name": "game start uses resolved player selection",
+      "phase": "GameStart",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [
+            {
+              "puuid": "fixture-self",
+              "championId": 73
+            }
+          ],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": null,
+      "puuid": "fixture-self",
+      "expected": 73
+    },
+    {
+      "name": "in-progress falls back to the second team",
+      "phase": "InProgress",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [
+            {
+              "puuid": "fixture-other",
+              "championId": 72
+            }
+          ],
+          "teamOne": [],
+          "teamTwo": [
+            {
+              "puuid": "fixture-self",
+              "championId": 89
+            }
+          ]
+        }
+      },
+      "champSelect": null,
+      "puuid": "fixture-self",
+      "expected": 89
+    },
+    {
+      "name": "reconnect prefers selected hero to team list",
+      "phase": "Reconnect",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [
+            {
+              "puuid": "fixture-self",
+              "championId": 84
+            }
+          ],
+          "teamOne": [
+            {
+              "puuid": "fixture-self",
+              "championId": 37
+            }
+          ],
+          "teamTwo": []
+        }
+      },
+      "champSelect": null,
+      "puuid": "fixture-self",
+      "expected": 84
+    },
+    {
+      "name": "missing current player",
+      "phase": "InProgress",
+      "session": {
+        "gameData": {
+          "queue": {
+            "gameMode": "KIWI"
+          },
+          "playerChampionSelections": [
+            {
+              "puuid": "fixture-self",
+              "championId": 73
+            }
+          ],
+          "teamOne": [],
+          "teamTwo": []
+        }
+      },
+      "champSelect": null,
+      "puuid": null,
+      "expected": null
+    }
+  ],
+  "destinations": [
+    {
+      "url": "https://resg.top/",
+      "page": true,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top/v/latest/champions/22",
+      "page": true,
+      "content": true
+    },
+    {
+      "url": "https://www.resg.top/v/live/champions/22/?foo=bar",
+      "page": true,
+      "content": true
+    },
+    {
+      "url": "https://www.resg.top:443/v/live/champions/22",
+      "page": true,
+      "content": true
+    },
+    {
+      "url": "https://www.resg.top:444/v/live/champions/22",
+      "page": false,
+      "content": false
+    },
+    {
+      "url": "https://example.net/v/latest/champions/22",
+      "page": false,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top.example.net/v/latest/champions/22",
+      "page": false,
+      "content": false
+    },
+    {
+      "url": "https://example.net@www.resg.top/v/latest/champions/22",
+      "page": false,
+      "content": false
+    },
+    {
+      "url": "http://www.resg.top/v/latest/champions/22",
+      "page": false,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top/v/latest/champions/22//",
+      "page": true,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top//v/latest/champions/22",
+      "page": true,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top/v/latest/champions/%32%32",
+      "page": true,
+      "content": false
+    },
+    {
+      "url": "https://www.resg.top/v/latest/champions/٢٢",
+      "page": true,
+      "content": false
+    },
+    {
+      "url": "not a url",
+      "page": false,
+      "content": false
+    }
+  ],
+  "charts": [
+    {
+      "champion": 1,
+      "expected": "https://www.resg.top/v/latest/champions/1"
+    },
+    {
+      "champion": 22,
+      "expected": "https://www.resg.top/v/latest/champions/22"
+    },
+    {
+      "champion": 99999,
+      "expected": "https://www.resg.top/v/latest/champions/99999"
+    },
+    {
+      "champion": 0,
+      "expected": null
+    },
+    {
+      "champion": 100000,
+      "expected": null
+    }
+  ]
+}

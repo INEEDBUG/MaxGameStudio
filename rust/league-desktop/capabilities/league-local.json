@@ -1,0 +1,6 @@
+{
+  "identifier": "league-local",
+  "description": "Events for the packaged League interface",
+  "windows": ["main", "aux", "opgg"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

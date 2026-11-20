@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MaxGameStudio League",
+  "mainBinaryName": "MaxGameStudioLeagueToolbox",
+  "version": "1.0.0-beta.8",
+  "identifier": "com.maxgamestudio.league.toolbox",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "capabilities": ["league-local"]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["dist/league.ico"]
+  }
+}
