@@ -62,12 +62,7 @@ pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
 
 fn windows(mut events: Vec<GameEvent>, tick_rate: f64, demo_end: i64) -> (i64, Vec<RoundWindow>) {
     events.sort_by_key(|event| event.tick);
-    let start = events
-        .iter()
-        .filter(|event| event.name == "round_announce_match_start")
-        .map(|event| i64::from(event.tick))
-        .max()
-        .unwrap_or(0);
+    let start = i64::from(match_start_tick(&events));
     let mut freezetime = BTreeMap::<i64, i64>::new();
     let mut restarts = BTreeSet::new();
     let mut decisions = BTreeMap::<i64, &GameEvent>::new();
@@ -165,7 +160,16 @@ fn windows(mut events: Vec<GameEvent>, tick_rate: f64, demo_end: i64) -> (i64, V
     (start, rounds)
 }
 
-fn field<'a>(event: &'a GameEvent, name: &str) -> Option<&'a Variant> {
+pub(crate) fn match_start_tick(events: &[GameEvent]) -> i32 {
+    events
+        .iter()
+        .filter(|event| event.name == "round_announce_match_start")
+        .map(|event| event.tick)
+        .max()
+        .unwrap_or(0)
+}
+
+pub(crate) fn field<'a>(event: &'a GameEvent, name: &str) -> Option<&'a Variant> {
     event
         .fields
         .iter()
@@ -174,7 +178,7 @@ fn field<'a>(event: &'a GameEvent, name: &str) -> Option<&'a Variant> {
         .as_ref()
 }
 
-fn integer(value: &Variant) -> Option<i64> {
+pub(crate) fn integer(value: &Variant) -> Option<i64> {
     match value {
         Variant::I32(n) => Some(i64::from(*n)),
         Variant::U32(n) => Some(i64::from(*n)),
@@ -206,7 +210,7 @@ fn reason(value: &Variant) -> Option<String> {
     }
 }
 
-fn end_tick(bytes: &[u8]) -> Result<i64, Failure> {
+pub(crate) fn end_tick(bytes: &[u8]) -> Result<i64, Failure> {
     let bad_frame = || Failure::replay_parse("invalid Demo frame boundary");
     let mut frames = bytes
         .get(16..)
