@@ -9,7 +9,7 @@ import { createNativeRendererConfig } from './build.mjs'
 const stagedSource = resolve('staged-league-fixture')
 const outDir = resolve('native-webview-dist')
 
-test('selects the three bundled windows and allows local Tauri IPC in their CSP', () => {
+test('selects the three bundled windows and allows local Tauri IPC and game art in their CSP', () => {
   const vue = { name: 'vite:vue' }
   const devtools = { name: 'vite-plugin-vue-devtools' }
   const config = createNativeRendererConfig({ plugins: [vue, [devtools]] }, stagedSource, outDir)
@@ -32,7 +32,7 @@ test('selects the three bundled windows and allows local Tauri IPC in their CSP'
     config.plugins[0].transformIndexHtml(html, {
       filename: config.build.rolldownOptions.input.main
     }),
-    html.replace("connect-src 'self'", "connect-src ipc: http://ipc.localhost 'self'")
+    html.replace("connect-src 'self'", "img-src https: akari: data: blob: 'self' http://league-art.localhost; connect-src ipc: http://ipc.localhost 'self'")
   )
 })
 

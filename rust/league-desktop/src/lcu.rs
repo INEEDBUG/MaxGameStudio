@@ -47,6 +47,9 @@ pub(crate) mod player_search;
 #[path = "game_data.rs"]
 pub(crate) mod game_data;
 
+#[path = "game_art.rs"]
+pub(crate) mod game_art;
+
 /// Borrow the port and token that trusted desktop discovery verified for the same client generation.
 pub(crate) struct LcuTarget<'a> {
     port: NonZeroU16,

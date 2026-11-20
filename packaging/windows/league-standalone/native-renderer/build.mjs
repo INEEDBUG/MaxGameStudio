@@ -6,6 +6,7 @@ import { resgDisplayProgram } from '../../league-resg/resg-display.ts'
 
 const IPC_MODULE = 'virtual:mgs-league-native-ipc'
 const IPC_SOURCE = fileURLToPath(new URL('./tauri-ipc.ts', import.meta.url))
+const GAME_ART_ORIGIN = 'http://league-art.localhost'
 const WINDOW_ENTRIES = {
   main: 'main-window.html',
   aux: 'aux-window.html',
@@ -219,6 +220,18 @@ function nativeRendererPlugin(sourceRoot) {
   transforms.set(piniaSync.replaceAll('\\', '/'), NATIVE_STATE_TRANSFORMS)
   const updateButton = join(sourceRoot, 'src/renderer/src-main-window/views/league-overview/LeagueUpdateButton.vue')
   transforms.set(updateButton.replaceAll('\\', '/'), UPDATE_BUTTON_TRANSFORMS)
+  const resources = join(sourceRoot, 'src/renderer-shared/providers/game-resource/akari.ts')
+  const resolveFromPath = 'akari://league-client${normalizeLcuPath(normalizedSource)}'
+  const resolveFromUrl = 'akari://league-client${normalizeLcuPath(`${url.pathname}${url.search}${url.hash}`)}'
+  transforms.set(resources.replaceAll('\\', '/'), [
+    ['(?:https?:|image:', '(?:https?:|akari:|image:'],
+    [resolveFromPath, resolveFromPath.replace('akari://league-client', GAME_ART_ORIGIN)],
+    [resolveFromUrl, resolveFromUrl.replace('akari://league-client', GAME_ART_ORIGIN)]
+  ])
+  const client = join(sourceRoot, 'src/renderer-shared/shards/league-client/index.ts')
+  transforms.set(client.replaceAll('\\', '/'), [
+    ["return new URL(uri, 'akari://league-client').href", `return new URL(uri, '${GAME_ART_ORIGIN}').href`]
+  ])
   for (const [relative, anchor, gesture, label] of DRAG_REGIONS) {
     const file = join(sourceRoot, 'src/renderer', relative).replaceAll('\\', '/')
     transforms.set(file, [
@@ -252,7 +265,12 @@ const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}
       return { code, map: null }
     },
     transformIndexHtml(html, { filename }) {
-      return replaceOnce(html, 'connect-src ', 'connect-src ipc: http://ipc.localhost ', filename)
+      return replaceOnce(
+        html,
+        'connect-src ',
+        `img-src https: akari: data: blob: 'self' ${GAME_ART_ORIGIN}; connect-src ipc: http://ipc.localhost `,
+        filename
+      )
     }
   }
 }

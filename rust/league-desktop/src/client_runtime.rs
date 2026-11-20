@@ -4,13 +4,17 @@ use crate::{
     aram_automation::{AramOptions, AramSchedule, SelectionScope},
     client_discovery::{discover_clients, ClientInstance, LocalClient},
     desktop::emit,
-    lcu::{player_search::PlayerSearchShard, GameflowSession, LcuError, LcuTransport},
+    lcu::{
+        game_art::{GameArt, GameArtPath},
+        player_search::PlayerSearchShard,
+        GameflowSession, LcuError, LcuTransport,
+    },
     resg_window::{ResgAction, ResgWindow},
 };
 pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
 use serde_json::{json, Map, Value};
 use std::{
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
@@ -121,6 +125,7 @@ struct RuntimeState {
     data_ticket: u64,
     data_task: Option<tauri::async_runtime::JoinHandle<()>>,
     game_data: Map<String, Value>,
+    art_client: Option<Arc<LocalClient>>,
 }
 
 pub(crate) fn empty_game_data() -> Value {
@@ -166,6 +171,7 @@ pub(crate) struct ClientRuntime {
     transport: LcuTransport,
     state: Mutex<RuntimeState>,
     wake: tokio::sync::Notify,
+    art_reads: tokio::sync::Semaphore,
 }
 
 impl ClientRuntime {
@@ -178,6 +184,7 @@ impl ClientRuntime {
                 ..Default::default()
             }),
             wake: tokio::sync::Notify::new(),
+            art_reads: tokio::sync::Semaphore::new(4),
         })
     }
 
@@ -207,6 +214,23 @@ impl ClientRuntime {
 
     pub(crate) fn refresh_soon(&self) {
         self.wake.notify_one();
+    }
+
+    pub(crate) async fn game_art(&self, path: &GameArtPath) -> Option<GameArt> {
+        let _permit = tokio::time::timeout(Duration::from_secs(3), self.art_reads.acquire())
+            .await
+            .ok()?
+            .ok()?;
+        let client = self.state.lock().ok()?.art_client.clone()?;
+        let target = client.target().ok()?;
+        let art = self.transport.read_game_art(&target, path).await.ok()??;
+        self.state
+            .lock()
+            .ok()?
+            .art_client
+            .as_ref()
+            .is_some_and(|current| current.instance == client.instance && client.alive())
+            .then_some(art)
     }
 
     pub(crate) fn replace_aram_options(&self, options: AramOptions) -> Result<(), &'static str> {
@@ -321,6 +345,7 @@ impl ClientRuntime {
         state.generation += 1;
         state.manual_client = selection;
         state.manually_disconnected = selection.is_none();
+        state.art_client = None;
         state.aram.reset();
         let previous = Snapshot {
             active: state.snapshot.active.take(),
@@ -466,7 +491,10 @@ impl ClientRuntime {
             .await
             .ok()
             .and_then(Result::ok)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<_>>();
         let find_client = |instance| clients.iter().find(|client| client.instance == instance);
         let candidate = if let Some(selection) = manual {
             find_client(selection)
@@ -522,6 +550,15 @@ impl ClientRuntime {
                 state.snapshot = snapshot;
             }
             state.refresh_game_data(app);
+            state.art_client = candidate
+                .filter(|candidate| {
+                    state
+                        .snapshot
+                        .active
+                        .as_ref()
+                        .is_some_and(|active| active.instance == candidate.instance)
+                })
+                .cloned();
             if state
                 .snapshot
                 .active

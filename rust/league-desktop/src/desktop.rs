@@ -1,5 +1,6 @@
 use crate::{
     client_runtime::{client_from_view, monitor, ClientRuntime, CLIENT},
+    lcu::game_art::GameArtPath,
     profile::DesktopProfile,
     resg_window::{self, ResgAction, ResgWindow},
 };
@@ -31,6 +32,47 @@ use bootstrap::{AUTO_SELECT, AUX_WINDOW, OPGG_WINDOW};
 
 const SYNC_NAMESPACE: &str = "mobx-utils-main";
 const LOCAL_WINDOWS: [&str; 3] = ["main", "aux", "opgg"];
+const GAME_ART_SCHEME: &str = "league-art";
+
+fn serve_game_art(
+    context: tauri::UriSchemeContext<'_, tauri::Wry>,
+    request: tauri::http::Request<Vec<u8>>,
+    responder: tauri::UriSchemeResponder,
+) {
+    use tauri::http::{Method, Response, StatusCode};
+    let allowed = LOCAL_WINDOWS.contains(&context.webview_label())
+        && request.method() == Method::GET
+        && request.uri().query().is_none();
+    let path = allowed
+        .then(|| GameArtPath::parse(request.uri().path()))
+        .flatten();
+    let Some(path) = path else {
+        responder.respond(
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Vec::new())
+                .expect("valid HTTP response"),
+        );
+        return;
+    };
+    let app = context.app_handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let runtime = app.state::<ClientRuntime>();
+        let result = runtime.game_art(&path).await;
+        let builder = Response::builder()
+            .header("Access-Control-Allow-Origin", "http://tauri.localhost")
+            .header("Cache-Control", "no-store")
+            .header("X-Content-Type-Options", "nosniff");
+        let response = if let Some(art) = result {
+            builder
+                .header("Content-Type", art.content_type)
+                .body(art.body)
+        } else {
+            builder.status(StatusCode::NOT_FOUND).body(Vec::new())
+        };
+        responder.respond(response.expect("valid game image HTTP response"));
+    });
+}
 
 #[derive(Default)]
 struct SettingsRevision(AtomicU64);
@@ -623,6 +665,7 @@ pub(crate) fn run() -> tauri::Result<()> {
             let _ = show_main(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol(GAME_ART_SCHEME, serve_game_art)
         .invoke_handler(tauri::generate_handler![league_call])
         .setup(|app| {
             // Setup runs after the single-instance plugin has taken ownership of this process.
