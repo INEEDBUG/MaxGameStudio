@@ -41,7 +41,7 @@ public static class MgsAllUsersNative
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll")]
-    private static extern int GetDlgCtrlID(IntPtr window);
+    private static extern IntPtr GetDlgItem(IntPtr dialog, int id);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr parameter,
         StringBuilder text, uint flags, uint milliseconds, out IntPtr result);
@@ -92,7 +92,6 @@ public static class MgsAllUsersNative
     {
         public IntPtr Handle { get; set; }
         public IntPtr Dialog { get; set; }
-        public int Id { get; set; }
         public string Text { get; set; }
         public bool IsButton { get; set; }
         public bool IsEdit { get; set; }
@@ -121,7 +120,7 @@ public static class MgsAllUsersNative
                     || (text.Length == 0 && !isEdit)) return true;
                 int buttonStyle = GetWindowLong(child, -16) & 0x0f;
                 controls.Add(new Control {
-                    Handle = child, Dialog = window, Id = GetDlgCtrlID(child), Text = text.ToString(),
+                    Handle = child, Dialog = window, Text = text.ToString(),
                     IsButton = isButton, IsEdit = isEdit,
                     Enabled = IsWindowEnabled(child),
                     IsCheckBox = isButton && (buttonStyle == 2 || buttonStyle == 3 || buttonStyle == 5 || buttonStyle == 6),
@@ -135,6 +134,15 @@ public static class MgsAllUsersNative
     }
 
     public static bool Click(IntPtr button) => PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero);
+
+    public static bool AcknowledgeNotice(IntPtr dialog)
+    {
+        // Use the native message box's IDOK command. The button text uses the runner's OS language.
+        var ok = new IntPtr(1);
+        IntPtr button = GetDlgItem(dialog, ok.ToInt32());
+        return button != IntPtr.Zero && IsWindowVisible(button) && IsWindowEnabled(button)
+            && PostMessage(dialog, 0x0111, ok, button);
+    }
 
     public static bool SetEditText(IntPtr edit, string text) =>
         SendMessageTimeoutText(edit, 0x000C, IntPtr.Zero, text, 2, 500, out IntPtr result) != IntPtr.Zero

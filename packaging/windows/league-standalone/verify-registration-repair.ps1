@@ -209,12 +209,9 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
       }
       if (!$confirmed) {
         $notice = @($controls | Where-Object { $_.Text -like '所有用户版已安装。个人数据设置及已有个人版均保留。*' })
-        if ($notice.Count -eq 1) {
-          $ok = @($controls | Where-Object { $_.Dialog -eq $notice[0].Dialog -and $_.IsButton -and $_.Enabled -and $_.Id -eq 1 })
-          if ($ok.Count -ne 1 -or ![MgsAllUsersNative]::Click($ok[0].Handle)) {
-            throw 'Could not acknowledge the all-users installation confirmation.'
-          }
+        if ($notice.Count -eq 1 -and [MgsAllUsersNative]::AcknowledgeNotice($notice[0].Dialog)) {
           $confirmed = $true
+          Write-Host 'LEAGUE_MACHINE_NOTICE_ACKNOWLEDGED'
         }
       }
       $finish = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and ($_.Text -replace '&', '').Trim() -match '^完成(?:\([A-Z]\))?$' })
@@ -231,7 +228,7 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
       }
       Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timed out waiting for the $scope recovery wizard to reach Finish."
+    throw "Timed out waiting for the $scope recovery wizard to reach Finish (confirmed installation notice: $confirmed)."
   } finally {
     if (!$wizard.HasExited) { Stop-CiFixtureProcess $wizard }
     $wizard.Dispose()
