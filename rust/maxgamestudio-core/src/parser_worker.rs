@@ -14,9 +14,7 @@ const EXECUTABLE: &str = "maxgamestudio-parser-worker.exe";
 const PARSER_COMMIT: &str = "db3ba5f7a1b02b8cb27d0063d52649883a98469c";
 const INPUT_LIMIT: usize = 64 * 1024;
 const OUTPUT_LIMIT: u64 = 4 * 1024 * 1024;
-const REPLAY_TIMEOUT: Duration = Duration::from_secs(240);
 
-#[derive(Clone)]
 pub(crate) struct ParserWorker {
     executable: PathBuf,
 }
@@ -43,14 +41,30 @@ impl ParserWorker {
         fps: f64,
         rounds: &Value,
     ) -> io::Result<Value> {
-        let request = serde_json::to_vec(&json!({
-            "protocol": 1, "action": "write_replay_parquet", "path": demo, "output_path": staged_parquet,
-            "tick_rate": tick_rate, "fps": fps, "rounds": rounds,
-        }))?;
+        self.run(
+            json!({
+                "protocol": 1, "action": "write_replay_parquet", "path": demo,
+                "output_path": staged_parquet, "tick_rate": tick_rate, "fps": fps, "rounds": rounds,
+            }),
+            Duration::from_secs(240),
+        )
+        .await
+    }
+
+    pub(crate) async fn inspect_demo(&self, path: &Path) -> io::Result<Value> {
+        self.run(
+            json!({"protocol": 1, "action": "inspect_demo", "path": path}),
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
+    async fn run(&self, input: Value, limit: Duration) -> io::Result<Value> {
+        let request = serde_json::to_vec(&input)?;
         if request.len() > INPUT_LIMIT {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Too many replay rounds for the parser worker",
+                "Parser worker request exceeded its size limit",
             ));
         }
 
@@ -64,7 +78,7 @@ impl ParserWorker {
         #[cfg(windows)]
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
         let mut child = command.spawn()?;
-        tokio::time::timeout(REPLAY_TIMEOUT, async {
+        tokio::time::timeout(limit, async {
             let mut stdin = child.stdin.take().expect("parser stdin was piped");
             stdin.write_all(&request).await?;
             drop(stdin);
@@ -106,6 +120,6 @@ impl ParserWorker {
             })
         })
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Replay parser worker timed out"))?
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Parser worker timed out"))?
     }
 }

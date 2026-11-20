@@ -2,6 +2,7 @@
 
 mod demo_body;
 mod demo_events;
+mod demo_open;
 mod demo_query;
 mod demo_radar;
 mod demo_watch;
@@ -102,7 +103,7 @@ struct ProfileState {
     session: RuntimeSession,
     disk: Arc<Semaphore>,
     parser_worker: Option<ParserWorker>,
-    replay_repair: Semaphore,
+    demo_parser: Semaphore,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
 }
@@ -137,7 +138,7 @@ impl NativeHttpServer {
             session: RuntimeSession::default(),
             disk: Arc::new(Semaphore::new(1)),
             parser_worker,
-            replay_repair: Semaphore::new(1),
+            demo_parser: Semaphore::new(1),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir
@@ -423,7 +424,9 @@ async fn route(
         }
     }
     let allowed = match route {
-        Route::Gsi | Route::ReplayBinary | Route::Demos(DemoRoute::InspectPath) => "POST",
+        Route::Gsi
+        | Route::ReplayBinary
+        | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
         Route::Demos(DemoRoute::Remark) => "PATCH",
         _ => "GET",
     };
@@ -464,6 +467,7 @@ async fn route(
                 route,
                 request,
                 shutdown,
+                extended_request,
             )
             .await
         }
@@ -502,7 +506,7 @@ async fn replay_response(
     if existing.status() != StatusCode::CONFLICT {
         return existing;
     }
-    let Ok(_permit) = profile.replay_repair.try_acquire() else {
+    let Ok(_permit) = profile.demo_parser.try_acquire() else {
         return detail(
             StatusCode::SERVICE_UNAVAILABLE,
             "Another Demo replay is being rebuilt",
@@ -569,8 +573,10 @@ async fn demo_response(
     route: DemoRoute,
     request: Request<Incoming>,
     shutdown: watch::Receiver<bool>,
+    extended_request: &AtomicBool,
 ) -> HttpResponse {
     match route {
+        DemoRoute::OpenLocal => demo_open::open(profile, request, extended_request).await,
         DemoRoute::RadarMap | DemoRoute::UtilityMask => demo_radar::image(route, request.uri()),
         DemoRoute::Stream => {
             let Some(body) = profile.demo_events.stream(shutdown) else {
@@ -740,8 +746,8 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
         .await;
     }
     if matches!(route, Route::ReplayCache) && request.method() == Method::DELETE {
-        let Ok(_permit) = profile.replay_repair.try_acquire() else {
-            return detail(StatusCode::CONFLICT, "回放缓存正在重建，请稍后再清理");
+        let Ok(_permit) = profile.demo_parser.try_acquire() else {
+            return detail(StatusCode::CONFLICT, "Demo 正在处理，请稍后再清理回放缓存");
         };
         return profile_disk(profile, |profile| {
             match clear_cache(profile.config.data_dir()) {

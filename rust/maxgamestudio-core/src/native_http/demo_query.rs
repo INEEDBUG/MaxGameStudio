@@ -15,6 +15,7 @@ pub(super) enum DemoRoute {
     Discovered,
     Stream,
     InspectPath,
+    OpenLocal,
     RadarMap,
     UtilityMask,
     Detail,
@@ -32,6 +33,7 @@ impl DemoRoute {
             "/api/demos/discovered" => Some(Self::Discovered),
             "/api/demos/stream" => Some(Self::Stream),
             "/api/demos/watch-path/inspect" => Some(Self::InspectPath),
+            "/api/demo/open-local" => Some(Self::OpenLocal),
             _ => {
                 for (prefix, route) in [
                     ("/api/demo/radar-map/", Self::RadarMap),
