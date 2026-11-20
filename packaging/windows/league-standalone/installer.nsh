@@ -361,7 +361,6 @@ FunctionEnd
   Call LeagueRunForUser
   ${If} $R7 == 4
     DetailPrint "所有用户版已安装。管理员会话未修改个人数据设置或移除旧个人版。"
-    MessageBox MB_ICONINFORMATION "所有用户版已安装。个人数据设置及已有个人版均保留。请使用自己的 Windows 帐户正常启动。" /SD IDOK
   ${ElseIf} $R7 != 0
     MessageBox MB_ICONEXCLAMATION "工具箱已写入，无法完成启动用户的数据设置或个人版清理。请检查该用户的数据目录权限后重试。" /SD IDOK
     SetErrorLevel 2

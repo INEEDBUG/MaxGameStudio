@@ -181,6 +181,9 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
       if ($edits.Count -ne 1 -or $edits[0].Enabled -or $edits[0].Text -cne $Destination -or $browse.Count) {
         throw 'Machine recovery exposed a program folder picker or did not lock the dedicated Program Files directory.'
       }
+      if (!($controls.Text -like '当前管理员会话仅安装共用程序。*继续使用该帐户的数据。')) {
+        throw 'Machine recovery must explain which account keeps its own data before installation.'
+      }
     } else {
       $program = @($edits | Where-Object { $_.Text -cne $profileDir })
       if ($edits.Count -ne 2 -or $program.Count -ne 1 -or !$program[0].Enabled -or
@@ -198,7 +201,6 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
     }
     Write-Host "LEAGUE_RECOVERY_WIZARD_INSTALL_CLICKED: $scope"
 
-    $confirmed = !$Machine
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     do {
       if ($wizard.HasExited) { throw "The $scope recovery wizard exited before Finish with code $($wizard.ExitCode)." }
@@ -207,15 +209,8 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
       if ($failure) {
         throw "The $scope recovery wizard reported an installation error before Finish. $($failure -join ' ')"
       }
-      if (!$confirmed) {
-        $notice = @($controls | Where-Object { $_.Text -like '所有用户版已安装。个人数据设置及已有个人版均保留。*' })
-        if ($notice.Count -eq 1 -and [MgsAllUsersNative]::AcknowledgeNotice($notice[0].Dialog)) {
-          $confirmed = $true
-          Write-Host 'LEAGUE_MACHINE_NOTICE_ACKNOWLEDGED'
-        }
-      }
       $finish = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and ($_.Text -replace '&', '').Trim() -match '^完成(?:\([A-Z]\))?$' })
-      if ($confirmed -and $finish.Count -eq 1) {
+      if ($finish.Count -eq 1) {
         $run = @($controls | Where-Object { $_.Dialog -eq $finish[0].Dialog -and $_.IsCheckBox -and ($_.Text -replace '&', '').Trim() -match '^运行' })
         if ($run.Count -ne 1 -or ![MgsAllUsersNative]::ClearCheckBox($run[0].Handle) -or
             ![MgsAllUsersNative]::Click($finish[0].Handle)) {
@@ -228,7 +223,7 @@ function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
       }
       Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timed out waiting for the $scope recovery wizard to reach Finish (confirmed installation notice: $confirmed)."
+    throw "Timed out waiting for the $scope recovery wizard to reach Finish."
   } finally {
     if (!$wizard.HasExited) { Stop-CiFixtureProcess $wizard }
     $wizard.Dispose()

@@ -40,8 +40,6 @@ public static class MgsAllUsersNative
     private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetDlgItem(IntPtr dialog, int id);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr parameter,
         StringBuilder text, uint flags, uint milliseconds, out IntPtr result);
@@ -134,15 +132,6 @@ public static class MgsAllUsersNative
     }
 
     public static bool Click(IntPtr button) => PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero);
-
-    public static bool AcknowledgeNotice(IntPtr dialog)
-    {
-        // Use the native message box's IDOK command. The button text uses the runner's OS language.
-        var ok = new IntPtr(1);
-        IntPtr button = GetDlgItem(dialog, ok.ToInt32());
-        return button != IntPtr.Zero && IsWindowVisible(button) && IsWindowEnabled(button)
-            && PostMessage(dialog, 0x0111, ok, button);
-    }
 
     public static bool SetEditText(IntPtr edit, string text) =>
         SendMessageTimeoutText(edit, 0x000C, IntPtr.Zero, text, 2, 500, out IntPtr result) != IntPtr.Zero
