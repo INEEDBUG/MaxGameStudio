@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { copyFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -6,6 +7,7 @@ import { resgDisplayProgram } from '../../league-resg/resg-display.ts'
 
 const IPC_MODULE = 'virtual:mgs-league-native-ipc'
 const IPC_SOURCE = fileURLToPath(new URL('./tauri-ipc.ts', import.meta.url))
+const OPGG_COMPANION = new URL('./NativeOpggCompanion.vue', import.meta.url)
 const GAME_ART_ORIGIN = 'http://league-art.localhost'
 const WINDOW_ENTRIES = {
   main: 'main-window.html',
@@ -232,6 +234,17 @@ function nativeRendererPlugin(sourceRoot) {
   transforms.set(client.replaceAll('\\', '/'), [
     ["return new URL(uri, 'akari://league-client').href", `return new URL(uri, '${GAME_ART_ORIGIN}').href`]
   ])
+  const opggRoot = join(sourceRoot, 'src/renderer/src-opgg-window').replaceAll('\\', '/')
+  const opggView = `${opggRoot}/opgg/OpggView.vue`
+  const opggHtml = join(sourceRoot, 'src/renderer', WINDOW_ENTRIES.opgg).replaceAll('\\', '/')
+  transforms.set(`${opggRoot}/App.vue`, [
+    ["import { provideOpgg } from './opgg/context'\n", ''],
+    ['\nprovideOpgg()\n', '\n']
+  ])
+  transforms.set(`${opggRoot}/shards/index.ts`, [
+    ["import { OpggRenderer } from './opgg'\n", ''],
+    ['manager.use(OpggRenderer)\n', '']
+  ])
   for (const [relative, anchor, gesture, label] of DRAG_REGIONS) {
     const file = join(sourceRoot, 'src/renderer', relative).replaceAll('\\', '/')
     transforms.set(file, [
@@ -255,7 +268,14 @@ const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}
       if (id === IPC_MODULE) return IPC_SOURCE
     },
     transform(source, id) {
-      const patches = transforms.get(id.replaceAll('\\', '/'))
+      const normalized = id.replaceAll('\\', '/')
+      if (normalized === opggView) {
+        if (!source.includes('const { currentTab } = useOpgg()')) {
+          throw new Error(`Unexpected OP.GG view in ${id}`)
+        }
+        return { code: readFileSync(OPGG_COMPANION, 'utf8'), map: null }
+      }
+      const patches = transforms.get(normalized)
       if (!patches) return
 
       let code = source.replaceAll('\r\n', '\n')
@@ -265,10 +285,16 @@ const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}
       return { code, map: null }
     },
     transformIndexHtml(html, { filename }) {
+      const opgg = filename.replaceAll('\\', '/') === opggHtml
+      if (opgg) {
+        html = replaceOnce(html, "default-src https: ws: 'self' data: blob: ;", "default-src 'self' data: blob:;", filename)
+        html = replaceOnce(html, "connect-src https: ws: 'self';", "connect-src 'self';", filename)
+      }
+      const imageSources = opgg ? "data: blob: 'self'" : "https: akari: data: blob: 'self'"
       return replaceOnce(
         html,
         'connect-src ',
-        `img-src https: akari: data: blob: 'self' ${GAME_ART_ORIGIN}; connect-src ipc: http://ipc.localhost `,
+        `img-src ${imageSources} ${GAME_ART_ORIGIN}; connect-src ipc: http://ipc.localhost `,
         filename
       )
     }

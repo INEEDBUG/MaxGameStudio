@@ -36,6 +36,25 @@ test('selects the three bundled windows and allows local Tauri IPC and game art 
   )
 })
 
+test('native OP.GG keeps the local shell and opens the official guide only through an explicit action', () => {
+  const config = createNativeRendererConfig({}, stagedSource, outDir)
+  const plugin = config.plugins[0]
+  const opgg = join(config.root, 'src-opgg-window')
+  const app = "import { provideOpgg } from './opgg/context'\n\nprovideOpgg()\n"
+  const shards = "import { OpggRenderer } from './opgg'\nmanager.use(OpggRenderer)\nmanager.use(AkariIpcRenderer)\n"
+  assert.doesNotMatch(plugin.transform(app, join(opgg, 'App.vue')).code, /provideOpgg/)
+  assert.equal(plugin.transform(shards, join(opgg, 'shards/index.ts')).code, 'manager.use(AkariIpcRenderer)\n')
+  const view = plugin.transform('const { currentTab } = useOpgg()', join(opgg, 'opgg/OpggView.vue')).code
+  assert.match(view, /@click="openGuide"/)
+  assert.match(view, /ipc\.call\(namespace, 'openGuide'\)/)
+  assert.doesNotMatch(view, /https?:|\bfetch\b|axios|provideOpgg/)
+  const meta = "default-src https: ws: 'self' data: blob: ; connect-src https: ws: 'self';"
+  const html = plugin.transformIndexHtml(meta, { filename: config.build.rolldownOptions.input.opgg })
+  assert.match(html, /default-src 'self' data: blob:;/)
+  assert.match(html, /connect-src ipc: http:\/\/ipc\.localhost 'self';/)
+  assert.doesNotMatch(html, /https:|ws:/)
+})
+
 test('later client events take precedence over a delayed initial state', async () => {
   const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
   const filename = join(stagedSource, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
