@@ -3,7 +3,7 @@
     <main class="league-overview">
       <h1>{{ english ? 'Overview' : '总览' }}</h1>
       <section class="client-panel" aria-live="polite">
-        <span class="league-game-mark" aria-hidden="true"></span>
+        <img class="league-game-mark" :src="leagueLogo" alt="" />
         <div>
           <strong>{{ clientStatus }}</strong>
           <p>{{ phase }}</p>
@@ -51,6 +51,7 @@
 </template>
 
 <script setup lang="ts">
+import leagueLogo from '@renderer-shared/assets/ico/league.ico?url'
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { AutoGameflowRenderer } from '@renderer-shared/shards/auto-gameflow'
@@ -123,12 +124,10 @@ async function changeSetting(apply: (value: boolean) => Promise<unknown>, value:
 .league-overview {
   --overview-border: color-mix(in srgb, currentColor 14%, transparent);
   --overview-surface: var(--la-background-color-secondary, var(--la-background-color-primary));
-  --overview-accent: #906a21;
   max-width: 1160px;
   margin: 0 auto;
   padding: 20px clamp(18px, 4vw, 42px) 24px;
 }
-:global([data-theme='dark']) .league-overview { --overview-accent: #d5b56c; }
 h1 { margin: 0 0 18px; font-size: 25px; line-height: 1.3; font-weight: 650; }
 h2 { margin: 0 0 12px; font-size: 15px; line-height: 1.4; font-weight: 650; }
 p { margin: 4px 0 0; opacity: .76; line-height: 1.5; font-size: 12px; }
@@ -144,8 +143,7 @@ p { margin: 4px 0 0; opacity: .76; line-height: 1.5; font-size: 12px; }
   inline-size: 36px;
   block-size: 36px;
   flex: none;
-  background: var(--overview-accent);
-  mask: url('./leagueoflegends.svg') center / contain no-repeat;
+  object-fit: contain;
 }
 .overview-columns { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin: 16px 0; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
