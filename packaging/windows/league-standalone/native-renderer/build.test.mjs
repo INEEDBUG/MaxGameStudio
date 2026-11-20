@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -106,4 +107,52 @@ test('connects the main title bar drag gesture to the native main window only', 
   assert.match(native, /class="shard-area" @mousedown\.self\.left="startNativeDrag"/)
   assert.match(native, /call\('window-manager-main\/main-window', 'startDragging'\)/)
   assert.equal(renderer.transform(component, join(stagedSource, 'other.vue')), undefined)
+})
+
+test('checks through Rust and downloads only the checked version from the native updater', async () => {
+  const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const component = readFileSync(new URL('../LeagueUpdateButton.vue', import.meta.url), 'utf8')
+  const filename = join(stagedSource, 'src/renderer/src-main-window/views/league-overview/LeagueUpdateButton.vue')
+  const native = renderer.transform(component, filename)?.code ?? component
+  assert.doesNotMatch(native, /\bfetch\(|:href=|league-update'/)
+  assert.match(native, /@click="openDownload"/)
+
+  const scripts = [...native.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(([, script]) => script.replace(/^import .*$/gm, ''))
+    .join('\n')
+  const script = stripTypeScriptTypes(scripts, { mode: 'transform' })
+  const createButton = new Function(
+    'ref', 'shallowRef', 'computed', 'onMounted', 'useAppCommonStore', 'useSelfUpdateStore',
+    'useInstance', 'AkariIpcRenderer', `${script}\nreturn { check, openDownload, status, update }`
+  )
+  const ref = (value) => ({ value })
+  const calls = []
+  let mounted
+  let availableVersion = '1.0.0-beta.10'
+  const makeButton = (autoCheckUpdates) => createButton(
+    ref, ref, (getter) => getter, (callback) => { mounted = callback },
+    () => ({ settings: { locale: 'zh-CN' } }), () => ({ settings: { autoCheckUpdates } }),
+    () => ({ async call(...args) {
+      calls.push(args)
+      if (args[1] === 'check') return { availableVersion }
+    } }), {}
+  )
+  const button = makeButton(false)
+  mounted()
+  assert.deepEqual(calls, [])
+  await button.check()
+  assert.equal(button.update.value, '1.0.0-beta.10')
+  await button.openDownload()
+  assert.deepEqual(calls, [
+    ['league-update-main', 'check'],
+    ['league-update-main', 'openDownload', '1.0.0-beta.10']
+  ])
+
+  availableVersion = null
+  const automatic = makeButton(true)
+  mounted()
+  await new Promise(setImmediate)
+  assert.equal(calls.length, 3)
+  assert.equal(automatic.status.value, 'idle')
+  assert.equal(automatic.update.value, null)
 })

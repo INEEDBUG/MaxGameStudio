@@ -23,6 +23,9 @@ use tauri_plugin_opener::OpenerExt;
 #[path = "bootstrap.rs"]
 mod bootstrap;
 
+#[path = "updater.rs"]
+mod updater;
+
 use bootstrap::{AUTO_SELECT, AUX_WINDOW, OPGG_WINDOW};
 
 const SYNC_NAMESPACE: &str = "mobx-utils-main";
@@ -122,6 +125,42 @@ fn close_main(window: &WebviewWindow, action: &str) -> Result<(), String> {
 
 fn field(value: Value) -> Value {
     json!({ "value": value, "config": { "raw": false } })
+}
+
+fn response(result: Result<Value, impl std::fmt::Display>) -> Value {
+    match result {
+        Ok(data) => json!({"success":true,"data":data}),
+        Err(error) => json!({"success":false,"error":{"message":error.to_string()}}),
+    }
+}
+
+async fn update_call(
+    window: &WebviewWindow,
+    method: &str,
+    args: &[Value],
+) -> Result<Value, String> {
+    let updater = window.state::<updater::LeagueUpdater>();
+    match (method, args) {
+        ("check", []) => {
+            let installed = window.app_handle().package_info().version.to_string();
+            let check = updater
+                .check(&installed)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(json!(check))
+        }
+        ("openDownload", [Value::String(version)]) => {
+            let url = updater
+                .download_url(version)
+                .map_err(|error| error.to_string())?;
+            window
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(|_| "无法打开 League 下载页面。".to_owned())?;
+            Ok(Value::Null)
+        }
+        _ => Err("无效的 League 更新操作。".into()),
+    }
 }
 
 fn state_fields(fields: Value, revision: Option<u64>) -> Value {
@@ -268,10 +307,16 @@ async fn league_call(
     if !LOCAL_WINDOWS.contains(&window.label()) {
         return Err("此窗口无法调用工具箱。".into());
     }
+    if namespace == updater::NAMESPACE {
+        if window.label() != "main" {
+            return Err("只能从主窗检查 League 更新。".into());
+        }
+        return Ok(response(update_call(&window, &method, &args).await));
+    }
     let app = window.app_handle();
     let invoke = || -> Result<Value, Box<dyn std::error::Error>> {
         match (namespace.as_str(), method.as_str()) {
-            (APP_COMMON, "getVersion") => Ok(json!(env!("CARGO_PKG_VERSION"))),
+            (APP_COMMON, "getVersion") => Ok(json!(app.package_info().version.to_string())),
             (APP_COMMON, "openUserDataDir") => {
                 window
                     .opener()
@@ -533,10 +578,7 @@ async fn league_call(
             _ => Err("该工具箱功能尚未接入 Rust 运行时。".into()),
         }
     };
-    Ok(match invoke() {
-        Ok(data) => json!({ "success": true, "data": data }),
-        Err(error) => json!({ "success": false, "error": { "message": error.to_string() } }),
-    })
+    Ok(response(invoke()))
 }
 
 pub(crate) fn run() -> tauri::Result<()> {
@@ -565,6 +607,7 @@ pub(crate) fn run() -> tauri::Result<()> {
             app.manage(profile);
             app.manage(ClientRuntime::new(auto_connect)?);
             app.manage(SettingsRevision::default());
+            app.manage(updater::LeagueUpdater::default());
             let show = MenuItem::with_id(app, "show", "显示工具箱", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出工具箱", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;

@@ -154,6 +154,61 @@ const DRAG_REGIONS = [
   ]
 ]
 
+const UPDATE_BUTTON_TRANSFORMS = [
+  [
+    `    <NButton v-if="update" size="small" type="primary" tag="a" :href="update.url"
+      target="_blank" rel="noopener noreferrer">
+      {{ (english ? 'Download ' : '下载 ') + update.version }}`,
+    `    <NButton v-if="update" size="small" type="primary" :loading="downloading"
+      :disabled="status === 'checking'" @click="openDownload">
+      {{ (english ? 'Download ' : '下载 ') + update }}`
+  ],
+  ["import { leagueUpdate, leagueUpdateFeed } from './league-update'\n", ''],
+  [
+    'const update = shallowRef<ReturnType<typeof leagueUpdate>>(null)',
+    `const update = shallowRef<string | null>(null)
+const downloading = ref(false)`
+  ],
+  [
+    "import { NButton } from 'naive-ui'",
+    `import { NButton } from 'naive-ui'
+import { useInstance } from '@renderer-shared/shards'
+import { AkariIpcRenderer } from '@renderer-shared/shards/ipc'`
+  ],
+  ['const app = useAppCommonStore()', 'const app = useAppCommonStore()\nconst ipc = useInstance(AkariIpcRenderer)'],
+  [
+    "  if (status.value === 'checking') return",
+    "  if (status.value === 'checking' || downloading.value) return"
+  ],
+  [
+    `    const response = await fetch(leagueUpdateFeed(app.version), {
+      cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(6000)
+    })
+    if (!response.ok) throw new Error('League manifest unavailable')
+    update.value = leagueUpdate(await response.json(), app.version)`,
+    `    const result = await ipc.call<{ availableVersion: string | null }>('league-update-main', 'check')
+    update.value = result.availableVersion`
+  ],
+  [
+    'onMounted(() => {',
+    `async function openDownload() {
+  const version = update.value
+  if (!version || downloading.value || status.value === 'checking') return
+  downloading.value = true
+  try {
+    await ipc.call('league-update-main', 'openDownload', version)
+  } catch {
+    update.value = null
+    status.value = 'error'
+  } finally {
+    downloading.value = false
+  }
+}
+
+onMounted(() => {`
+  ]
+]
+
 function nativeRendererPlugin(sourceRoot) {
   const ipcDirectory = join(sourceRoot, 'src/renderer-shared/shards/ipc').replaceAll('\\', '/')
   const transforms = new Map(
@@ -161,6 +216,8 @@ function nativeRendererPlugin(sourceRoot) {
   )
   const piniaSync = join(sourceRoot, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
   transforms.set(piniaSync.replaceAll('\\', '/'), NATIVE_STATE_TRANSFORMS)
+  const updateButton = join(sourceRoot, 'src/renderer/src-main-window/views/league-overview/LeagueUpdateButton.vue')
+  transforms.set(updateButton.replaceAll('\\', '/'), UPDATE_BUTTON_TRANSFORMS)
   for (const [relative, anchor, gesture, label] of DRAG_REGIONS) {
     const file = join(sourceRoot, 'src/renderer', relative).replaceAll('\\', '/')
     transforms.set(file, [

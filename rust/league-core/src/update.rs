@@ -12,6 +12,13 @@ pub struct LeagueUpdate {
     pub url: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LeagueFeedIdentity {
+    pub product: &'static str,
+    pub channel: &'static str,
+    pub url: &'static str,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateError {
     Version,
@@ -78,15 +85,39 @@ fn parse_version(value: &str) -> Option<Version> {
 }
 
 pub fn league_update_feed(current: &str) -> Result<&'static str, UpdateError> {
+    Ok(league_feed_identity(current)?.url)
+}
+
+pub fn league_feed_identity(current: &str) -> Result<LeagueFeedIdentity, UpdateError> {
     let installed = parse_version(current).ok_or(UpdateError::Version)?;
-    Ok(if installed.beta.is_some() {
-        "https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/league-beta.json"
-    } else {
-        "https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/league-latest.json"
+    Ok(LeagueFeedIdentity {
+        product: PRODUCT,
+        channel: installed.channel(),
+        url: if installed.beta.is_some() {
+            "https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/league-beta.json"
+        } else {
+            "https://raw.githubusercontent.com/INEEDBUG/MaxGameStudio/updater/league-latest.json"
+        },
     })
 }
 
 pub fn league_update(info: &Value, current: &str) -> Result<Option<LeagueUpdate>, UpdateError> {
+    evaluate_update(info, current, false)
+}
+
+/// Evaluate a response from the installed application's own published channel.
+pub fn league_update_from_feed(
+    info: &Value,
+    current: &str,
+) -> Result<Option<LeagueUpdate>, UpdateError> {
+    evaluate_update(info, current, true)
+}
+
+fn evaluate_update(
+    info: &Value,
+    current: &str,
+    published_feed: bool,
+) -> Result<Option<LeagueUpdate>, UpdateError> {
     // The original checks the installed version before inspecting an object or array's fields.
     if !info.is_object() && !info.is_array() {
         return Err(UpdateError::Manifest);
@@ -111,11 +142,18 @@ pub fn league_update(info: &Value, current: &str) -> Result<Option<LeagueUpdate>
         return Err(UpdateError::Channel);
     }
     if channel != installed.channel() {
-        return if installed.beta.is_none() {
+        return if installed.beta.is_none() && !published_feed {
             Ok(None)
         } else {
             Err(UpdateError::Channel)
         };
+    }
+    if published_feed
+        && !info["sha256"].as_str().is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    {
+        return Err(UpdateError::Manifest);
     }
     Ok((remote > installed).then(|| LeagueUpdate {
         version: version.to_owned(),
