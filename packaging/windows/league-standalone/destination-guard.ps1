@@ -84,11 +84,11 @@ function Get-IncompleteInstallDirectory($Registration) {
   if (Test-NonemptyDirectory $path) { $path }
 }
 
-function Test-LeaguePayload([string]$Program) {
+function Test-LeaguePayload([string]$Program, [string]$ExpectedNativeHash) {
   $resources = Get-LocalDirectory (Join-Path $Program 'resources')
   $complete = $true
   foreach ($path in (Join-Path $Program 'MaxGameStudioLeagueToolbox.exe'),
-      (Join-Path $Program 'Uninstall MaxGameStudioLeagueToolbox.exe'), (Join-Path $resources 'app.asar')) {
+      (Join-Path $Program 'Uninstall MaxGameStudioLeagueToolbox.exe')) {
     try { $item = Get-Item -LiteralPath $path -Force }
     catch [System.Management.Automation.ItemNotFoundException] { $complete = $false; continue }
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -96,7 +96,13 @@ function Test-LeaguePayload([string]$Program) {
     }
     if (!$item.Length) { $complete = $false }
   }
-  return $complete
+  if (!$complete) { return $false }
+  if ($ExpectedNativeHash) {
+    $native = Get-LeagueNativeRuntime $Program
+    return [bool]($native -and $native.Digest -ceq $ExpectedNativeHash)
+  }
+  $asar = Get-LeagueOrdinaryFile $resources 'app.asar'
+  return [bool](($asar -and $asar.Length) -or (Get-LeagueNativeRuntime $Program))
 }
 
 function Get-OwnedLeagueDirectory($Registration, [string[]]$Protected) {
@@ -170,7 +176,16 @@ try {
   }
   if ($phase -eq 'payload') {
     $program = Get-LocalDirectory $env:MGS_LEAGUE_INSTALL_DEST
-    if (!(Test-LeaguePayload $program)) { exit 7 }
+    $expectedNativeHash = ''
+    $inventory = Get-LeagueOrdinaryFile $PSScriptRoot 'maxgamestudio-runtime-hashes.json'
+    if ($inventory) {
+      $expected = Get-Content -LiteralPath $inventory.FullName -Raw | ConvertFrom-Json
+      if (!$expected.PSObject.Properties['resources/app.asar']) {
+        $expectedNativeHash = $expected.PSObject.Properties['MaxGameStudioLeagueToolbox.exe'].Value
+        if ($expectedNativeHash -cnotmatch '^[a-f0-9]{64}$') { exit 7 }
+      }
+    }
+    if (!(Test-LeaguePayload $program $expectedNativeHash)) { exit 7 }
     exit 0
   }
   $leagueRoot = Get-LocalDirectory (Join-Path $env:APPDATA 'MaxGameStudioLeague')

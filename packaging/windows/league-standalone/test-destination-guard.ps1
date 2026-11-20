@@ -81,6 +81,29 @@ try {
   [IO.File]::WriteAllText($appExe, 'old')
   Assert-Guard 'All required files permit registration' 'payload' 'CurrentUser' $old 0
 
+  $native = Join-Path $scratch 'Native Toolbox'
+  [IO.Directory]::CreateDirectory($native) | Out-Null
+  $nativeExe = Join-Path $native 'MaxGameStudioLeagueToolbox.exe'
+  $nativeUninstaller = Join-Path $native 'Uninstall MaxGameStudioLeagueToolbox.exe'
+  Add-Type -TypeDefinition @'
+using System.Reflection;
+[assembly: AssemblyProduct("MaxGameStudio League")]
+[assembly: AssemblyInformationalVersion("1.0.0-beta.9")]
+public static class NativeLeagueFixture { public static void Main() { } }
+'@ -OutputAssembly $nativeExe -OutputType ConsoleApplication
+  [IO.File]::WriteAllText($nativeUninstaller, 'fixture uninstaller')
+  $nativeHash = (Get-FileHash -LiteralPath $nativeExe).Hash.ToLowerInvariant()
+  $inventoryJson = @{ 'MaxGameStudioLeagueToolbox.exe' = $nativeHash } | ConvertTo-Json
+  $trustedInventory = Join-Path $scratch 'maxgamestudio-runtime-hashes.json'
+  $installedInventory = Join-Path $native 'maxgamestudio-runtime-hashes.json'
+  [IO.File]::WriteAllText($trustedInventory, $inventoryJson)
+  [IO.File]::WriteAllText($installedInventory, $inventoryJson)
+  Assert-Guard 'Exact native payload permits registration without an ASAR' 'payload' 'CurrentUser' $native 0
+  [IO.File]::AppendAllText($nativeExe, 'modified')
+  Assert-Guard 'A modified native payload cannot register' 'payload' 'CurrentUser' $native 7
+  Assert-Guard 'A stale ASAR cannot validate a native package' 'payload' 'CurrentUser' $old 7
+  [IO.File]::Delete($trustedInventory)
+
   Set-ItemProperty -LiteralPath $machineKey -Name InstallLocation -Value (Join-Path $scratch 'Missing old common folder')
   Assert-Guard 'Only the incomplete machine registration is flagged' 'registrations' 'CurrentUser' '' 16
   Assert-Guard 'A complete user registration still allows an in-place upgrade' 'selection' 'CurrentUser' $old 0

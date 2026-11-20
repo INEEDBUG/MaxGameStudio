@@ -16,6 +16,30 @@ function Get-LeagueOrdinaryFile([string]$Root, [string]$Relative) {
   if (!$item.PSIsContainer) { $item }
 }
 
+function Get-LeagueNativeRuntime([string]$Root) {
+  $executableName = 'MaxGameStudioLeagueToolbox.exe'
+  $executable = Get-LeagueOrdinaryFile $Root $executableName
+  $inventory = Get-LeagueOrdinaryFile $Root 'maxgamestudio-runtime-hashes.json'
+  if (!$executable -or !$executable.Length -or !$inventory -or !$inventory.Length) { return }
+
+  $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($executable.FullName)
+  if ($versionInfo.ProductName -cne 'MaxGameStudio League' -or
+      $versionInfo.ProductVersion -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$') {
+    return
+  }
+  try {
+    $files = Get-Content -LiteralPath $inventory.FullName -Raw | ConvertFrom-Json
+  } catch {
+    return
+  }
+  $digest = $files.PSObject.Properties[$executableName].Value
+  if ($digest -cnotmatch '^[a-f0-9]{64}$' -or
+      (Get-FileHash -LiteralPath $executable.FullName -Algorithm SHA256).Hash -ine $digest) {
+    return
+  }
+  [pscustomobject]@{ Executable = $executable; Version = $versionInfo.ProductVersion; Digest = $digest }
+}
+
 function Remove-LeagueOwnedPayload([string]$Root, [string]$NewInventory) {
   $inventory = Get-LeagueOrdinaryFile $Root 'maxgamestudio-runtime-hashes.json'
   if (!$inventory) { return }
