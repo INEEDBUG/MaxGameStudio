@@ -22,6 +22,27 @@
   Update-StandaloneSource $sidebar "import { RespawnTimerItem } from './respawn-timer-item'`n" ''
   Update-StandaloneSource $sidebar "const rts = useRespawnTimerStore()`n" ''
 
+  $respawnNotification = @'
+const notification = useNotification()
+
+watch(
+  () => rts.info.isDead,
+  (isDead, prevIsDead) => {
+    if (!isDead && prevIsDead && mws.focus === 'focused') {
+      notification.success({
+        title: () => t('navigation.sidebar.status.respawned'),
+        content: () => t('navigation.sidebar.status.respawnedContent'),
+        duration: 4000
+      })
+    }
+  }
+)
+'@
+  Update-StandaloneSource $sidebar $respawnNotification ''
+  Update-StandaloneSource $sidebar 'NProgress, NTooltip, useNotification' 'NProgress, NTooltip'
+  Update-StandaloneSource $sidebar "import { useMainWindowStore } from '@renderer-shared/shards/window-manager/store'`n" ''
+  Update-StandaloneSource $sidebar "const mws = useMainWindowStore()`n" ''
+
   $settings = Join-Path $renderer 'components\settings-modal\SettingsModal.vue'
   $miscTab = @'
       <NTabPane name="misc" :tab="t('settings.misc.title')">
