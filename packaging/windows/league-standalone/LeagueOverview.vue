@@ -35,17 +35,11 @@
         </section>
       </div>
 
-      <section class="overview-panel lookup-panel" aria-labelledby="league-lookup">
+      <section class="overview-panel" aria-labelledby="league-lookup">
         <h2 id="league-lookup">{{ english ? 'Player lookup' : '玩家查询' }}</h2>
-        <form class="lookup-form" @submit.prevent="lookup">
-          <NInput v-model:value="riotId" :maxlength="40" placeholder="名称 # 标签"
-            :aria-label="english ? 'Riot ID' : '玩家名称与标签'" :disabled="!client.isConnected" />
-          <NButton type="primary" attr-type="submit" :loading="searching"
-            :disabled="!client.isConnected || !riotId.trim()">
-            {{ english ? 'Search' : '查询' }}
-          </NButton>
-        </form>
-        <p v-if="lookupMessage" role="status">{{ lookupMessage }}</p>
+        <NButton type="primary" @click="router.push({ name: 'league-lookup' })">
+          {{ english ? 'Open player lookup' : '打开查询' }}
+        </NButton>
       </section>
 
       <footer>
@@ -57,17 +51,15 @@
 </template>
 
 <script setup lang="ts">
-import { useSummonerFetch } from '@renderer-shared/composables/useSummonerFetch'
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { AutoGameflowRenderer } from '@renderer-shared/shards/auto-gameflow'
 import { useAutoGameflowStore } from '@renderer-shared/shards/auto-gameflow/store'
 import { useLeagueClientStore } from '@renderer-shared/shards/league-client/store'
-import { useSgpStore } from '@renderer-shared/shards/sgp/store'
 import { WindowManagerRenderer } from '@renderer-shared/shards/window-manager'
-import { useAuxWindowStore, useOngoingGameWindowStore } from '@renderer-shared/shards/window-manager/store'
-import { NButton, NInput, NScrollbar, NSwitch, useMessage } from 'naive-ui'
-import { computed, ref } from 'vue'
+import { useAuxWindowStore } from '@renderer-shared/shards/window-manager/store'
+import { NButton, NScrollbar, NSwitch, useMessage } from 'naive-ui'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import ResgWindowButton from '@main-window/components/resg-window/ResgWindowButton.vue'
@@ -78,14 +70,11 @@ const client = useLeagueClientStore()
 const app = useAppCommonStore()
 const autoGameflow = useAutoGameflowStore()
 const aux = useAuxWindowStore()
-const ongoing = useOngoingGameWindowStore()
 const autoGameflowRenderer = useInstance(AutoGameflowRenderer)
 const windows = useInstance(WindowManagerRenderer)
-const servers = useSgpStore()
 const router = useRouter()
 const message = useMessage()
 const { openSettingsModal } = useMainWindowAppContext()
-const { searchSummonerByAlias } = useSummonerFetch()
 const english = computed(() => app.settings.locale.startsWith('en'))
 
 const clientStatus = computed(() => {
@@ -117,12 +106,6 @@ const quickSettings = computed(() => [
     description: english.value ? 'Open quick tools in champion select.' : '选人时显示常用操作。',
     value: aux.settings.enabled,
     apply: (value: boolean) => windows.auxWindow.setEnabled(value)
-  },
-  {
-    id: 'match', label: english.value ? 'In-game information window' : '对局信息面板',
-    description: english.value ? 'See teams and recent matches.' : '查看队伍与近期战绩。',
-    value: ongoing.settings.enabled,
-    apply: (value: boolean) => windows.ongoingGameWindow.setEnabled(value)
   }
 ])
 
@@ -134,33 +117,6 @@ async function changeSetting(apply: (value: boolean) => Promise<unknown>, value:
   }
 }
 
-const riotId = ref('')
-const searching = ref(false)
-const lookupMessage = ref('')
-
-async function lookup() {
-  if (!client.isConnected || searching.value) return
-  const match = /^([^#]+)#([^#]+)$/.exec(riotId.value.trim())
-  if (!match?.[1].trim() || !match[2].trim()) {
-    lookupMessage.value = english.value ? 'Enter a name and tag, e.g. Name # Tag.' : '请输入名称和标签，例如 名称 # 标签。'
-    return
-  }
-  searching.value = true
-  lookupMessage.value = ''
-  try {
-    const player = await searchSummonerByAlias(match[1].trim(), match[2].trim(), 'lcu')
-    const sgpServerId = servers.availability.sgpServerId
-    if (player && sgpServerId) {
-      await router.push({ name: 'player-tabs', params: { puuid: player.puuid, sgpServerId } })
-    } else {
-      lookupMessage.value = english.value ? 'Player not found in the connected region.' : '当前连接大区未找到该玩家。'
-    }
-  } catch {
-    lookupMessage.value = english.value ? 'Player lookup failed. Try again.' : '查询失败，请重试。'
-  } finally {
-    searching.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -195,7 +151,7 @@ p { margin: 4px 0 0; opacity: .76; line-height: 1.5; font-size: 12px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
 .settings-row + .settings-row { border-top: 1px solid var(--overview-border); }
 .resg-panel { border-top: 1px solid var(--overview-border); padding-top: 12px; }
-.resg-actions, .lookup-form, footer { display: flex; gap: 8px; align-items: center; }
+.resg-actions, footer { display: flex; gap: 8px; align-items: center; }
 .resg-actions { margin-top: 16px; flex-wrap: wrap; }
 footer { justify-content: space-between; flex-wrap: wrap; margin: 16px 0 0; }
 @media (max-width: 720px) { .overview-columns { grid-template-columns: 1fr; } }

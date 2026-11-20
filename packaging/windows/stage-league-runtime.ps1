@@ -974,7 +974,11 @@ try {
     } else {
       throw "Pinned source is missing electron-builder.yml; refusing to build an unbranded runtime."
     }
-    $leagueWorkbenchIcon = Join-Path $repoRoot "packaging\windows\league-workbench-icon.ico"
+    $leagueWorkbenchIcon = if ($Standalone) {
+      Join-Path $source 'src\renderer-shared\assets\ico\league.ico'
+    } else {
+      Join-Path $repoRoot 'packaging\windows\league-workbench-icon.ico'
+    }
     if (-not (Test-Path -LiteralPath $leagueWorkbenchIcon -PathType Leaf)) {
       throw "Dedicated League workbench icon is missing: $leagueWorkbenchIcon"
     }
@@ -1013,6 +1017,13 @@ try {
     } finally { Pop-Location }
     $builtAssetVerifier = Join-Path $repoRoot "packaging\windows\verify-league-runtime-assets.ps1"
     & $builtAssetVerifier -Root $source -Mode Built
+    if ($Standalone) {
+      foreach ($entry in 'ongoing-game-window.html', 'cd-timer-window.html') {
+        if (Test-Path -LiteralPath (Join-Path $source "out\renderer\$entry")) {
+          throw "Retired overlay remains in the standalone League renderer: $entry."
+        }
+      }
+    }
     $runtimeSource = Join-Path $source "dist\win-unpacked"
     if (-not (Test-Path -LiteralPath (Join-Path $runtimeSource "resources\app.asar"))) {
       throw "Build completed without a runnable dist\win-unpacked/resources/app.asar."

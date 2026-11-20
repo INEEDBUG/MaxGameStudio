@@ -2,7 +2,6 @@
 
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false)
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..')).Path
 
 function Update-StandaloneSource([string]$RelativePath, [string]$Anchor, [string]$Replacement) {
   $target = Join-Path $SourceRoot $RelativePath
@@ -25,10 +24,9 @@ foreach ($name in @('profile-bootstrap.ts', 'league-profile.ts')) {
 }
 $overviewDir = Join-Path $SourceRoot 'src\renderer\src-main-window\views\league-overview'
 New-Item -ItemType Directory -Path $overviewDir -Force | Out-Null
-foreach ($name in @('LeagueOverview.vue', 'LeagueUpdateButton.vue', 'league-update.ts')) {
+foreach ($name in @('LeagueOverview.vue', 'LeaguePlayerSearch.vue', 'LeagueUpdateButton.vue', 'league-update.ts')) {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $overviewDir
 }
-Copy-Item -LiteralPath (Join-Path $repoRoot 'frontend\public\brand-icons\leagueoflegends.svg') -Destination $overviewDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer.nsh') -Destination (Join-Path $SourceRoot 'build\mgs-league-installer.nsh')
 foreach ($name in 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1') {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $SourceRoot "build\$name")
@@ -99,6 +97,11 @@ redirect: { name: 'league-overview' }
       name: 'league-overview',
       path: '/overview',
       component: () => import('@main-window/views/league-overview/LeagueOverview.vue')
+    },
+    {
+      name: 'league-lookup',
+      path: '/player-search',
+      component: () => import('@main-window/views/league-overview/LeaguePlayerSearch.vue')
 '@
 Update-StandaloneSource (Join-Path $renderer 'App.vue') '<KeepAlive>' '<KeepAlive :max="3">'
 $mainWindow = 'src\main\shards\window-manager\main-window\window.ts'
@@ -148,8 +151,8 @@ import { companionWindowDemand } from '../companion-window-demand'
   $oldWatcher = [regex]::Match($companionSource, '(?s)    const showTiming = computed\(\(\) => \{.*?\{ fireImmediately: true, delay: 500, equals: comparer\.shallow \}\r?\n    \)')
   if (-not $oldWatcher.Success) { throw "Pinned companion startup watcher was not found: $companion" }
   $watcher = @"
-    const showTiming = computed(() =>
-      companionWindowDemand('$kind', {
+    const showTiming = computed(() => {
+      const demand = companionWindowDemand('$kind', {
         enabled: this.settings.enabled,
         initialized: this._windowManager.state.isManagerFinishedInit,
         connected: this._leagueClient.state.connectionState === 'connected',
@@ -158,7 +161,12 @@ import { companionWindowDemand } from '../companion-window-demand'
         phase: this._leagueClient.data.gameflow.phase,
         spectating: this._leagueClient.data.champSelect.session?.isSpectating
       })
-    )
+      const mode = this._leagueClient.data.gameflow.session?.gameData.queue.gameMode
+      if ((demand === 'prepare' || demand === 'show') && mode !== 'ARAM' && mode !== 'KIWI') {
+        return 'ignore'
+      }
+      return demand
+    })
 
     this._mobxUtils.reaction(
       () => showTiming.get(),
@@ -200,11 +208,11 @@ import { companionWindowDemand } from '../companion-window-demand'
 $sidebar = Join-Path $renderer 'components\sidebar\Sidebar.vue'
 Update-StandaloneSource (Join-Path $renderer 'shards\main-window-ui\store.ts') 'sidebarCollapsed: true,' 'sidebarCollapsed: false,'
 Update-StandaloneSource $sidebar "import AkariLogo from '@renderer-shared/assets/icon/AkariLogo.vue'" @'
-import leagueLogo from '@main-window/views/league-overview/leagueoflegends.svg?url'
+import leagueLogo from '@renderer-shared/assets/ico/league.ico?url'
 import { Home24Regular as HomeIcon } from '@vicons/fluent'
 import { useMainWindowAppContext } from '@main-window/context'
 '@
-Update-StandaloneSource $sidebar '<AkariLogo />' '<span class="league-sidebar-mark" :style="{ maskImage: ''url('' + leagueLogo + '')'' }" aria-hidden="true"></span>'
+Update-StandaloneSource $sidebar '<AkariLogo />' '<img :src="leagueLogo" class="league-sidebar-mark" width="26" height="26" alt="" />'
 Update-StandaloneSource $sidebar "{{ t('appName', { ns: 'common' }) }}" "{{ english ? 'League Toolbox' : '英雄联盟工具箱' }}"
 Update-StandaloneSource $sidebar 'const as = useAppCommonStore()' @'
 const as = useAppCommonStore()
@@ -231,7 +239,7 @@ Update-StandaloneSource $sidebar '      name: t(''navigation.sidebar.menu.toolki
     {
       key: 'league-runes',
       icon: renderIcon(ToolFilledIcon),
-      name: english.value ? 'Runes and builds' : '符文与英雄配置'
+      name: english.value ? 'Auto pick / ban' : '自动选择 / 禁用'
     },
     {
       key: 'league-windows',
@@ -240,23 +248,31 @@ Update-StandaloneSource $sidebar '      name: t(''navigation.sidebar.menu.toolki
 '@
 Update-StandaloneSource $sidebar '    await router.replace({ name: val })' @'
     if (val === 'league-windows') return openSettingsModal('multi-window')
-    if (val === 'league-runes') return router.replace({ name: 'automation', params: { section: 'auto-champ-config' } })
-    if (val === 'league-lookup') return router.replace({ name: 'league-overview', hash: '#league-lookup' })
+    if (val === 'league-runes') return router.replace({ name: 'automation', params: { section: 'auto-select' } })
     await router.replace({ name: val })
+'@
+Update-StandaloneSource $sidebar '  currentMenu.value = route.name as string' @'
+  currentMenu.value = route.name === 'automation' && route.params.section === 'auto-select'
+    ? 'league-runes'
+    : route.name as string
 '@
 Update-StandaloneSource $sidebar '<style scoped>' @'
 <style scoped>
 .league-sidebar-mark {
   display: block;
-  width: 26px;
-  height: 26px;
-  background: #906a21;
-  mask-size: contain;
-  mask-position: center;
-  mask-repeat: no-repeat;
+  object-fit: contain;
 }
-:global([data-theme='dark']) .league-sidebar-mark { background: #d5b56c; }
 '@
+
+$startup = Join-Path $renderer 'views\player-tabs\components\StartupPane.vue'
+$oldStartupMark = @'
+    <NIcon class="startup-logo relative -left-2 mb-4 text-[96px]">
+      <AkariLogo />
+    </NIcon>
+'@
+Update-StandaloneSource $startup $oldStartupMark '<img :src="leagueIco" class="mb-4 size-16 object-contain" width="64" height="64" alt="" />'
+Update-StandaloneSource $startup "import AkariLogo from '@renderer-shared/assets/icon/AkariLogo.vue'" ''
+Update-StandaloneSource $startup "{{ t('appName', { ns: 'common' }) }}" "{{ as.settings.locale.startsWith('en') ? 'League Toolbox' : '英雄联盟工具箱' }}"
 
 $about = Join-Path $renderer 'components\settings-modal\AboutPane.vue'
 Update-StandaloneSource $about '<div class="flex justify-center">' @'
@@ -298,3 +314,18 @@ Update-StandaloneSource $settings '<script setup lang="ts">' @'
 <script setup lang="ts">
 import LeagueUpdateButton from '@main-window/views/league-overview/LeagueUpdateButton.vue'
 '@
+
+. (Join-Path $PSScriptRoot 'stage-compact-windows.ps1')
+. (Join-Path $PSScriptRoot 'stage-extras.ps1')
+. (Join-Path $PSScriptRoot 'stage-aram.ps1')
+
+$mainBoot = 'src\main\bootstrap\index.ts'
+Update-StandaloneSource $mainBoot "import { AutoChampionConfigMain } from '@main/shards/auto-champ-config'" ''
+Update-StandaloneSource $mainBoot '    manager.use(AutoChampionConfigMain)' ''
+foreach ($uiBoot in @(
+  (Join-Path $renderer 'shards\index.ts'),
+  'src\renderer\src-opgg-window\shards\index.ts'
+)) {
+  Update-StandaloneSource $uiBoot "import { AutoChampConfigRenderer } from '@renderer-shared/shards/auto-champ-config'" ''
+  Update-StandaloneSource $uiBoot 'manager.use(AutoChampConfigRenderer)' ''
+}
