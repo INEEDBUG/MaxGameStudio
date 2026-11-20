@@ -9,6 +9,7 @@ const base = {
   connected: true,
   ready: false,
   phase: 'ChampSelect',
+  gameMode: 'ARAM',
   spectating: false
 }
 
@@ -39,4 +40,13 @@ test('manual opening outside an auto-show phase does not change the automatic de
     assert.equal(companionWindowDemand('aux', { ...base, ready, phase: 'None' }), 'hide')
     assert.equal(companionWindowDemand('opgg', { ...base, ready, phase: 'None' }), 'ignore')
   }
+})
+
+test('only the ARAM family automatically prepares or opens companion windows', () => {
+  for (const kind of ['aux', 'opgg']) {
+    assert.equal(companionWindowDemand(kind, { ...base, gameMode: 'KIWI' }), 'prepare')
+    assert.equal(companionWindowDemand(kind, { ...base, gameMode: 'CLASSIC', ready: true }), 'ignore')
+    assert.equal(companionWindowDemand(kind, { ...base, gameMode: undefined }), 'ignore')
+  }
+  assert.equal(companionWindowDemand('aux', { ...base, phase: 'None', gameMode: null }), 'hide')
 })

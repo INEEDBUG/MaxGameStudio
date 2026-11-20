@@ -16,6 +16,7 @@ pub struct CompanionWindowState {
     pub auto_show: bool,
     pub ready: bool,
     pub phase: Option<String>,
+    pub game_mode: Option<String>,
     pub spectating: Option<bool>,
 }
 
@@ -41,7 +42,9 @@ pub fn companion_window_demand(
     match (kind, state.phase.as_deref()) {
         (Aux, Some("ChampSelect")) if state.spectating == Some(true) => Ignore,
         (_, Some("ChampSelect")) | (Aux, Some("Lobby" | "Matchmaking" | "ReadyCheck")) => {
-            if state.ready {
+            if !matches!(state.game_mode.as_deref(), Some("ARAM" | "KIWI")) {
+                Ignore
+            } else if state.ready {
                 Show
             } else {
                 Prepare

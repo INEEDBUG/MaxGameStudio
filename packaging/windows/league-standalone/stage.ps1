@@ -151,22 +151,18 @@ import { companionWindowDemand } from '../companion-window-demand'
   $oldWatcher = [regex]::Match($companionSource, '(?s)    const showTiming = computed\(\(\) => \{.*?\{ fireImmediately: true, delay: 500, equals: comparer\.shallow \}\r?\n    \)')
   if (-not $oldWatcher.Success) { throw "Pinned companion startup watcher was not found: $companion" }
   $watcher = @"
-    const showTiming = computed(() => {
-      const demand = companionWindowDemand('$kind', {
+    const showTiming = computed(() =>
+      companionWindowDemand('$kind', {
         enabled: this.settings.enabled,
         initialized: this._windowManager.state.isManagerFinishedInit,
         connected: this._leagueClient.state.connectionState === 'connected',
         autoShow: this.settings.autoShow,
         ready: this.state.ready,
         phase: this._leagueClient.data.gameflow.phase,
+        gameMode: this._leagueClient.data.gameflow.session?.gameData.queue.gameMode,
         spectating: this._leagueClient.data.champSelect.session?.isSpectating
       })
-      const mode = this._leagueClient.data.gameflow.session?.gameData.queue.gameMode
-      if ((demand === 'prepare' || demand === 'show') && mode !== 'ARAM' && mode !== 'KIWI') {
-        return 'ignore'
-      }
-      return demand
-    })
+    )
 
     this._mobxUtils.reaction(
       () => showTiming.get(),

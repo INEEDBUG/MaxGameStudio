@@ -21,6 +21,7 @@ use tauri::{
 mod desktop_storage;
 mod valorant_crosshair;
 mod steam_accounts;
+mod training;
 
 pub fn desktop_logs_dir() -> Option<PathBuf> {
     desktop_storage::directory("data/logs").ok()
@@ -214,7 +215,7 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
     Ok(None)
 }
 
-fn writable_data_root(_app: &AppHandle, _root: &Path, _python: &Path) -> Result<PathBuf, String> {
+fn writable_data_root(_app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
         let data_root = desktop_storage::directory("data")?;
@@ -316,7 +317,7 @@ pub(crate) fn start_backend(app: &AppHandle) -> Result<(), String> {
         return Err(format!("未找到后端入口：{}", run_server.display()));
     }
 
-    let data_root = writable_data_root(app, &root, &python)?;
+    let data_root = writable_data_root(app)?;
     let logs_dir = data_root.join("logs");
     let backend_dir = root.join("backend");
     let bundle_data_dir = root.join("data");
@@ -542,6 +543,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(BackendProcess::new().expect("failed to create desktop session token"))
         .manage(AppLifecycle::default())
+        .manage(training::TrainingStore::default())
         .invoke_handler(tauri::generate_handler![
             desktop_storage::get_desktop_storage,
             desktop_storage::choose_desktop_storage,
@@ -558,6 +560,10 @@ pub fn run() {
             quit_app,
             valorant_crosshair::encode_valorant_crosshair,
             valorant_crosshair::decode_valorant_crosshair,
+            training::save_sensitivity_recommendation,
+            training::list_sensitivity_history,
+            training::save_input_analysis,
+            training::list_input_history,
             steam_accounts::get_steam_accounts,
             steam_accounts::switch_steam_account
         ])

@@ -65,7 +65,7 @@ const updates = [
   ['string manifest', 'not an object', '1.0.0']
 ].map(([name, manifest, current]) => ({ name, manifest, current, expected: capture(() => leagueUpdate(manifest, current)) }))
 
-const base = { enabled: true, autoShow: true, initialized: true, connected: true, ready: false, phase: 'ChampSelect' }
+const base = { enabled: true, autoShow: true, initialized: true, connected: true, ready: false, phase: 'ChampSelect', gameMode: 'ARAM' }
 const states = [
   ...['enabled', 'autoShow', 'initialized', 'connected'].map(key => [key + ' false', { [key]: false, ready: true }]),
   ...['ChampSelect', 'Lobby', 'Matchmaking', 'ReadyCheck', 'None'].flatMap(phase => [
@@ -75,6 +75,9 @@ const states = [
   ['spectating', { spectating: true, ready: true }],
   ['not spectating', { spectating: false }],
   ['unknown phase', { phase: 'FuturePhase' }],
+  ['Hextech ARAM', { gameMode: 'KIWI' }],
+  ['classic queue', { gameMode: 'CLASSIC', ready: true }],
+  ['missing queue', { gameMode: undefined }],
   ['missing phase', { phase: undefined }],
   ['null phase', { phase: null }]
 ]
