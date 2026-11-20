@@ -1,4 +1,7 @@
-//! Locate the temporary lockfile of a League client in the current Windows session.
+//! Locate the authenticated local League listener in the current Windows session.
+
+#[path = "ux_launch.rs"]
+mod ux_launch;
 
 use crate::lcu::{LcuError, LcuTarget};
 use maxgamestudio_league_core::lcu_lockfile::LcuLockfile;
@@ -8,7 +11,7 @@ use std::{
     io::{self, Read},
     mem::{offset_of, size_of},
     os::windows::{
-        ffi::OsStringExt,
+        ffi::{OsStrExt, OsStringExt},
         fs::{MetadataExt, OpenOptionsExt},
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     },
@@ -20,6 +23,7 @@ use windows_sys::Win32::{
         ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, ERROR_SUCCESS, FILETIME,
         INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
     },
+    Globalization::{CompareStringOrdinal, CSTR_EQUAL},
     NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
         TCP_TABLE_OWNER_PID_LISTENER,
@@ -43,6 +47,7 @@ use windows_sys::Win32::{
 };
 
 const CLIENT_PROCESS: &str = "LeagueClient.exe";
+const UI_PROCESS: &str = "LeagueClientUx.exe";
 const LOCKFILE_LIMIT: u64 = 4096;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,17 +80,21 @@ impl LocalClient {
 
 pub(crate) fn discover_clients() -> io::Result<Vec<LocalClient>> {
     let session = session_id(std::process::id()).ok_or_else(io::Error::last_os_error)?;
-    let candidates = client_process_ids()?;
+    let (candidates, ui_pids) = client_process_ids()?;
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
     let listeners = ipv4_listeners()?;
+    let ui_pids: Vec<_> = ui_pids
+        .into_iter()
+        .filter(|&pid| session_id(pid) == Some(session))
+        .collect();
     let mut clients = Vec::new();
     for pid in candidates
         .into_iter()
         .filter(|&pid| session_id(pid) == Some(session))
     {
-        if let Some(client) = read_client(pid, &listeners) {
+        if let Some(client) = read_client(pid, &listeners, &ui_pids) {
             clients.push(client);
         }
     }
@@ -97,7 +106,7 @@ fn session_id(pid: u32) -> Option<u32> {
     (unsafe { ProcessIdToSessionId(pid, &mut session) } != 0).then_some(session)
 }
 
-fn client_process_ids() -> io::Result<Vec<u32>> {
+fn client_process_ids() -> io::Result<(Vec<u32>, Vec<u32>)> {
     let handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if handle == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
@@ -109,6 +118,7 @@ fn client_process_ids() -> io::Result<Vec<u32>> {
     };
     let mut available = unsafe { Process32FirstW(snapshot.as_raw_handle(), &mut process) } != 0;
     let mut pids = Vec::new();
+    let mut ui_pids = Vec::new();
     while available {
         let end = process
             .szExeFile
@@ -116,15 +126,10 @@ fn client_process_ids() -> io::Result<Vec<u32>> {
             .position(|c| *c == 0)
             .unwrap_or(process.szExeFile.len());
         let executable = &process.szExeFile[..end];
-        let name_matches = executable.len() == CLIENT_PROCESS.len()
-            && executable
-                .iter()
-                .zip(CLIENT_PROCESS.bytes())
-                .all(|(&unit, expected)| {
-                    u8::try_from(unit).is_ok_and(|byte| byte.eq_ignore_ascii_case(&expected))
-                });
-        if name_matches {
+        if process_name_matches(executable, CLIENT_PROCESS) {
             pids.push(process.th32ProcessID);
+        } else if process_name_matches(executable, UI_PROCESS) {
+            ui_pids.push(process.th32ProcessID);
         }
         available = unsafe { Process32NextW(snapshot.as_raw_handle(), &mut process) } != 0;
     }
@@ -132,9 +137,15 @@ fn client_process_ids() -> io::Result<Vec<u32>> {
     if error.raw_os_error() != Some(ERROR_NO_MORE_FILES as i32) {
         return Err(error);
     }
-    Ok(pids)
+    Ok((pids, ui_pids))
 }
 
+fn process_name_matches(name: &[u16], expected: &str) -> bool {
+    name.len() == expected.len()
+        && name.iter().zip(expected.bytes()).all(|(&unit, byte)| {
+            u8::try_from(unit).is_ok_and(|actual| actual.eq_ignore_ascii_case(&byte))
+        })
+}
 fn process_image(process: &OwnedHandle) -> Option<PathBuf> {
     let mut name = vec![0u16; 32_768];
     let mut units = name.len() as u32;
@@ -201,7 +212,7 @@ fn is_local_install_directory(directory: &Path) -> bool {
     true
 }
 
-fn read_client(pid: u32, listeners: &[MIB_TCPROW_OWNER_PID]) -> Option<LocalClient> {
+fn open_named_process(pid: u32, expected: &str) -> Option<(OwnedHandle, PathBuf, u64)> {
     let handle = unsafe {
         OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -214,28 +225,51 @@ fn read_client(pid: u32, listeners: &[MIB_TCPROW_OWNER_PID]) -> Option<LocalClie
     }
     let process = unsafe { OwnedHandle::from_raw_handle(handle) };
     let image = process_image(&process)?;
-    if !image
-        .file_name()?
-        .to_str()?
-        .eq_ignore_ascii_case(CLIENT_PROCESS)
-    {
+    if !image.file_name()?.to_str()?.eq_ignore_ascii_case(expected) {
         return None;
     }
 
+    let created_at = creation_time(&process)?;
+    Some((process, image, created_at))
+}
+
+fn read_client(
+    pid: u32,
+    listeners: &[MIB_TCPROW_OWNER_PID],
+    ui_pids: &[u32],
+) -> Option<LocalClient> {
+    let (process, image, created_at) = open_named_process(pid, CLIENT_PROCESS)?;
     let install_directory = image.parent()?;
     if !is_local_install_directory(install_directory) {
         return None;
     }
+    let instance = ClientInstance { pid, created_at };
+    let (port, token) = read_lockfile(install_directory, instance, listeners)
+        .or_else(|| read_ui_connection(install_directory, instance, listeners, ui_pids))?;
+
+    let result = LocalClient {
+        process,
+        instance,
+        port,
+        token,
+    };
+    result.alive().then_some(result)
+}
+
+fn read_lockfile(
+    directory: &Path,
+    instance: ClientInstance,
+    listeners: &[MIB_TCPROW_OWNER_PID],
+) -> Option<(u16, String)> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(install_directory.join("lockfile"))
+        .open(directory.join("lockfile"))
         .ok()?;
     let metadata = file.metadata().ok()?;
-    let created_at = creation_time(&process)?;
     if !metadata.is_file()
         || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || metadata.last_write_time() < created_at
+        || metadata.last_write_time() < instance.created_at
     {
         return None;
     }
@@ -249,17 +283,53 @@ fn read_client(pid: u32, listeners: &[MIB_TCPROW_OWNER_PID]) -> Option<LocalClie
         return None;
     }
     let lockfile = LcuLockfile::parse(&contents)?;
-    if lockfile.pid != pid || !owns_loopback_listener(listeners, pid, lockfile.port) {
+    if lockfile.pid != instance.pid
+        || !owns_loopback_listener(listeners, instance.pid, lockfile.port)
+    {
         return None;
     }
+    Some((lockfile.port, lockfile.token.to_owned()))
+}
 
-    let result = LocalClient {
-        process,
-        instance: ClientInstance { pid, created_at },
-        port: lockfile.port,
-        token: lockfile.token.to_owned(),
-    };
-    result.alive().then_some(result)
+fn read_ui_connection(
+    directory: &Path,
+    instance: ClientInstance,
+    listeners: &[MIB_TCPROW_OWNER_PID],
+    ui_pids: &[u32],
+) -> Option<(u16, String)> {
+    let directory: Vec<_> = directory.as_os_str().encode_wide().collect();
+    let mut verified = ui_pids.iter().filter_map(|&pid| {
+        let (ui, image, creation) = open_named_process(pid, UI_PROCESS)?;
+        if creation < instance.created_at {
+            return None;
+        }
+        let parent: Vec<_> = image.parent()?.as_os_str().encode_wide().collect();
+        let matches = unsafe {
+            CompareStringOrdinal(
+                directory.as_ptr(),
+                directory.len() as i32,
+                parent.as_ptr(),
+                parent.len() as i32,
+                1,
+            )
+        } == CSTR_EQUAL;
+        if !matches {
+            return None;
+        }
+        let args = ux_launch::LaunchDetails::read(&ui)?;
+        if args.owner_pid != instance.pid
+            || !owns_loopback_listener(listeners, instance.pid, args.port)
+            || unsafe { WaitForSingleObject(ui.as_raw_handle(), 0) } != WAIT_TIMEOUT
+        {
+            return None;
+        }
+        Some(args)
+    });
+    let connection = verified.next()?;
+    if verified.any(|args| args != connection) {
+        return None;
+    }
+    Some((connection.port, connection.token))
 }
 
 fn owns_loopback_listener(listeners: &[MIB_TCPROW_OWNER_PID], pid: u32, port: u16) -> bool {
