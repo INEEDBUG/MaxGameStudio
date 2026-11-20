@@ -83,11 +83,22 @@ async function closeInstalledToolbox(remember) {
       }
       const timeout = setTimeout(finish(reject), 5_000, new Error('No packaged renderer response.'))
       socket.addEventListener('message', receive)
-      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }))
+      socket.send(JSON.stringify({
+        id,
+        method: 'Runtime.evaluate',
+        params: { expression, awaitPromise: true, returnByValue: true }
+      }))
     })
 
     await waitFor('the real title-bar close button', 30_000, () =>
       evaluate(`Boolean(document.querySelector(${JSON.stringify(closeSelector)}))`))
+    if (remember) {
+      // A fresh profile follows the host language. Exercise Chinese through
+      // the same setting used by the application, regardless of runner locale.
+      await evaluate("window.akariManager.getInstance('app-common-renderer').setLocale('zh-CN')")
+      await waitFor('the Chinese interface', 10_000, () =>
+        evaluate(`document.querySelector(${JSON.stringify(closeSelector)}).title === '关闭'`))
+    }
     // Defer the click so the test command can return before the app exits.
     await evaluate(`void setTimeout(() => document.querySelector(${JSON.stringify(closeSelector)}).click(), 100)`)
 
