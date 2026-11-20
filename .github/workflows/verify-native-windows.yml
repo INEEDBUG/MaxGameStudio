@@ -84,6 +84,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $env:MGS_MAIN_NATIVE_CATALOG = (Resolve-Path -LiteralPath 'packaging/windows/native-legacy/main-3.1.4-repair.json').Path
+          $env:CARGO_TARGET_DIR = Join-Path (Get-Location).Path 'frontend/src-tauri/target'
+          $parserSource = Join-Path $env:RUNNER_TEMP 'mgs-parser-source'
+          $worker = ./packaging/demoparser-lean/stage-native-worker.ps1 -SourceRoot $parserSource
+          cargo build --release --locked --manifest-path $worker.Manifest
+          $env:MGS_MAIN_NATIVE_PARSER_EXE = (Resolve-Path -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/maxgamestudio-parser-worker.exe')).Path
+          $env:MGS_MAIN_NATIVE_PARSER_NOTICE = $worker.Notice
+          (Get-FileHash -LiteralPath $env:MGS_MAIN_NATIVE_PARSER_EXE).Hash.ToLowerInvariant() |
+            Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-parser-sha256.txt') -Encoding ascii
           Push-Location frontend
           try {
             pnpm.cmd install --frozen-lockfile
@@ -155,7 +163,8 @@ jobs:
           }
           $pair.CandidateSha256 = (Get-FileHash -LiteralPath $pair.Installer -Algorithm SHA256).Hash.ToLowerInvariant()
           $pair.LeagueCandidateSha256 = (Get-FileHash -LiteralPath $pair.LeagueInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
-          ./packaging/windows/tests/verify-packaged-upgrade.ps1 @pair
+          $parserHash = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-parser-sha256.txt') -Raw).Trim()
+          ./packaging/windows/tests/verify-packaged-upgrade.ps1 @pair -ParserWorkerSha256 $parserHash
           ./packaging/windows/tests/verify-all-users-install.ps1 @pair
           foreach ($path in $pair.Installer, $pair.LeagueInstaller) {
             $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

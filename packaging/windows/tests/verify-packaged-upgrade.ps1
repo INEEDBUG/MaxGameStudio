@@ -7,6 +7,7 @@ param(
   [string]$LeagueInstaller,
   [switch]$NativePayloads,
   [ValidatePattern('^[a-f0-9]{64}$')][string]$CandidateSha256,
+  [ValidatePattern('^[a-f0-9]{64}$')][string]$ParserWorkerSha256,
   [ValidatePattern('^[a-f0-9]{64}$')][string]$LeagueCandidateSha256,
   [string]$LeagueBaselineInstaller,
   [ValidatePattern('^\d+\.\d+\.\d+(?:-beta\.\d+)?$')][string]$LeagueBaselineVersion,
@@ -150,12 +151,10 @@ function Write-IdleResourceSample(
   $last = @(Get-Process -Id @($processIds) -ErrorAction SilentlyContinue)
   $App.Refresh()
   if ($App.HasExited) { throw "$Product exited during the idle resource sample." }
-  if ($NativePayloads) {
-    $pythonChildren = $last.ProcessName -match '^python(?:w)?$'
-    if ($Role -eq 'candidate' -and $pythonChildren) { throw "$Product ran a Python child during its native idle sample." }
-    if ($Role -eq 'baseline' -and $Product -eq 'maxgamestudio' -and !$pythonChildren) {
-      throw 'The Main baseline did not start its Python runtime for the idle comparison.'
-    }
+  # Both Main builds open Home first and defer their backend until a tool needs it.
+  $pythonChildren = @($last.ProcessName -match '^python(?:w)?$').Count
+  if ($NativePayloads -and $Role -eq 'candidate' -and $pythonChildren) {
+    throw "$Product ran a Python child during its native idle sample."
   }
   $elapsed = ((Get-Date) - $started).TotalSeconds
   $privateSet = (Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
@@ -166,6 +165,7 @@ function Write-IdleResourceSample(
   $sample = [ordered]@{
     product = $Product; version = $Version; role = $Role; packageSha256 = (Get-FileHash -LiteralPath $Package).Hash
     scene = 'fixture profile, no game client, idle main window'; warmupSeconds = 10; processes = $last.Count
+    pythonChildren = $pythonChildren
     installerBytes = (Get-Item -LiteralPath $Package).Length; profileBytes = [long]$profileBytes
     installedProgramBytes = [long]$programBytes; installedProgramMiB = [math]::Round($programBytes / 1MB, 2)
     privateWorkingSetMiB = [math]::Round($privateSet / 1MB, 2)
@@ -252,20 +252,6 @@ else:
         assert conn.execute("pragma quick_check").fetchone() == ("ok",)
         assert conn.execute("select name from acceptance_marker").fetchone() == (label,)
 '@ | Set-Content -LiteralPath $fixture -Encoding utf8
-
-function Wait-MainNativeHealth([Diagnostics.Process]$App) {
-  $deadline = [DateTime]::UtcNow.AddSeconds(30)
-  do {
-    if ($App.HasExited) { break }
-    if (Get-NetTCPConnection -LocalPort 19871 -State Listen -OwningProcess $App.Id -ErrorAction SilentlyContinue) {
-      $health = $null
-      try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:19871/api/health' -TimeoutSec 2 -NoProxy } catch {}
-      if ($health.status -ceq 'ok' -and $health.version -ceq $ExpectedVersion) { return }
-    }
-    Start-Sleep -Milliseconds 300
-  } while ([DateTime]::UtcNow -lt $deadline)
-  throw 'The installed Main executable did not serve the expected native runtime version from its own process.'
-}
 
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
 if ($LeagueInstaller) {
@@ -423,10 +409,21 @@ if (!$retestPublishedBaseline) {
     if ($mainPe.ProductName -cne 'MaxGameStudio' -or $mainPe.ProductVersion -cne $ExpectedVersion) {
       throw 'The installed Main PE did not match the native candidate version.'
     }
+    if ($ParserWorkerSha256) {
+      $parserExe = Join-Path $oldDirectory 'maxgamestudio-parser-worker.exe'
+      Assert-FileHash $parserExe $ParserWorkerSha256
+      $probe = '{"protocol":1,"action":"probe"}' | & $parserExe | ConvertFrom-Json
+      if ($LASTEXITCODE -ne 0 -or $probe.protocol -ne 1 -or !$probe.ok -or
+          $probe.parser_commit -cne 'db3ba5f7a1b02b8cb27d0063d52649883a98469c' -or
+          $probe.result.actions -cnotcontains 'write_replay_parquet' -or
+          !(Test-Path -LiteralPath (Join-Path $oldDirectory 'maxgamestudio-parser-worker.LICENSE.txt') -PathType Leaf)) {
+        throw 'The packaged Main parser did not expose the pinned native protocol and notice.'
+      }
+      Write-Host 'MAIN_NATIVE_PARSER_VERIFIED: installed parser hash, protocol and notice matched.'
+    }
     $currentMain = Start-Process -FilePath $installed -PassThru
     try {
       Wait-AppWindow $currentMain '^MaxGameStudio$' 'Native Main'
-      Wait-MainNativeHealth $currentMain
       Write-IdleResourceSample $currentMain 'maxgamestudio' $ExpectedVersion $Installer $profile
     } finally {
       Stop-FixtureApp $currentMain -TryClose
@@ -434,7 +431,7 @@ if (!$retestPublishedBaseline) {
     if ((Read-StorageLocator).root -ne $profile) { throw 'Native Main startup did not keep the original profile.' }
     & $python -I -B $fixture verify $data
     if ($LASTEXITCODE -ne 0) { throw 'The Main marker is missing or invalid after native startup.' }
-    Write-Host 'MAIN_NATIVE_RUNTIME_VERIFIED: the installed process served its native runtime with the original profile.'
+    Write-Host 'MAIN_NATIVE_PROFILE_VERIFIED: the installed application opened with the original profile and data.'
   }
 
   # The native NSIS fixture checks the page's registry write separately. Seed
@@ -456,7 +453,6 @@ if (!$retestPublishedBaseline) {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $relocated 'temp'))) { throw 'Candidate did not initialize the new runtime directory.' }
     Wait-AppWindow $app '^MaxGameStudio$' 'MaxGameStudio'
-    if ($NativePayloads) { Wait-MainNativeHealth $app }
     Write-IdleResourceSample $app 'maxgamestudio' $ExpectedVersion $Installer $relocated
     foreach ($folder in @($data, (Join-Path $relocated 'data'))) {
       & $python -I -B $fixture verify $folder
