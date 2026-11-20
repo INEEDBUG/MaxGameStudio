@@ -124,3 +124,88 @@ exit 0
     }
   }
 }
+
+function Wait-Fixture([string]$Failure, [scriptblock]$Condition, [Diagnostics.Process]$Process) {
+  $until = [DateTime]::UtcNow.AddSeconds(45)
+  do {
+    if ($Process.HasExited) { throw "$Failure Process exited early." }
+    $result = & $Condition
+    if ($result) { return $result }
+    Start-Sleep -Milliseconds 300
+  } while ([DateTime]::UtcNow -lt $until)
+  throw $Failure
+}
+
+function Assert-StandardProcessOwner([Diagnostics.Process]$Process, $User) {
+  if (![MgsAllUsersNative]::IsStandardUser($Process.Handle, $User.SID)) {
+    throw 'The test process did not start under the expected standard-user token.'
+  }
+}
+
+function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash) {
+  $exe = Join-Path $Product.Default $Product.Exe
+  if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ine $ExpectedHash) {
+    throw 'The installed executable does not match the exact verified package input.'
+  }
+  # WebView2 ignores user-scoped browser flags for elevated hosts. Give only
+  # the ordinary fixture user's app process the temporary debugger settings.
+  $reservation = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+  $reservation.Start()
+  try { $port = $reservation.LocalEndpoint.Port }
+  finally { $reservation.Stop() }
+
+  $folder = Join-Path $env:ProgramFiles ('MGS-Update-Probe-' + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $folder | Out-Null
+  $launchScript = Join-Path $folder 'launch.ps1'
+  $launcher = $null
+  try {
+    [IO.File]::WriteAllText($launchScript, @'
+param([string]$Executable, [int]$Port)
+$ErrorActionPreference = 'Stop'
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+$app = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path -Parent $Executable) -Wait -PassThru
+exit $app.ExitCode
+'@)
+    $windowsPowerShell = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Executable "{1}" -Port {2}' -f $launchScript, $exe, $port
+    $launcher = Start-StandardProcess $User $windowsPowerShell $Product.Default $arguments -Stage 'native-updater-launch'
+    $app = Wait-Fixture 'Installed updater app did not start' {
+      $child = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($launcher.Id)" |
+        Where-Object { $_.ExecutablePath -ieq $exe } | Select-Object -First 1
+      if ($child) { Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue }
+    } $launcher
+    Assert-StandardProcessOwner $app $User
+    $null = Wait-Fixture 'Installed app did not expose a loopback WebView2 debugger' {
+      $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+      if (!$listeners.Count) { return }
+      foreach ($listener in $listeners) {
+        if ($listener.LocalAddress -notin '127.0.0.1', '::1') { throw 'Debugger is not confined to loopback.' }
+        $id = $listener.OwningProcess
+        for ($depth = 0; $id -and $id -ne $app.Id -and $depth -lt 12; $depth++) {
+          $ancestor = Get-CimInstance Win32_Process -Filter "ProcessId=$id"
+          if (!$ancestor -or $ancestor.CreationDate.ToUniversalTime().AddTicks(9) -lt $app.StartTime.ToUniversalTime()) { break }
+          $id = $ancestor.ParentProcessId
+        }
+        if ($id -ne $app.Id) { throw 'Debugger is not owned by the installed app process tree.' }
+      }
+      if ('127.0.0.1' -in $listeners.LocalAddress) { return $true }
+    } $app
+    & node (Join-Path $PSScriptRoot 'verify-native-updaters.mjs') ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port
+    if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) installed updater verification failed." }
+    if ($app.HasExited) { throw "$($Product.Name) exited during updater verification." }
+    if ($Product.Name -eq 'Main') {
+      $api = @(Get-NetTCPConnection -LocalPort 19871 -State Listen -OwningProcess $app.Id -ErrorAction SilentlyContinue)
+      if ($api.Count -ne 1 -or $api[0].LocalAddress -ne '127.0.0.1') {
+        throw 'The installed Main process did not own its native loopback API listener.'
+      }
+      Write-Host 'MAIN_NATIVE_RUNTIME_VERIFIED: installed PID served the expected health and authenticated config.'
+    }
+  } finally {
+    try {
+      if ($launcher) { Stop-CiFixtureProcess $launcher }
+    } finally {
+      if (Test-Path -LiteralPath $launchScript -PathType Leaf) { Remove-Item -LiteralPath $launchScript }
+      Remove-Item -LiteralPath $folder
+    }
+  }
+}

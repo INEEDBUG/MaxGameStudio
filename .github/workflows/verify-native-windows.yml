@@ -6,6 +6,9 @@ on:
       main_version:
         required: true
         type: string
+      league_startup_only:
+        type: boolean
+        default: false
     secrets:
       main_signing_key:
         required: false
@@ -37,6 +40,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: actions/setup-python@v5
+        if: ${{ !inputs.league_startup_only }}
         with:
           python-version: '3.12.10'
       - uses: dtolnay/rust-toolchain@stable
@@ -44,6 +48,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Verify the exact released baselines
+        if: ${{ !inputs.league_startup_only }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +80,7 @@ jobs:
           $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-baselines.json') -Encoding utf8
 
       - name: Build the native Main installer
+        if: ${{ !inputs.league_startup_only }}
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.main_signing_key }}
@@ -145,7 +151,19 @@ jobs:
           }
           ./packaging/windows/build-league-installer.ps1 @options
 
+      - name: Verify installed League startup as an ordinary Windows user
+        if: inputs.league_startup_only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA) { throw 'Unexpected startup verification checkout.' }
+          $installer = Join-Path $env:RUNNER_TEMP "mgs-native-candidates/MaxGameStudioLeague_$($env:LEAGUE_VERSION)_x64-setup.exe"
+          $binary = Join-Path $env:RUNNER_TEMP 'league-native-payload/MaxGameStudioLeagueToolbox.exe'
+          $sha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
+          ./packaging/windows/tests/verify-native-league-boot.ps1 -Installer $installer -Version $env:LEAGUE_VERSION -ExecutableSha256 $sha
+
       - name: Verify personal and machine upgrades and measure both products
+        if: ${{ !inputs.league_startup_only }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

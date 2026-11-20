@@ -11,6 +11,10 @@ on:
         description: "Build and verify the two native installers in an isolated Windows run"
         type: boolean
         default: false
+      native_league_startup:
+        description: "Build and verify only installed League startup and updates"
+        type: boolean
+        default: false
   push:
     branches:
       - "main"
@@ -19,7 +23,7 @@ on:
       - "V*"
 
 concurrency:
-  group: ${{ inputs.native_smoke && 'verify-native-windows' || 'release-windows' }}
+  group: ${{ (inputs.native_smoke || inputs.native_league_startup) && 'verify-native-windows' || 'release-windows' }}
   cancel-in-progress: false
 
 permissions:
@@ -27,18 +31,19 @@ permissions:
 
 jobs:
   native-smoke:
-    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke && github.repository == 'INEEDBUG/MaxGameStudio'
+    if: github.event_name == 'workflow_dispatch' && (inputs.native_smoke || inputs.native_league_startup) && github.repository == 'INEEDBUG/MaxGameStudio'
     uses: ./.github/workflows/verify-native-windows.yml
     permissions:
       contents: read
       actions: read
     with:
       main_version: ${{ inputs.version }}
+      league_startup_only: ${{ inputs.native_league_startup }}
     secrets:
       main_signing_key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
   release:
-    if: ${{ !inputs.native_smoke }}
+    if: ${{ !inputs.native_smoke && !inputs.native_league_startup }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
