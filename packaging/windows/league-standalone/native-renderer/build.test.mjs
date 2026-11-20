@@ -55,6 +55,45 @@ test('native OP.GG keeps the local shell and opens the official guide only throu
   assert.doesNotMatch(html, /https:|ws:/)
 })
 
+test('League startup skips the unused upstream logo preference and still loads app state', () => {
+  const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const shard = join(stagedSource, 'src/renderer-shared/shards/app-common')
+  const fixture = `import type { SettingUtilsRenderer } from '../setting-utils'
+import { APP_COMMON_RENDERER_NAMESPACE, MAIN_SHARD_NAMESPACE } from './context'
+
+export async function syncAppCommonRendererState(
+  piniaMobxUtils: PiniaMobxUtilsRenderer,
+  settingUtils: SettingUtilsRenderer,
+  getVersion: () => Promise<string>
+) {
+  const store = useAppCommonStore()
+  store.version = await getVersion()
+
+  await settingUtils.savedGetterVue(
+    APP_COMMON_RENDERER_NAMESPACE,
+    'tempAkariSubscriptionInfo',
+    () => store.tempAkariSubscriptionInfo,
+    (v) => (store.tempAkariSubscriptionInfo = v)
+  )
+
+  await piniaMobxUtils.sync(MAIN_SHARD_NAMESPACE, 'state', store)
+  await piniaMobxUtils.sync(MAIN_SHARD_NAMESPACE, 'settings', store.settings)
+}
+`
+  const entry = `await syncAppCommonRendererState(this._piniaMobxUtils, this._settingUtils, () =>
+      this.getVersion()
+    )`
+  const source = renderer.transform(fixture, join(shard, 'settings-sync.ts'))?.code ?? fixture
+  assert.doesNotMatch(source, /tempAkariSubscriptionInfo|settingUtils|APP_COMMON_RENDERER_NAMESPACE/)
+  assert.match(source, /store\.version = await getVersion\(\)/)
+  assert.match(source, /await piniaMobxUtils\.sync\(MAIN_SHARD_NAMESPACE, 'state', store\)/)
+  assert.match(source, /await piniaMobxUtils\.sync\(MAIN_SHARD_NAMESPACE, 'settings', store\.settings\)/)
+  assert.equal(
+    renderer.transform(entry, join(shard, 'index.ts'))?.code,
+    'await syncAppCommonRendererState(this._piniaMobxUtils, () =>\n      this.getVersion()\n    )'
+  )
+})
+
 test('later client events take precedence over a delayed initial state', async () => {
   const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
   const filename = join(stagedSource, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')

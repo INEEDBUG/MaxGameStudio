@@ -218,6 +218,29 @@ function nativeRendererPlugin(sourceRoot) {
   const transforms = new Map(
     Object.entries(IPC_TRANSFORMS).map(([file, patches]) => [`${ipcDirectory}/${file}`, patches])
   )
+  const appCommon = join(sourceRoot, 'src/renderer-shared/shards/app-common').replaceAll('\\', '/')
+  // The standalone logo has no upstream easter egg. Loading its preference
+  // here would block startup on an IPC setting this app never uses.
+  transforms.set(`${appCommon}/settings-sync.ts`, [
+    ["import type { SettingUtilsRenderer } from '../setting-utils'\n", ''],
+    ['APP_COMMON_RENDERER_NAMESPACE, MAIN_SHARD_NAMESPACE', 'MAIN_SHARD_NAMESPACE'],
+    ['  settingUtils: SettingUtilsRenderer,\n', ''],
+    [
+      `  await settingUtils.savedGetterVue(
+    APP_COMMON_RENDERER_NAMESPACE,
+    'tempAkariSubscriptionInfo',
+    () => store.tempAkariSubscriptionInfo,
+    (v) => (store.tempAkariSubscriptionInfo = v)
+  )
+
+`,
+      ''
+    ]
+  ])
+  transforms.set(`${appCommon}/index.ts`, [
+    ['syncAppCommonRendererState(this._piniaMobxUtils, this._settingUtils,',
+      'syncAppCommonRendererState(this._piniaMobxUtils,']
+  ])
   const piniaSync = join(sourceRoot, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
   transforms.set(piniaSync.replaceAll('\\', '/'), NATIVE_STATE_TRANSFORMS)
   const updateButton = join(sourceRoot, 'src/renderer/src-main-window/views/league-overview/LeagueUpdateButton.vue')
