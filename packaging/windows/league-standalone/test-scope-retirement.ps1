@@ -90,13 +90,64 @@ try {
     throw 'Scope retirement did not retain private, unknown and modified files.'
   }
   Write-Host 'Known program file removed. Private, unknown and modified files retained.'
+  # The native installer must use its own verified catalog, even if the
+  # installed Electron inventory claims an unrelated file.
+  $obsolete = Join-Path $old 'old-electron.dll'
+  $legacyInventory = Join-Path $scratch 'legacy-hashes.json'
+  Set-Content -LiteralPath $obsolete -Value 'shipped Electron bytes'
+  Set-Content -LiteralPath $exe -Value 'shipped Electron executable'
+  $oldInventory = Join-Path $old 'maxgamestudio-runtime-hashes.json'
+  @{
+    'MaxGameStudioLeagueToolbox.exe' = (Get-FileHash -LiteralPath $exe).Hash
+    'maxgamestudio-runtime-hashes.json' = (Get-FileHash -LiteralPath $oldInventory).Hash
+    'old-electron.dll' = (Get-FileHash -LiteralPath $obsolete).Hash
+    'resources.pak' = $hashes['resources.pak']
+  } | ConvertTo-Json | Set-Content -LiteralPath $legacyInventory
+  $trusted = Get-LeaguePayloadHashes $legacyInventory
+  @{ 'MaxGameStudioLeagueToolbox.exe' = $hashes['MaxGameStudioLeagueToolbox.exe'] } |
+    ConvertTo-Json | Set-Content -LiteralPath $newInventory
+  $replacement = Get-LeaguePayloadHashes $newInventory -Native
+  Assert-LeagueReplacement $old $replacement $trusted
+  $collision = Join-Path $old 'libunwind.dll'
+  Set-Content -LiteralPath $collision -Value 'unrelated file with the same name'
+  $replacement['libunwind.dll'] = $hashes['resources.pak']
+  $blocked = $false
+  try { Assert-LeagueReplacement $old $replacement $trusted } catch { $blocked = $true }
+  if (!$blocked -or (Get-Content -LiteralPath $collision) -ne 'unrelated file with the same name') {
+    throw 'Native replacement did not reject an unrelated file with a colliding path.'
+  }
+  Remove-LeagueVerifiedFiles $old $trusted $replacement
+  if ((Test-Path -LiteralPath $obsolete) -or !(Test-Path -LiteralPath $exe) -or
+      (Get-Content -LiteralPath $unknown) -ne 'user file' -or (Get-Content -LiteralPath $changed) -ne 'modified program file') {
+    throw 'Native retirement removed unrelated/changed files or retained exact obsolete Electron files.'
+  }
+  $stage = Join-Path $scratch 'stage'
+  New-Item -ItemType Directory -Path $stage | Out-Null
+  $newExe = Join-Path $stage 'MaxGameStudioLeagueToolbox.exe'
+  Set-Content -LiteralPath $newExe -Value 'native replacement'
+  $digest = (Get-FileHash -LiteralPath $newExe).Hash
+  Remove-Item -LiteralPath $collision
+  $replacement.Remove('libunwind.dll')
+  $replacement['MaxGameStudioLeagueToolbox.exe'] = $digest
+  Install-LeagueNativeFiles $old $stage $replacement $trusted
+  if ((Get-FileHash -LiteralPath $exe).Hash -ne $digest -or
+      (Get-ChildItem -LiteralPath $old -Force -Filter '.mgs-league-*')) {
+    throw 'Native payload installation did not commit its file cleanly.'
+  }
+  Remove-LeagueVerifiedFiles $old $replacement @{}
+  if ((Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $unknown)) {
+    throw 'Native payload uninstall did not retain the unrelated original file.'
+  }
+  Write-Host 'Native overlay rejects unknown collisions and retires only verified obsolete files.'
 } finally {
   foreach ($name in $fixtureLinks) {
     $file = Join-Path $scratch $name
     if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
   }
-  foreach ($file in @($newInventory, $exe, $changed, $unknown, $data, $activePointer, $pendingPointer, (Join-Path $old 'maxgamestudio-runtime-hashes.json'))) {
+  foreach ($file in @($newInventory, $legacyInventory, $obsolete, $collision, $exe, $changed, $unknown, $data, $activePointer, $pendingPointer, (Join-Path $old 'maxgamestudio-runtime-hashes.json'))) {
     if ($file -and (Test-Path -LiteralPath $file -PathType Leaf)) { Remove-Item -LiteralPath $file }
   }
+  if ($newExe -and (Test-Path -LiteralPath $newExe)) { Remove-Item -LiteralPath $newExe }
+  if ($stage -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage }
   foreach ($directory in @($profile, $old, $scratch)) { Remove-Item -LiteralPath $directory }
 }

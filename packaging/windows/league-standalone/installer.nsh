@@ -1,11 +1,59 @@
 ﻿!include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 
-!ifndef BUILD_UNINSTALLER
 !define MGS_LEAGUE_GUARD "${__FILEDIR__}\destination-guard.ps1"
 !define MGS_LEAGUE_RETIRE "${__FILEDIR__}\retire-user-install.ps1"
 !define MGS_LEAGUE_SHORTCUT_TARGET "${__FILEDIR__}\shortcut-target.ps1"
 !define MGS_LEAGUE_INVENTORY "${__FILEDIR__}\maxgamestudio-runtime-hashes.json"
+!ifdef MGS_LEAGUE_NATIVE_PACKAGE
+  !define MGS_LEAGUE_PRIOR_INVENTORY "${__FILEDIR__}\prior-program-hashes.json"
+  !define MGS_LEAGUE_WEBVIEW2_BOOTSTRAPPER "${__FILEDIR__}\MicrosoftEdgeWebview2Setup.exe"
+  !define MGS_LEAGUE_WEBVIEW2_VERIFIER "${__FILEDIR__}\verify-webview2-bootstrapper.ps1"
+!endif
+
+!macro leagueRunGuard
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\mgs-league-destination.ps1" "${MGS_LEAGUE_GUARD}"
+  File "/oname=$PLUGINSDIR\retire-user-install.ps1" "${MGS_LEAGUE_RETIRE}"
+  File "/oname=$PLUGINSDIR\shortcut-target.ps1" "${MGS_LEAGUE_SHORTCUT_TARGET}"
+  File "/oname=$PLUGINSDIR\maxgamestudio-runtime-hashes.json" "${MGS_LEAGUE_INVENTORY}"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_PHASE", w "$R0") i.r0'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_DEST", w "$R1") i.r0'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_DATA_DEST", w "$R2") i.r0'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_SCOPE", w "$R3") i.r0'
+  StrCpy $0 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$0" +2 0
+  StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  nsExec::ExecToStack '"$0" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\mgs-league-destination.ps1"'
+  Pop $R7
+  Pop $R6
+  StrCpy $R6 $R6 4
+!macroend
+
+!ifdef MGS_LEAGUE_NATIVE_PACKAGE
+  !ifdef BUILD_UNINSTALLER
+    !macro customRemoveFiles
+      SetOutPath "$WINDIR"
+      StrCpy $R0 "native-uninstall"
+      StrCpy $R1 "$INSTDIR"
+      StrCpy $R2 ""
+      StrCpy $R3 $installMode
+      System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_UNINSTALL_IMAGE", w "$EXEPATH") i.r0'
+      !insertmacro leagueRunGuard
+      ${If} $R7 != 0
+        MessageBox MB_ICONEXCLAMATION "无法安全移除工具箱程序。请关闭工具箱并确认当前安装登记后重试。" /SD IDOK
+        SetErrorLevel 2
+        Quit
+      ${EndIf}
+      ${If} $R6 == "LG10"
+        Delete "$INSTDIR\${UNINSTALL_FILENAME}"
+      ${EndIf}
+      RMDir "$INSTDIR"
+    !macroend
+  !endif
+!endif
+
+!ifndef BUILD_UNINSTALLER
 Var LeagueDataPath
 Var LeagueDataEdit
 Var LeagueProgramPath
@@ -167,22 +215,16 @@ Function LeagueUserAction
     Return
   ${EndIf}
 
-  InitPluginsDir
-  File "/oname=$PLUGINSDIR\mgs-league-destination.ps1" "${MGS_LEAGUE_GUARD}"
-  File "/oname=$PLUGINSDIR\retire-user-install.ps1" "${MGS_LEAGUE_RETIRE}"
-  File "/oname=$PLUGINSDIR\shortcut-target.ps1" "${MGS_LEAGUE_SHORTCUT_TARGET}"
-  File "/oname=$PLUGINSDIR\maxgamestudio-runtime-hashes.json" "${MGS_LEAGUE_INVENTORY}"
-  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_PHASE", w "$R0") i.r0'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_DEST", w "$R1") i.r0'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_DATA_DEST", w "$R2") i.r0'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "MGS_LEAGUE_INSTALL_SCOPE", w "$R3") i.r0'
-  StrCpy $0 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
-  IfFileExists "$0" +2 0
-  StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
-  nsExec::ExecToStack '"$0" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\mgs-league-destination.ps1"'
-  Pop $R7
-  Pop $R6
-  StrCpy $R6 $R6 4
+  !ifdef MGS_LEAGUE_NATIVE_PACKAGE
+    Push $OUTDIR
+    SetOutPath "$WINDIR"
+    File "/oname=$PLUGINSDIR\prior-program-hashes.json" "${MGS_LEAGUE_PRIOR_INVENTORY}"
+  !endif
+  !insertmacro leagueRunGuard
+  !ifdef MGS_LEAGUE_NATIVE_PACKAGE
+    Pop $0
+    SetOutPath "$0"
+  !endif
 FunctionEnd
 
 Function LeagueDataPage
@@ -337,6 +379,76 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+!ifdef MGS_LEAGUE_NATIVE_PACKAGE
+  !define MGS_LEAGUE_WEBVIEW2_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+  !macro leagueReadWebView2
+    ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${MGS_LEAGUE_WEBVIEW2_GUID}" "pv"
+    ${If} $installMode == "CurrentUser"
+    ${AndIf} $4 == ""
+      ReadRegStr $4 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\${MGS_LEAGUE_WEBVIEW2_GUID}" "pv"
+    ${EndIf}
+    ${If} $4 == "0.0.0.0"
+      StrCpy $4 ""
+    ${EndIf}
+  !macroend
+
+  !macro leagueInstallNativeFiles
+    SetOutPath "$WINDIR"
+    !insertmacro leagueReadWebView2
+    ${If} $4 == ""
+      InitPluginsDir
+      File "/oname=$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe" "${MGS_LEAGUE_WEBVIEW2_BOOTSTRAPPER}"
+      File "/oname=$PLUGINSDIR\verify-webview2-bootstrapper.ps1" "${MGS_LEAGUE_WEBVIEW2_VERIFIER}"
+      StrCpy $0 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+      IfFileExists "$0" +2 0
+      StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+      nsExec::ExecToStack /TIMEOUT=20000 '"$0" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\verify-webview2-bootstrapper.ps1" -Bootstrapper "$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe"'
+      Pop $0
+      Pop $1
+      ${If} $0 != 0
+        MessageBox MB_ICONEXCLAMATION "无法验证内置的 Microsoft WebView2 安装程序，已停止安装。" /SD IDOK
+        SetErrorLevel 2
+        Quit
+      ${EndIf}
+      DetailPrint "正在安装 Microsoft WebView2 运行时。"
+      ClearErrors
+      ExecWait '"$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install' $1
+      !insertmacro leagueReadWebView2
+      ${If} ${Errors}
+      ${OrIf} $1 != 0
+      ${OrIf} $4 == ""
+        MessageBox MB_ICONEXCLAMATION "未能安装 Microsoft WebView2 运行时。请检查网络或系统设置后重试。" /SD IDOK
+        SetErrorLevel 2
+        Quit
+      ${EndIf}
+    ${EndIf}
+    SetOutPath "$PLUGINSDIR\native-files"
+    !insertmacro installApplicationFiles
+    SetOutPath "$WINDIR"
+    StrCpy $R0 "native-install"
+    StrCpy $R1 "$INSTDIR"
+    StrCpy $R2 ""
+    StrCpy $R3 $installMode
+    Call LeagueUserAction
+    ${If} $R7 != 0
+      ${If} $R6 == "LG06"
+      ${OrIf} $R6 == "LG08"
+        MessageBox MB_ICONEXCLAMATION "无法验证旧版程序或安装目录包含同名文件（$R6）。原文件已保留，请选择独立的安装目录。" /SD IDOK
+      ${ElseIf} $R7 == 3
+        MessageBox MB_ICONEXCLAMATION "请先关闭英雄联盟工具箱，再继续安装。" /SD IDOK
+      ${Else}
+        MessageBox MB_ICONEXCLAMATION "无法验证或写入工具箱程序。请检查安装目录和磁盘空间后重试。" /SD IDOK
+      ${EndIf}
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+    ${If} $R6 == "LG07"
+      DetailPrint "部分旧版文件无法清理，已保留。"
+    ${EndIf}
+    SetOutPath "$INSTDIR"
+  !macroend
+!endif
+
 !macro leagueBeforeRegistration
   ; Validate the files as the account that wrote the program, before exposing an entry point.
   StrCpy $R0 "payload"
@@ -361,6 +473,8 @@ FunctionEnd
   Call LeagueRunForUser
   ${If} $R7 == 4
     DetailPrint "所有用户版已安装。管理员会话未修改个人数据设置或移除旧个人版。"
+  ${ElseIf} $R7 == 9
+    DetailPrint "无法验证旧个人版的程序文件，已保留该安装。"
   ${ElseIf} $R7 != 0
     MessageBox MB_ICONEXCLAMATION "工具箱已写入，无法完成启动用户的数据设置或个人版清理。请检查该用户的数据目录权限后重试。" /SD IDOK
     SetErrorLevel 2

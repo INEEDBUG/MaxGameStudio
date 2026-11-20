@@ -16,6 +16,8 @@ foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install
 }
 $inventory = Join-Path $scratch 'maxgamestudio-runtime-hashes.json'
 [IO.File]::WriteAllText($inventory, '{}')
+$nativeInputs = @('prior-program-hashes.json', 'MicrosoftEdgeWebview2Setup.exe', 'verify-webview2-bootstrapper.ps1')
+foreach ($name in $nativeInputs) { [IO.File]::WriteAllText((Join-Path $scratch $name), 'compile-only fixture') }
 $script = Join-Path $scratch 'include-test.nsi'
 $out = Join-Path $scratch 'include-test.exe'
 $originalAppData = $env:APPDATA
@@ -36,6 +38,9 @@ InstallDir "$TEMP\MaxGameStudioLeagueIncludeTest"
 Var installMode
 Var hasPerUserInstallation
 Var hasPerMachineInstallation
+!define UNINSTALL_FILENAME "Fixture-Uninstall.exe"
+!macro installApplicationFiles
+!macroend
 !macro setInstallModePerAllUsers
   StrCpy $installMode "all"
 !macroend
@@ -51,6 +56,15 @@ Var hasPerMachineInstallation
 !endif
 !ifdef BUILD_UNINSTALLER
 SilentInstall silent
+!ifdef MGS_LEAGUE_NATIVE_PACKAGE
+Function .onInit
+  WriteUninstaller "$TEMP\never-run-fixture.exe"
+  Quit
+FunctionEnd
+Section "Uninstall"
+  !insertmacro customRemoveFiles
+SectionEnd
+!endif
 !else
 Function setInstallSectionSpaceRequired
 FunctionEnd
@@ -93,6 +107,9 @@ FunctionEnd
 !endif
 Section
   !ifndef BUILD_UNINSTALLER
+    !ifdef MGS_LEAGUE_NATIVE_PACKAGE
+      !insertmacro leagueInstallNativeFiles
+    !endif
     SetOutPath $INSTDIR
     ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD"
     ${If} $0 == "1"
@@ -115,15 +132,16 @@ try {
   $launcher = Join-Path $PSScriptRoot 'run-league-nsis.cjs'
   node -e "const fs = require('node:fs'); const { patchInstallerTemplate } = require(process.argv[1]); const script = process.argv[2]; fs.writeFileSync(script, patchInstallerTemplate(fs.readFileSync(script, 'utf8')));" $launcher $script
   if ($LASTEXITCODE -ne 0) { throw 'Could not patch the NSIS test startup template.' }
-  foreach ($mode in @('uninstaller', 'installer')) {
+  foreach ($mode in @('native-uninstaller', 'native-installer', 'uninstaller', 'installer')) {
     $flags = @('/V2', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out", "/DLEAGUE_HEADERS=$headers", "/DLEAGUE_PLUGINS=$plugins")
-    if ($mode -eq 'uninstaller') { $flags += '/DBUILD_UNINSTALLER' }
+    if ($mode -like 'native-*') { $flags += '/DMGS_LEAGUE_NATIVE_PACKAGE' }
+    if ($mode -like '*uninstaller') { $flags += '/DBUILD_UNINSTALLER' }
     & $compiler @flags $script
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $out -PathType Leaf)) {
       throw "League NSIS include failed in $mode mode."
     }
     Write-Host "League NSIS include compiled in $mode mode."
-    if ($mode -eq 'uninstaller') { Remove-Item -LiteralPath $out }
+    if ($mode -ne 'installer') { Remove-Item -LiteralPath $out }
   }
   $machine = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'MaxGameStudioLeagueToolbox'
   $machineExisted = Test-Path -LiteralPath $machine
@@ -196,5 +214,6 @@ try {
   foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1', 'maxgamestudio-runtime-hashes.json') {
     Remove-Item -LiteralPath (Join-Path $scratch $name)
   }
+  foreach ($name in $nativeInputs) { Remove-Item -LiteralPath (Join-Path $scratch $name) }
   Remove-Item -LiteralPath $scratch
 }

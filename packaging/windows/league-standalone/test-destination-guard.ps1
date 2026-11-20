@@ -91,6 +91,7 @@ using System.Reflection;
 [assembly: AssemblyInformationalVersion("1.0.0-beta.9")]
 public static class NativeLeagueFixture { public static void Main() { } }
 '@ -OutputAssembly $nativeExe -OutputType ConsoleApplication
+  $originalNativeExe = [IO.File]::ReadAllBytes($nativeExe)
   [IO.File]::WriteAllText($nativeUninstaller, 'fixture uninstaller')
   $nativeHash = (Get-FileHash -LiteralPath $nativeExe).Hash.ToLowerInvariant()
   $inventoryJson = @{ 'MaxGameStudioLeagueToolbox.exe' = $nativeHash } | ConvertTo-Json
@@ -99,6 +100,32 @@ public static class NativeLeagueFixture { public static void Main() { } }
   [IO.File]::WriteAllText($trustedInventory, $inventoryJson)
   [IO.File]::WriteAllText($installedInventory, $inventoryJson)
   Assert-Guard 'Exact native payload permits registration without an ASAR' 'payload' 'CurrentUser' $native 0
+  $nativeDll = Join-Path $native 'WebView2Loader.dll'
+  [IO.File]::WriteAllText($nativeDll, 'fixture loader')
+  $files = @{
+    'MaxGameStudioLeagueToolbox.exe' = $nativeHash
+    'WebView2Loader.dll' = (Get-FileHash -LiteralPath $nativeDll).Hash.ToLowerInvariant()
+  }
+  $withDll = $files | ConvertTo-Json
+  [IO.File]::WriteAllText($trustedInventory, $withDll)
+  [IO.File]::WriteAllText($installedInventory, $withDll)
+  Assert-Guard 'Verified native loader permits registration' 'payload' 'CurrentUser' $native 0
+  [IO.File]::AppendAllText($nativeDll, 'modified')
+  Assert-Guard 'A modified native DLL cannot register' 'payload' 'CurrentUser' $native 7
+  [IO.File]::WriteAllText($trustedInventory, $inventoryJson)
+  [IO.File]::WriteAllText($installedInventory, $inventoryJson)
+
+  Set-ItemProperty -LiteralPath $userKey -Name InstallLocation -Value $native
+  Set-ItemProperty -LiteralPath $userArp -Name UninstallString -Value "`"$nativeUninstaller`" /currentuser"
+  $electronInventory = @{
+    'MaxGameStudioLeagueToolbox.exe' = $nativeHash
+    'resources/app.asar' = 'f' * 64
+  } | ConvertTo-Json
+  [IO.File]::WriteAllText($installedInventory, $electronInventory)
+  Assert-Guard 'Electron inventory with a missing ASAR is an incomplete old install' 'registrations' 'CurrentUser' '' 8
+  [IO.File]::WriteAllText($installedInventory, $inventoryJson)
+  Set-ItemProperty -LiteralPath $userKey -Name InstallLocation -Value $old
+  Set-ItemProperty -LiteralPath $userArp -Name UninstallString -Value "`"$uninstaller`" /currentuser"
   [IO.File]::AppendAllText($nativeExe, 'modified')
   Assert-Guard 'A modified native payload cannot register' 'payload' 'CurrentUser' $native 7
   Assert-Guard 'A stale ASAR cannot validate a native package' 'payload' 'CurrentUser' $old 7
@@ -112,6 +139,34 @@ public static class NativeLeagueFixture { public static void Main() { } }
   if ([IO.File]::ReadAllText($data) -ne 'user settings' -or [IO.File]::ReadAllText((Join-Path $old 'keep.txt')) -ne 'old' -or
       (Test-Path -LiteralPath $fresh)) {
     throw 'Preflight changed the old data, old files or destination.'
+  }
+
+  $stage = Join-Path $scratch 'native-files'
+  [IO.Directory]::CreateDirectory($stage) | Out-Null
+  $nativeExeName = 'MaxGameStudioLeagueToolbox.exe'
+  $uninstallerName = 'Uninstall MaxGameStudioLeagueToolbox.exe'
+  $inventoryName = 'maxgamestudio-runtime-hashes.json'
+  $oldHash = (Get-FileHash -LiteralPath $appExe).Hash.ToLowerInvariant()
+  $prior = @{ $oldHash = @{
+      $nativeExeName = $oldHash
+      $uninstallerName = (Get-FileHash -LiteralPath $uninstaller).Hash.ToLowerInvariant()
+      'resources/app.asar' = (Get-FileHash -LiteralPath (Join-Path $old 'resources/app.asar')).Hash.ToLowerInvariant()
+    } } | ConvertTo-Json
+  [IO.File]::WriteAllText((Join-Path $scratch 'prior-program-hashes.json'), $prior)
+  [IO.File]::WriteAllBytes((Join-Path $stage $nativeExeName), $originalNativeExe)
+  [IO.File]::Copy($nativeUninstaller, (Join-Path $stage $uninstallerName))
+  [IO.File]::WriteAllText($trustedInventory, $inventoryJson)
+  [IO.File]::WriteAllText((Join-Path $stage $inventoryName), $inventoryJson)
+  Assert-Guard 'Staged native payload can replace an exact registered prior installation' 'native-install' 'CurrentUser' $old 0
+  Assert-Guard 'Native replacement is ready to register' 'payload' 'CurrentUser' $old 0
+  if ((Test-Path -LiteralPath (Join-Path $old 'resources/app.asar')) -or
+      [IO.File]::ReadAllText((Join-Path $old 'keep.txt')) -ne 'old' -or [IO.File]::ReadAllText($data) -ne 'user settings') {
+    throw 'Native replacement altered user objects or kept the verified obsolete ASAR.'
+  }
+  Assert-Guard 'Native uninstall removes its verified program files' 'native-uninstall' 'CurrentUser' $old 0
+  if ((Test-Path -LiteralPath $appExe) -or (Test-Path -LiteralPath (Join-Path $old $inventoryName)) -or
+      [IO.File]::ReadAllText((Join-Path $old 'keep.txt')) -ne 'old' -or [IO.File]::ReadAllText($data) -ne 'user settings') {
+    throw 'Native uninstallation altered user objects or retained its verified program files.'
   }
   Write-Host 'LEAGUE_DESTINATION_GUARD_VERIFIED'
 } finally {

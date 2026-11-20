@@ -85,7 +85,6 @@ function Get-IncompleteInstallDirectory($Registration) {
 }
 
 function Test-LeaguePayload([string]$Program, [string]$ExpectedNativeHash) {
-  $resources = Get-LocalDirectory (Join-Path $Program 'resources')
   $complete = $true
   foreach ($path in (Join-Path $Program 'MaxGameStudioLeagueToolbox.exe'),
       (Join-Path $Program 'Uninstall MaxGameStudioLeagueToolbox.exe')) {
@@ -101,8 +100,10 @@ function Test-LeaguePayload([string]$Program, [string]$ExpectedNativeHash) {
     $native = Get-LeagueNativeRuntime $Program
     return [bool]($native -and $native.Digest -ceq $ExpectedNativeHash)
   }
+  if (Get-LeagueNativeRuntime $Program) { return $true }
+  $resources = Get-LocalDirectory (Join-Path $Program 'resources')
   $asar = Get-LeagueOrdinaryFile $resources 'app.asar'
-  return [bool](($asar -and $asar.Length) -or (Get-LeagueNativeRuntime $Program))
+  return [bool]($asar -and $asar.Length)
 }
 
 function Get-OwnedLeagueDirectory($Registration, [string[]]$Protected) {
@@ -156,13 +157,53 @@ function Assert-MachineDestination([string]$Destination, [string]$Identity, [str
   return 5
 }
 
+function Invoke-NativeProgramPhase([string]$Phase, [string]$Scope, [string]$Identity, [string]$UninstallKey) {
+  $program = Get-LocalDirectory $env:MGS_LEAGUE_INSTALL_DEST
+  if (Get-Process -Name 'MaxGameStudioLeagueToolbox' -ErrorAction SilentlyContinue) { return 3 }
+  if ($Scope -eq 'all') { $null = Assert-MachineDestination $program $Identity $UninstallKey }
+  $hive = if ($Scope -eq 'all') { 'HKLM:' } else { 'HKCU:' }
+  $registration = Read-LeagueRegistration $hive $Identity $UninstallKey
+  $inventory = Join-Path $PSScriptRoot $LeagueInventoryName
+  $replacement = Get-LeaguePayloadHashes $inventory -Native
+  $replacement[$LeagueInventoryName] = (Get-FileHash -LiteralPath $inventory -Algorithm SHA256).Hash.ToLowerInvariant()
+  $expectedUninstaller = Join-Path $program $LeagueUninstallerName
+  if ($Phase -eq 'native-uninstall') {
+    if ($registration.Location -ne $program -or $registration.Uninstaller -ne $expectedUninstaller) {
+      throw 'The native uninstaller is not registered at this directory.'
+    }
+    $image = $env:MGS_LEAGUE_UNINSTALL_IMAGE
+    if ($image -and (Test-LeagueFileHash $program $LeagueUninstallerName (Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash)) {
+      Write-Output 'LG10'
+    }
+    Remove-LeagueVerifiedFiles $program $replacement @{}
+    return 0
+  }
+  $stage = Join-Path $PSScriptRoot 'native-files'
+  $uninstaller = Get-LeagueOrdinaryFile $stage $LeagueUninstallerName
+  $native = Get-LeagueNativeRuntime $stage
+  if (!$uninstaller -or !$uninstaller.Length -or !$native -or $native.Digest -ne $replacement[$LeagueRuntimeName]) { return 7 }
+  $replacement[$LeagueUninstallerName] = (Get-FileHash -LiteralPath $uninstaller.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  $prior = @{}
+  if (Test-NonemptyDirectory $program) {
+    if ($registration.Location -ne $program -or $registration.Uninstaller -ne $expectedUninstaller) {
+      throw 'The native replacement directory is not owned by this installation.'
+    }
+    $prior = Get-LeaguePriorHashes $program (Join-Path $PSScriptRoot 'prior-program-hashes.json') $replacement
+  }
+  Install-LeagueNativeFiles $program $stage $replacement $prior
+  try { Remove-LeagueVerifiedFiles $program $prior $replacement }
+  catch { Write-Output 'LG07' }
+  return 0
+}
+
 try {
   if ([Environment]::Is64BitOperatingSystem -and ![Environment]::Is64BitProcess) {
     throw 'Native registry view is required.'
   }
   $phase = $env:MGS_LEAGUE_INSTALL_PHASE
   $scope = $env:MGS_LEAGUE_INSTALL_SCOPE
-  if ($phase -notin 'registrations', 'selection', 'machine', 'payload', 'complete' -or $scope -notin 'CurrentUser', 'all') {
+  if ($phase -notin 'registrations', 'selection', 'machine', 'payload', 'complete', 'native-install', 'native-uninstall' -or
+      $scope -notin 'CurrentUser', 'all') {
     throw 'Unknown League installation phase or scope.'
   }
   if ($phase -eq 'selection' -and (Get-Process -Name 'MaxGameStudioLeagueToolbox' -ErrorAction SilentlyContinue)) {
@@ -170,6 +211,11 @@ try {
   }
   $leagueIdentity = 'b1d9ab62-895c-574e-a779-36d3f2ee3611'
   $uninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall'
+  if ($phase -in 'native-install', 'native-uninstall') {
+    $result = Invoke-NativeProgramPhase $phase $scope $leagueIdentity $uninstallKey
+    if ($result.Count -gt 1) { Write-Output $result[0] }
+    exit $result[-1]
+  }
   if ($phase -eq 'machine') {
     if ($scope -ne 'all') { throw 'Wrong scope for machine destination check.' }
     exit (Assert-MachineDestination $env:MGS_LEAGUE_INSTALL_DEST $leagueIdentity $uninstallKey)
@@ -183,6 +229,11 @@ try {
       if (!$expected.PSObject.Properties['resources/app.asar']) {
         $expectedNativeHash = $expected.PSObject.Properties['MaxGameStudioLeagueToolbox.exe'].Value
         if ($expectedNativeHash -cnotmatch '^[a-f0-9]{64}$') { exit 7 }
+        $hashes = Get-LeaguePayloadHashes $inventory.FullName -Native
+        $hashes[$LeagueInventoryName] = (Get-FileHash -LiteralPath $inventory.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        foreach ($relative in $hashes.Keys) {
+          if (!(Test-LeagueFileHash $program $relative $hashes[$relative])) { exit 7 }
+        }
       }
     }
     if (!(Test-LeaguePayload $program $expectedNativeHash)) { exit 7 }
@@ -268,7 +319,8 @@ try {
       if ($program -ne $owned[$scope]) { throw 'The new program installation is not registered.' }
       $selection = if ($data -and $data -ne (Get-LocalDirectory $activeLeagueProfile)) { $data }
       $oldProgram = if ($scope -eq 'all') { $owned['CurrentUser'] }
-      exit (Complete-LeagueUserInstall $leagueRoot $selection $oldProgram $leagueIdentity -Defer:$deferUserChanges)
+      $catalog = Get-LeagueOrdinaryFile $PSScriptRoot 'prior-program-hashes.json'
+      exit (Complete-LeagueUserInstall $leagueRoot $selection $oldProgram $leagueIdentity -Defer:$deferUserChanges -NativeCatalog $catalog.FullName)
     }
   }
   if ($incomplete[$scope]) { exit 5 }
@@ -281,6 +333,8 @@ try {
     'New program folder is not empty.' { Write-Output 'LG03' }
     'New data folder is not empty.' { Write-Output 'LG04' }
     'League registration does not own the selected executable.' { Write-Output 'LG05' }
+    'No verified upgrade inventory for the installed League executable.' { Write-Output 'LG06' }
+    'Native files would overwrite an unverified program object.' { Write-Output 'LG08' }
   }
   exit 2
 }

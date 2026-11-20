@@ -19,7 +19,7 @@ function patchScopeTemplates(templates) {
   const keepShortcuts = /^\$\{if\} \$isTryToKeepShortcuts == "true"(?=\r?$)/gm
   const sameScopeUninstall = /^!insertmacro uninstallOldVersion SHELL_CONTEXT\r?\n!insertmacro handleUninstallResult SHELL_CONTEXT(?=\r?$)/gm
   const launchLink = /^\$\{if\} \$\{FileExists\} "\$newStartMenuLink"(?=\r?$)/gm
-  const commitInstall = /^!insertmacro installApplicationFiles\r?\n!insertmacro registryAddInstallInfo(?=\r?$)/gm
+  const commitInstall = /^SetOutPath \$INSTDIR\r?\n\r?\n!ifdef UNINSTALLER_ICON\r?\n  File \/oname=uninstallerIcon\.ico "\$\{UNINSTALLER_ICON\}"\r?\n!endif\r?\n\r?\n!insertmacro installApplicationFiles\r?\n!insertmacro registryAddInstallInfo(?=\r?$)/gm
   for (const anchor of [crossScopeUninstall, linkSetup, keepShortcuts, sameScopeUninstall, launchLink, commitInstall]) {
     if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League install section.')
   }
@@ -36,17 +36,24 @@ function patchScopeTemplates(templates) {
     // Never run a command or reuse shortcut information from an incomplete registration.
     .replace(keepShortcuts, (match) => match + '\n${andIf} $LeagueRepair != "1"')
     .replace(sameScopeUninstall, (match) => [
+      '!ifndef MGS_LEAGUE_NATIVE_PACKAGE',
       '${if} $LeagueRepair != "1"',
       ...match.split(/\r?\n/).map((line) => '  ' + line),
       '${endif}',
+      '!endif',
     ].join('\n'))
     .replace(launchLink, (match) => match + '\n${andIf} $LeagueRepair != "1"')
-    .replace(commitInstall, () => [
-      '!insertmacro installApplicationFiles',
+    .replace(commitInstall, (match) => [
+      '!ifdef MGS_LEAGUE_NATIVE_PACKAGE',
+      '!insertmacro leagueInstallNativeFiles',
+      '!else',
+      match.replace(/\r?\n!insertmacro registryAddInstallInfo$/, ''),
+      '!endif',
       '!insertmacro leagueBeforeRegistration',
       '!insertmacro registryAddInstallInfo',
     ].join('\n'))
   writeFileSync(section, patchedSection, 'utf8')
+  patchNativeUninstaller(join(templates, 'uninstaller.nsh'))
   patchExtractionRetries(join(templates, 'include', 'extractAppPackage.nsh'))
   for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
     const path = join(templates, filename)
@@ -69,6 +76,26 @@ function patchScopeTemplates(templates) {
     }
     writeFileSync(path, localized, 'utf8')
   }
+}
+
+function patchNativeUninstaller(path) {
+  const original = readFileSync(path, 'utf8')
+  const workingDirectory = /^Function un\.onInit\r?\n  SetOutPath \$INSTDIR(?=\r?$)/gm
+  const deleteAppData = /^  Var \/GLOBAL isDeleteAppData\r?\n[\s\S]*?(?=^  DeleteRegKey SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}")/gm
+  for (const anchor of [workingDirectory, deleteAppData]) {
+    if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League uninstaller.')
+  }
+  const patched = original
+    .replace(workingDirectory, (match) => [
+      'Function un.onInit',
+      '  !ifdef MGS_LEAGUE_NATIVE_PACKAGE',
+      '    SetOutPath "$WINDIR"',
+      '  !else',
+      match.split(/\r?\n/)[1],
+      '  !endif',
+    ].join('\n'))
+    .replace(deleteAppData, (match) => '  !ifndef MGS_LEAGUE_NATIVE_PACKAGE\n' + match + '  !endif\n')
+  writeFileSync(path, patched, 'utf8')
 }
 
 function patchExtractionRetries(path) {
