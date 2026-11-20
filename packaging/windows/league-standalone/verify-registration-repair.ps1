@@ -35,6 +35,8 @@ $programName = 'MaxGameStudioLeagueToolbox.exe'
 $removeName = 'Uninstall MaxGameStudioLeagueToolbox.exe'
 $root = Join-Path $env:RUNNER_TEMP ('mgs-league-registration-repair-' + [Guid]::NewGuid().ToString('N'))
 $old = Join-Path $root 'Old Toolbox Program'
+$oldExe = Join-Path $old $programName
+$parkedExe = Join-Path $root 'Parked Baseline Executable.exe'
 $oldRemove = Join-Path $old $removeName
 $oldArchive = Join-Path $old 'resources\app.asar'
 $profileDir = Join-Path $root 'Existing Toolbox Profile'
@@ -94,13 +96,16 @@ $oldFile = Join-Path $old 'keep-old-program-fixture.txt'
 # cleanup removes the executable and app.asar, which must both survive repair.
 $saved = @{}
 foreach ($file in @(
-    (Join-Path $old $programName), $oldArchive, $oldRemove, $oldFile,
+    $oldExe, $oldArchive, $oldRemove, $oldFile,
     $config, $userFile, $locator
   )) {
   $saved[$file] = (Get-FileHash -LiteralPath $file).Hash
 }
 
 function Assert-PreservedFixture([switch]$Machine) {
+  if ((Test-Path -LiteralPath $parkedExe) -and (Test-Path -LiteralPath $oldExe)) {
+    throw 'Repair populated the intentionally missing executable in the old program directory.'
+  }
   foreach ($file in $saved.Keys) {
     if (!(Test-Path -LiteralPath $file -PathType Leaf) -or
         (Get-FileHash -LiteralPath $file).Hash -cne $saved[$file]) {
@@ -123,7 +128,7 @@ function Assert-RecoveryWizard {
     do {
       if ($wizard.HasExited) { break }
       $texts = @([MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id) | ForEach-Object Text)
-      if (($texts -match '旧版登记不完整。请选择独立的空文件夹') -and $texts -ccontains $profileDir) {
+      if (($texts -match '旧版安装不完整。请选择独立的空文件夹') -and $texts -ccontains $profileDir) {
         Write-Host 'LEAGUE_RECOVERY_WIZARD_VERIFIED: Chinese directory page retained the selected data path.'
         return
       }
@@ -135,7 +140,25 @@ function Assert-RecoveryWizard {
   }
 }
 
-foreach ($scenario in @('MissingLocation', 'NonLeadingQuote')) {
+# A complete-looking installation can still have an uninstaller Windows cannot
+# start. The stock helper must not continue into copying over that installation.
+$uninstallerBytes = [IO.File]::ReadAllBytes($oldRemove)
+$failedUpgrade = Join-Path $root 'Blocked old uninstaller'
+try {
+  [IO.File]::WriteAllText($oldRemove, 'invalid fixture executable')
+  Invoke-FixtureInstaller $Installer "/S /currentuser /D=$failedUpgrade" 2
+  if ((Test-Path -LiteralPath $failedUpgrade) -or
+      (Get-ItemPropertyValue -LiteralPath $product -Name InstallLocation) -cne $old -or
+      (Get-ItemPropertyValue -LiteralPath $arp -Name UninstallString) -cne $originalUninstall) {
+    throw 'An unlaunchable old uninstaller did not stop setup before copying and registration.'
+  }
+} finally {
+  [IO.File]::WriteAllBytes($oldRemove, $uninstallerBytes)
+}
+Assert-PreservedFixture
+Write-Host 'LEAGUE_OLD_UNINSTALLER_FAILURE_VERIFIED'
+
+foreach ($scenario in @('MissingLocation', 'NonLeadingQuote', 'MissingExecutable')) {
   $repaired = Join-Path $root "Repaired Toolbox $scenario"
   $child = Join-Path $old 'New Child'
   if ($scenario -eq 'MissingLocation') {
@@ -144,9 +167,18 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote')) {
     $badUninstall = $originalUninstall
   } else {
     # Make a partial registry again without copying a second baseline.
-    # Stock NSIS can extract the quoted path after the invalid leading token.
     $expectedLocation = $old
-    $badUninstall = '/unexpected ' + $originalUninstall
+    if ($scenario -eq 'NonLeadingQuote') {
+      # Stock NSIS can extract the quoted path after the invalid leading token.
+      $badUninstall = '/unexpected ' + $originalUninstall
+    } else {
+      # Both registry values remain valid. Move only the exact fixture EXE
+      # within the same runner volume to simulate missing program payload.
+      $badUninstall = $originalUninstall
+      [IO.File]::Move($oldExe, $parkedExe)
+      $saved[$parkedExe] = $saved[$oldExe]
+      $saved.Remove($oldExe)
+    }
     New-Item -Path $product, $arp -Force | Out-Null
     Set-ItemProperty -LiteralPath $product -Name InstallLocation -Value $expectedLocation
     Set-ItemProperty -LiteralPath $arp -Name DisplayVersion -Value $baselineVersion
@@ -160,6 +192,9 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote')) {
   if ($scenario -eq 'MissingLocation') {
     Assert-RecoveryWizard
     Invoke-FixtureInstaller $Installer '/S /currentuser' 2
+    Invoke-FixtureInstaller $Installer "/S /currentuser --updated $destinationArgument" 2
+  }
+  if ($scenario -eq 'MissingExecutable') {
     Invoke-FixtureInstaller $Installer "/S /currentuser --updated $destinationArgument" 2
   }
   Invoke-FixtureInstaller $Installer "/S /currentuser /D=$old" 2
@@ -189,6 +224,11 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote')) {
     throw 'The repaired program did not uninstall independently.'
   }
   Assert-PreservedFixture
+  if ($scenario -eq 'MissingExecutable') {
+    [IO.File]::Move($parkedExe, $oldExe)
+    $saved[$oldExe] = $saved[$parkedExe]
+    $saved.Remove($parkedExe)
+  }
   Write-Host "LEAGUE_REGISTRATION_REPAIR_VERIFIED: $scenario"
 }
 

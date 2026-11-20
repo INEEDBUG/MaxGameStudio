@@ -84,6 +84,32 @@ function Get-IncompleteInstallDirectory($Registration) {
   if (Test-NonemptyDirectory $path) { $path }
 }
 
+function Test-LeaguePayload([string]$Program) {
+  $resources = Get-LocalDirectory (Join-Path $Program 'resources')
+  $complete = $true
+  foreach ($path in (Join-Path $Program 'MaxGameStudioLeagueToolbox.exe'),
+      (Join-Path $Program 'Uninstall MaxGameStudioLeagueToolbox.exe'), (Join-Path $resources 'app.asar')) {
+    try { $item = Get-Item -LiteralPath $path -Force }
+    catch [System.Management.Automation.ItemNotFoundException] { $complete = $false; continue }
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw 'Invalid League program file.'
+    }
+    if (!$item.Length) { $complete = $false }
+  }
+  return $complete
+}
+
+function Get-OwnedLeagueDirectory($Registration, [string[]]$Protected) {
+  if (!$Registration.Location -or !$Registration.Uninstaller) { return }
+  $existing = Get-LocalDirectory $Registration.Location
+  Assert-Separate $existing $Protected
+  if ((Get-LocalDirectory (Split-Path -Parent $Registration.Uninstaller)) -ne $existing -or
+      (Split-Path -Leaf $Registration.Uninstaller) -ne 'Uninstall MaxGameStudioLeagueToolbox.exe') {
+    throw 'League registration does not own the selected executable.'
+  }
+  if (Test-LeaguePayload $existing) { $existing }
+}
+
 function Assert-ProtectedMachinePath([string]$Path) {
   $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
   $acl = Get-Acl -LiteralPath $Path
@@ -110,16 +136,18 @@ function Assert-MachineDestination([string]$Destination, [string]$Identity, [str
   if ([IO.Directory]::Exists($program)) { Assert-ProtectedMachinePath $program }
   $registration = Read-LeagueRegistration 'HKLM:' $Identity $UninstallKey
   if (!$registration) { return 0 }
-  if (!$registration.Location -or !$registration.Uninstaller) {
-    if (Test-NonemptyDirectory $program) { throw 'Incomplete machine registration has an occupied program folder.' }
-    return 5
+  if ($registration.Location -and $registration.Uninstaller) {
+    $uninstaller = Join-Path $program 'Uninstall MaxGameStudioLeagueToolbox.exe'
+    if ($registration.Location -ne $program -or $registration.Uninstaller -ne $uninstaller) {
+      throw 'Unexpected machine League registration.'
+    }
+    if (Test-LeaguePayload $program) {
+      Assert-ProtectedMachinePath $uninstaller
+      return 0
+    }
   }
-  $uninstaller = Get-LeagueOrdinaryFile $program 'Uninstall MaxGameStudioLeagueToolbox.exe'
-  if (!$uninstaller -or $registration.Location -ne $program -or $registration.Uninstaller -ne $uninstaller.FullName) {
-    throw 'Unexpected machine League registration.'
-  }
-  Assert-ProtectedMachinePath $uninstaller.FullName
-  return 0
+  if (Test-NonemptyDirectory $program) { throw 'Incomplete machine installation has an occupied program folder.' }
+  return 5
 }
 
 try {
@@ -128,7 +156,7 @@ try {
   }
   $phase = $env:MGS_LEAGUE_INSTALL_PHASE
   $scope = $env:MGS_LEAGUE_INSTALL_SCOPE
-  if ($phase -notin 'registrations', 'selection', 'machine', 'complete' -or $scope -notin 'CurrentUser', 'all') {
+  if ($phase -notin 'registrations', 'selection', 'machine', 'payload', 'complete' -or $scope -notin 'CurrentUser', 'all') {
     throw 'Unknown League installation phase or scope.'
   }
   if ($phase -eq 'selection' -and (Get-Process -Name 'MaxGameStudioLeagueToolbox' -ErrorAction SilentlyContinue)) {
@@ -139,6 +167,11 @@ try {
   if ($phase -eq 'machine') {
     if ($scope -ne 'all') { throw 'Wrong scope for machine destination check.' }
     exit (Assert-MachineDestination $env:MGS_LEAGUE_INSTALL_DEST $leagueIdentity $uninstallKey)
+  }
+  if ($phase -eq 'payload') {
+    $program = Get-LocalDirectory $env:MGS_LEAGUE_INSTALL_DEST
+    if (!(Test-LeaguePayload $program)) { exit 7 }
+    exit 0
   }
   $leagueRoot = Get-LocalDirectory (Join-Path $env:APPDATA 'MaxGameStudioLeague')
   $activeLeagueProfile = Join-Path $leagueRoot 'Profile'
@@ -177,25 +210,11 @@ try {
     $registration = Read-LeagueRegistration $hive $leagueIdentity $uninstallKey
     if (!$registration) { continue }
     $registeredScope = if ($hive -eq 'HKCU:') { 'CurrentUser' } else { 'all' }
-    if (!$registration.Location -or !$registration.Uninstaller) {
+    $existing = Get-OwnedLeagueDirectory $registration $protected
+    if (!$existing) {
       $incomplete[$registeredScope] = $true
       if ($phase -ne 'registrations') { $preserved += Get-IncompleteInstallDirectory $registration }
       continue
-    }
-    $uninstaller = $registration.Uninstaller
-    $existing = Get-LocalDirectory $registration.Location
-    Assert-Separate $existing $protected
-    if ((Get-LocalDirectory (Split-Path -Parent $uninstaller)) -ne $existing -or
-        (Split-Path -Leaf $uninstaller) -ne 'Uninstall MaxGameStudioLeagueToolbox.exe') {
-      throw 'League registration does not own the selected executable.'
-    }
-    $resources = Get-LocalDirectory (Join-Path $existing 'resources')
-    foreach ($ownedFile in @($uninstaller, (Join-Path $existing 'MaxGameStudioLeagueToolbox.exe'),
-        (Join-Path $resources 'app.asar'))) {
-      $item = Get-Item -LiteralPath $ownedFile -Force
-      if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw 'Invalid registered League file.'
-      }
     }
     $owned[$registeredScope] = $existing
   }

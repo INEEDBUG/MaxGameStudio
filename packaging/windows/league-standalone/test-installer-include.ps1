@@ -79,6 +79,18 @@ FunctionEnd
 Section
   !ifndef BUILD_UNINSTALLER
     SetOutPath $INSTDIR
+    ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD"
+    ${If} $0 == "1"
+      SetOutPath "$INSTDIR\resources"
+      FileOpen $1 "$OUTDIR\app.asar" w
+      FileWrite $1 "fixture archive"
+      FileClose $1
+      SetOutPath $INSTDIR
+      FileOpen $1 "$OUTDIR\Uninstall MaxGameStudioLeagueToolbox.exe" w
+      FileWrite $1 "fixture uninstaller"
+      FileClose $1
+      !insertmacro leagueBeforeRegistration
+    ${EndIf}
     FileOpen $0 "$INSTDIR\fixture-payload.txt" w
     FileClose $0
   !endif
@@ -126,6 +138,13 @@ try {
   if ($accepted.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $empty 'fixture-payload.txt'))) {
     throw "NSIS did not accept an independent empty folder (exit ${accepted.ExitCode})."
   }
+  $missing = Join-Path $scratch 'missing-copied-program'
+  $env:MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD = '1'
+  $blocked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$missing" -WindowStyle Hidden -Wait -PassThru
+  $env:MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD = $null
+  if ($blocked.ExitCode -ne 2 -or (Test-Path -LiteralPath (Join-Path $missing 'fixture-payload.txt'))) {
+    throw 'NSIS continued past the registration gate without the copied program files.'
+  }
   $shared = Join-Path $scratch 'unprotected-machine-program'
   $env:MGS_LEAGUE_FIXTURE_MACHINE = '1'
   $env:USERPROFILE = $null
@@ -133,12 +152,18 @@ try {
   if ($blocked.ExitCode -ne 2 -or (Test-Path -LiteralPath $shared)) {
     throw "NSIS accepted an unprotected machine installation directory (exit $($blocked.ExitCode))."
   }
-  Write-Host 'League NSIS rejected occupied, overlapping and unprotected machine paths before writing. Accepted a new independent private program directory.'
+  Write-Host 'League NSIS accepted an independent directory, blocked protected paths, and refused registration when the copied EXE was missing.'
 } finally {
   $env:MGS_LEAGUE_FIXTURE_MACHINE = $null
+  $env:MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD = $null
   $env:APPDATA = $originalAppData
   $env:USERPROFILE = $originalUserProfile
   foreach ($child in 'wrong-folder\main-marker.txt', 'wrong-folder\fixture-payload.txt', 'wrong-folder', 'empty-program\fixture-payload.txt', 'empty-program', 'unprotected-machine-program\fixture-payload.txt', 'unprotected-machine-program', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox\fixture-payload.txt', 'fixture-appdata\MaxGameStudio\Overlapping Toolbox', 'fixture-appdata\MaxGameStudio', 'fixture-appdata') {
+    $file = Join-Path $scratch $child
+    if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
+  }
+  foreach ($child in 'missing-copied-program\fixture-payload.txt', 'missing-copied-program\resources\app.asar', 'missing-copied-program\resources',
+      'missing-copied-program\Uninstall MaxGameStudioLeagueToolbox.exe', 'missing-copied-program') {
     $file = Join-Path $scratch $child
     if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
   }

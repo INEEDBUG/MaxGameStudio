@@ -19,7 +19,8 @@ function patchScopeTemplates(templates) {
   const keepShortcuts = /^\$\{if\} \$isTryToKeepShortcuts == "true"(?=\r?$)/gm
   const sameScopeUninstall = /^!insertmacro uninstallOldVersion SHELL_CONTEXT\r?\n!insertmacro handleUninstallResult SHELL_CONTEXT(?=\r?$)/gm
   const launchLink = /^\$\{if\} \$\{FileExists\} "\$newStartMenuLink"(?=\r?$)/gm
-  for (const anchor of [crossScopeUninstall, linkSetup, keepShortcuts, sameScopeUninstall, launchLink]) {
+  const commitInstall = /^!insertmacro installApplicationFiles\r?\n!insertmacro registryAddInstallInfo(?=\r?$)/gm
+  for (const anchor of [crossScopeUninstall, linkSetup, keepShortcuts, sameScopeUninstall, launchLink, commitInstall]) {
     if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League install section.')
   }
   const patchedSection = original
@@ -40,7 +41,13 @@ function patchScopeTemplates(templates) {
       '${endif}',
     ].join('\n'))
     .replace(launchLink, (match) => match + '\n${andIf} $LeagueRepair != "1"')
+    .replace(commitInstall, () => [
+      '!insertmacro installApplicationFiles',
+      '!insertmacro leagueBeforeRegistration',
+      '!insertmacro registryAddInstallInfo',
+    ].join('\n'))
   writeFileSync(section, patchedSection, 'utf8')
+  patchExtractionRetries(join(templates, 'include', 'extractAppPackage.nsh'))
   for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
     const path = join(templates, filename)
     const text = readFileSync(path, 'utf8')
@@ -62,6 +69,22 @@ function patchScopeTemplates(templates) {
     }
     writeFileSync(path, localized, 'utf8')
   }
+}
+
+function patchExtractionRetries(path) {
+  const original = readFileSync(path, 'utf8')
+  const copy = /^    CopyFiles \/SILENT "\$PLUGINSDIR\\7z-out\\\*" \$OUTDIR(?=\r?$)/gm
+  const retry = /^      MessageBox MB_RETRYCANCEL\|MB_ICONEXCLAMATION "\$\(appCannotBeClosed\)" \/SD IDRETRY IDCANCEL AbortExtract7za(?=\r?$)/gm
+  const uncheckedFallback = /^    # As an absolutely last resort[\s\S]*?^  AbortExtract7za:\r?\n    Quit(?=\r?$)/gm
+  for (const anchor of [copy, retry, uncheckedFallback]) {
+    if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League extraction retry.')
+  }
+  writeFileSync(path, original
+    .replace(copy, (line) => '    ClearErrors\n' + line)
+    .replace(retry, () =>
+      '      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "无法复制工具箱程序文件。请检查磁盘空间和安装目录的写入权限，然后重试。" /SD IDCANCEL IDCANCEL AbortExtract7za IDRETRY RetryExtract7za')
+    // Retrying must go through CopyFiles again. Stock direct extraction can silently skip files.
+    .replace(uncheckedFallback, () => '  AbortExtract7za:\n    SetErrorLevel 2\n    Quit'), 'utf8')
 }
 
 if (require.main === module) {

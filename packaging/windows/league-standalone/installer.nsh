@@ -76,6 +76,15 @@ Var LeagueRepair
 !macro customCheckAppRunning
 !macroend
 
+!macro customUnInstallCheck
+  ${If} ${Errors}
+  ${OrIf} $R0 != 0
+    MessageBox MB_ICONEXCLAMATION "无法卸载旧版工具箱。请检查旧版程序目录后重试安装。" /SD IDOK
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+!macroend
+
 ; The custom include is prepended before electron-builder loads MUI2.
 !macro customHeader
 Function LeagueRunForUser
@@ -194,7 +203,7 @@ Function LeagueDataPage
     IntOp $0 $LeagueIncompleteScopes & 16
     ${If} $0 != 0
       StrCpy $LeagueProgramPath "$PROGRAMFILES64\MaxGameStudioLeagueToolbox"
-      StrCpy $1 "旧版登记不完整。若共用程序目录仍有文件，请选择仅为我安装。"
+      StrCpy $1 "旧版安装不完整。若共用程序目录仍有文件，请选择仅为我安装。"
     ${EndIf}
   ${Else}
     StrCpy $1 "程序安装目录。全新安装请使用空文件夹。"
@@ -203,7 +212,7 @@ Function LeagueDataPage
       StrCpy $LeagueProgramPath "$LOCALAPPDATA\Programs\MaxGameStudioLeagueToolbox"
       IfFileExists "$LeagueProgramPath\*.*" 0 +2
         StrCpy $LeagueProgramPath ""
-      StrCpy $1 "旧版登记不完整。请选择独立的空文件夹，旧文件和数据会保留。"
+      StrCpy $1 "旧版安装不完整。请选择独立的空文件夹，旧文件和数据会保留。"
     ${EndIf}
   ${EndIf}
   ${NSD_CreateLabel} 0 0 100% 22u "$1"
@@ -287,11 +296,29 @@ FunctionEnd
     ${EndIf}
     ${If} ${isUpdated}
     ${OrIf} $0 == ""
-      MessageBox MB_ICONEXCLAMATION "旧版安装登记不完整。请打开安装向导，选择独立的空文件夹继续。" /SD IDOK
+      MessageBox MB_ICONEXCLAMATION "旧版安装不完整。请打开安装向导，选择独立的空文件夹继续。" /SD IDOK
       SetErrorLevel 2
       Quit
     ${EndIf}
   ${EndIf}
+!macroend
+
+!macro leagueBeforeRegistration
+  ; Validate the files as the account that wrote the program, before exposing an entry point.
+  StrCpy $R0 "payload"
+  StrCpy $R1 $INSTDIR
+  StrCpy $R2 ""
+  StrCpy $R3 $installMode
+  Push $OUTDIR
+  SetOutPath $WINDIR
+  Call LeagueUserAction
+  Pop $0
+  ${If} $R7 != 0
+    MessageBox MB_ICONEXCLAMATION "工具箱程序文件不完整，安装已停止。请检查安装目录并重新运行安装包。" /SD IDOK
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  SetOutPath $0
 !macroend
 
 !macro customInstall

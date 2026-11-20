@@ -70,6 +70,17 @@ try {
   Assert-Guard 'An uninstall string alone protects the referenced folder' 'selection' 'CurrentUser' $old 2
 
   Set-ItemProperty -LiteralPath $userKey -Name InstallLocation -Value $old
+  $appExe = Join-Path $old 'MaxGameStudioLeagueToolbox.exe'
+  [IO.File]::Delete($appExe)
+  Assert-Guard 'A registered folder with no executable permits the recovery wizard' 'registrations' 'CurrentUser' '' 8
+  Assert-Guard 'A missing executable permits a separate installation' 'selection' 'CurrentUser' $fresh 5
+  Assert-Guard 'A registered partial folder is preserved' 'selection' 'CurrentUser' $old 2
+  Assert-Guard 'A missing executable prevents registering a copy' 'payload' 'CurrentUser' $old 7
+  [IO.File]::WriteAllText($appExe, '')
+  Assert-Guard 'An empty executable prevents registering a copy' 'payload' 'CurrentUser' $old 7
+  [IO.File]::WriteAllText($appExe, 'old')
+  Assert-Guard 'All required files permit registration' 'payload' 'CurrentUser' $old 0
+
   Set-ItemProperty -LiteralPath $machineKey -Name InstallLocation -Value (Join-Path $scratch 'Missing old common folder')
   Assert-Guard 'Only the incomplete machine registration is flagged' 'registrations' 'CurrentUser' '' 16
   Assert-Guard 'A complete user registration still allows an in-place upgrade' 'selection' 'CurrentUser' $old 0
