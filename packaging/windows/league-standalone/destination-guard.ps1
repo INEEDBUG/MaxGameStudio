@@ -60,6 +60,30 @@ function Read-InstallLocation([string]$Key) {
   if ($value) { $value.Trim() -replace '^"([^"]+)"$', '$1' }
 }
 
+function Read-LeagueRegistration([string]$Hive, [string]$Identity, [string]$UninstallKey) {
+  $location = Read-InstallLocation "$Hive\Software\$Identity"
+  $remove = Read-Value "$Hive\$UninstallKey\$Identity" 'UninstallString'
+  if (!$location -and !$remove) { return }
+  $uninstaller = if ($remove -is [string] -and $remove -match '^"([^"]+\.exe)"(?:\s|$)') { $Matches[1] }
+  [pscustomobject]@{ Location = $location; Uninstaller = $uninstaller }
+}
+
+function Test-NonemptyDirectory([string]$Path) {
+  (Test-Path -LiteralPath $Path -PathType Container) -and
+    [bool](Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
+}
+
+function Get-IncompleteInstallDirectory($Registration) {
+  $path = $Registration.Location
+  if (!$path -and $Registration.Uninstaller -match '^[a-z]:\\.*\\Uninstall MaxGameStudioLeagueToolbox\.exe$') {
+    $path = Split-Path -Parent $Registration.Uninstaller
+  }
+  if (!$path) { return }
+  try { $path = Get-LocalDirectory $path } catch { return }
+  # A known occupied directory is protected. An unverified record never establishes ownership.
+  if (Test-NonemptyDirectory $path) { $path }
+}
+
 function Assert-ProtectedMachinePath([string]$Path) {
   $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
   $acl = Get-Acl -LiteralPath $Path
@@ -84,15 +108,18 @@ function Assert-MachineDestination([string]$Destination, [string]$Identity, [str
   }
   Assert-ProtectedMachinePath $programFiles
   if ([IO.Directory]::Exists($program)) { Assert-ProtectedMachinePath $program }
-  $registered = Read-InstallLocation "HKLM:\Software\$Identity"
-  $remove = Read-Value "HKLM:\$UninstallKey\$Identity" 'UninstallString'
-  if (!$registered -and !$remove) { return }
+  $registration = Read-LeagueRegistration 'HKLM:' $Identity $UninstallKey
+  if (!$registration) { return 0 }
+  if (!$registration.Location -or !$registration.Uninstaller) {
+    if (Test-NonemptyDirectory $program) { throw 'Incomplete machine registration has an occupied program folder.' }
+    return 5
+  }
   $uninstaller = Get-LeagueOrdinaryFile $program 'Uninstall MaxGameStudioLeagueToolbox.exe'
-  if (!$uninstaller -or $registered -ne $program -or
-      $remove -notmatch '^"([^"]+\.exe)"(?:\s|$)' -or $Matches[1] -ne $uninstaller.FullName) {
+  if (!$uninstaller -or $registration.Location -ne $program -or $registration.Uninstaller -ne $uninstaller.FullName) {
     throw 'Unexpected machine League registration.'
   }
   Assert-ProtectedMachinePath $uninstaller.FullName
+  return 0
 }
 
 try {
@@ -111,8 +138,7 @@ try {
   $uninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall'
   if ($phase -eq 'machine') {
     if ($scope -ne 'all') { throw 'Wrong scope for machine destination check.' }
-    Assert-MachineDestination $env:MGS_LEAGUE_INSTALL_DEST $leagueIdentity $uninstallKey
-    exit 0
+    exit (Assert-MachineDestination $env:MGS_LEAGUE_INSTALL_DEST $leagueIdentity $uninstallKey)
   }
   $leagueRoot = Get-LocalDirectory (Join-Path $env:APPDATA 'MaxGameStudioLeague')
   $activeLeagueProfile = Join-Path $leagueRoot 'Profile'
@@ -145,13 +171,19 @@ try {
   }
   $protected = $mainProtected + $leagueProfiles + $leagueRoot
   $owned = @{}
+  $incomplete = @{}
+  $preserved = @()
   foreach ($hive in 'HKCU:', 'HKLM:') {
-    $existing = Read-InstallLocation "$hive\Software\$leagueIdentity"
-    $remove = Read-Value "$hive\$uninstallKey\$leagueIdentity" 'UninstallString'
-    if (!$existing -and !$remove) { continue }
-    if (!$existing -or $remove -notmatch '^"([^"]+\.exe)"(?:\s|$)') { throw 'Invalid League registration.' }
-    $uninstaller = $Matches[1]
-    $existing = Get-LocalDirectory $existing
+    $registration = Read-LeagueRegistration $hive $leagueIdentity $uninstallKey
+    if (!$registration) { continue }
+    $registeredScope = if ($hive -eq 'HKCU:') { 'CurrentUser' } else { 'all' }
+    if (!$registration.Location -or !$registration.Uninstaller) {
+      $incomplete[$registeredScope] = $true
+      if ($phase -ne 'registrations') { $preserved += Get-IncompleteInstallDirectory $registration }
+      continue
+    }
+    $uninstaller = $registration.Uninstaller
+    $existing = Get-LocalDirectory $registration.Location
     Assert-Separate $existing $protected
     if ((Get-LocalDirectory (Split-Path -Parent $uninstaller)) -ne $existing -or
         (Split-Path -Leaf $uninstaller) -ne 'Uninstall MaxGameStudioLeagueToolbox.exe') {
@@ -165,8 +197,11 @@ try {
         throw 'Invalid registered League file.'
       }
     }
-    $registeredScope = if ($hive -eq 'HKCU:') { 'CurrentUser' } else { 'all' }
     $owned[$registeredScope] = $existing
+  }
+  if ($phase -eq 'registrations') {
+    # NSIS uses these bits to show a fresh destination for the affected scope.
+    exit ((8 * [int]$incomplete.ContainsKey('CurrentUser')) + (16 * [int]$incomplete.ContainsKey('all')))
   }
   if ($phase -ne 'registrations') {
     $program = Get-LocalDirectory $env:MGS_LEAGUE_INSTALL_DEST
@@ -180,22 +215,19 @@ try {
     $data = $null
     if (!$deferUserChanges -and $env:MGS_LEAGUE_DATA_DEST) {
       $data = Get-LocalDirectory $env:MGS_LEAGUE_DATA_DEST
-      Assert-Separate $data ($mainProtected + @($owned.Values))
+      Assert-Separate $data ($mainProtected + @($owned.Values) + $preserved)
       $control = Get-LocalDirectory $leagueRoot
       if ($data -eq $control -or $control.StartsWith($data + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'The data directory would contain the Toolbox location settings.'
       }
-      if ($data -ne (Get-LocalDirectory $activeLeagueProfile) -and
-          (Test-Path -LiteralPath $data) -and
-          (Get-ChildItem -LiteralPath $data -Force | Select-Object -First 1) -and
+      if ($data -ne (Get-LocalDirectory $activeLeagueProfile) -and (Test-NonemptyDirectory $data) -and
           !(Test-Path -LiteralPath (Join-Path $data '.maxgamestudio-league-profile') -PathType Leaf)) {
         throw 'New data folder is not empty.'
       }
       $protected += $data
     }
-    Assert-Separate $program $protected
-    if ($program -ne $owned[$scope] -and (Test-Path -LiteralPath $program) -and
-        (Get-ChildItem -LiteralPath $program -Force | Select-Object -First 1)) {
+    Assert-Separate $program ($protected + $preserved)
+    if ($program -ne $owned[$scope] -and (Test-NonemptyDirectory $program)) {
       throw 'New program folder is not empty.'
     }
     if ($phase -eq 'complete') {
@@ -205,6 +237,7 @@ try {
       exit (Complete-LeagueUserInstall $leagueRoot $selection $oldProgram $leagueIdentity -Defer:$deferUserChanges)
     }
   }
+  if ($incomplete[$scope]) { exit 5 }
   exit 0
 } catch {
   exit 2

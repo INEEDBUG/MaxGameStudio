@@ -12,6 +12,8 @@ Var LeagueProgramPath
 Var LeagueProgramEdit
 Var LeagueMutex
 Var LeagueDeferUserData
+Var LeagueIncompleteScopes
+Var LeagueRepair
 
 !macro customPageAfterChangeDir
   Page custom LeagueDataPage LeagueDataLeave
@@ -37,31 +39,36 @@ Var LeagueDeferUserData
       Abort
     ${EndIf}
   ${EndIf}
+  StrCpy $LeagueIncompleteScopes 0
   ${If} ${Silent}
     StrCpy $LeagueProgramPath $INSTDIR
-    StrCpy $R0 "selection"
+    Call LeagueValidateDestination
   ${Else}
     StrCpy $R0 "registrations"
-  ${EndIf}
-  Call LeagueRunForUser
-  ${If} $R7 == 3
-    MessageBox MB_ICONEXCLAMATION "请先关闭英雄联盟工具箱，再继续安装。" /SD IDOK
-    SetErrorLevel 2
-    Abort
+    Call LeagueRunForUser
+    ${If} $R7 == 8
+    ${OrIf} $R7 == 16
+    ${OrIf} $R7 == 24
+      StrCpy $LeagueIncompleteScopes $R7
+      IntOp $0 $LeagueIncompleteScopes & 8
+      ${If} $0 != 0
+        StrCpy $hasPerUserInstallation "0"
+      ${EndIf}
+      IntOp $0 $LeagueIncompleteScopes & 16
+      ${If} $0 != 0
+        StrCpy $hasPerMachineInstallation "0"
+      ${EndIf}
+      StrCpy $R7 0
+    ${EndIf}
   ${EndIf}
   ${If} $R7 != 0
-    MessageBox MB_ICONEXCLAMATION "无法验证工具箱安装目录。请选择独立的空目录，并确认旧版安装有效。" /SD IDOK
+    ${If} ${Silent}
+      Call LeagueShowDestinationError
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION "无法核对已有工具箱的安装登记或文件。请联系维护者。"
+    ${EndIf}
     SetErrorLevel 2
     Abort
-  ${EndIf}
-  ${If} ${Silent}
-  ${AndIf} $installMode == "all"
-    Call LeagueCheckMachineDestination
-    ${If} $R7 != 0
-      MessageBox MB_ICONEXCLAMATION "所有用户版的程序必须安装到受保护的 Program Files 专用文件夹。" /SD IDOK
-      SetErrorLevel 2
-      Abort
-    ${EndIf}
   ${EndIf}
 !macroend
 
@@ -90,6 +97,36 @@ Function LeagueCheckMachineDestination
   StrCpy $R2 ""
   StrCpy $R3 "all"
   Call LeagueUserAction
+FunctionEnd
+
+Function LeagueValidateDestination
+  StrCpy $LeagueRepair "0"
+  StrCpy $R0 "selection"
+  Call LeagueRunForUser
+  ${If} $R7 == 5
+    StrCpy $LeagueRepair "1"
+    StrCpy $R7 0
+  ${EndIf}
+  ${If} $R7 == 0
+  ${AndIf} $installMode == "all"
+    Call LeagueCheckMachineDestination
+    ${If} $R7 == 5
+      StrCpy $LeagueRepair "1"
+      StrCpy $R7 0
+    ${ElseIf} $R7 != 0
+      StrCpy $R7 6
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function LeagueShowDestinationError
+  ${If} $R7 == 3
+    MessageBox MB_ICONEXCLAMATION "请先关闭英雄联盟工具箱，再继续安装。" /SD IDOK
+  ${ElseIf} $R7 == 6
+    MessageBox MB_ICONEXCLAMATION "无法验证 Program Files 中的共用程序目录。请检查现有安装，或选择仅为我安装。" /SD IDOK
+  ${Else}
+    MessageBox MB_ICONEXCLAMATION "无法验证工具箱安装。请选择独立的空目录，或确认当前安装的登记和文件完整。" /SD IDOK
+  ${EndIf}
 FunctionEnd
 
 Function LeagueUserAction
@@ -154,8 +191,20 @@ Function LeagueDataPage
   ${endif}
   ${If} $installMode == "all"
     StrCpy $1 "所有用户共用 Program Files 中的程序。每位用户的数据独立保存。"
+    IntOp $0 $LeagueIncompleteScopes & 16
+    ${If} $0 != 0
+      StrCpy $LeagueProgramPath "$PROGRAMFILES64\MaxGameStudioLeagueToolbox"
+      StrCpy $1 "旧版登记不完整。若共用程序目录仍有文件，请选择仅为我安装。"
+    ${EndIf}
   ${Else}
     StrCpy $1 "程序安装目录。全新安装请使用空文件夹。"
+    IntOp $0 $LeagueIncompleteScopes & 8
+    ${If} $0 != 0
+      StrCpy $LeagueProgramPath "$LOCALAPPDATA\Programs\MaxGameStudioLeagueToolbox"
+      IfFileExists "$LeagueProgramPath\*.*" 0 +2
+        StrCpy $LeagueProgramPath ""
+      StrCpy $1 "旧版登记不完整。请选择独立的空文件夹，旧文件和数据会保留。"
+    ${EndIf}
   ${EndIf}
   ${NSD_CreateLabel} 0 0 100% 22u "$1"
   Pop $0
@@ -212,25 +261,37 @@ Function LeagueDataLeave
       Abort
     ${EndIf}
   ${EndIf}
-  StrCpy $R0 "selection"
-  Call LeagueRunForUser
-  ${If} $R7 == 3
-    MessageBox MB_ICONEXCLAMATION "请先关闭英雄联盟工具箱，再继续安装。"
-    Abort
-  ${EndIf}
+  Call LeagueValidateDestination
   ${If} $R7 != 0
-    MessageBox MB_ICONEXCLAMATION "请选择本机磁盘上的独立文件夹。"
+    Call LeagueShowDestinationError
     Abort
-  ${EndIf}
-  ${If} $installMode == "all"
-    Call LeagueCheckMachineDestination
-    ${If} $R7 != 0
-      MessageBox MB_ICONEXCLAMATION "所有用户版的程序必须安装到受保护的 Program Files 专用文件夹。"
-      Abort
-    ${EndIf}
   ${EndIf}
   GetFullPathName $INSTDIR "$LeagueProgramPath"
 FunctionEnd
+!macroend
+
+!macro leagueBeforeInstall
+  ; Recheck at the point where the stock installer can run an old uninstaller.
+  StrCpy $LeagueProgramPath $INSTDIR
+  Call LeagueValidateDestination
+  ${If} $R7 != 0
+    Call LeagueShowDestinationError
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  ${If} $LeagueRepair == "1"
+    ${If} ${Silent}
+      !insertmacro GetDParameter $0
+    ${Else}
+      StrCpy $0 "interactive"
+    ${EndIf}
+    ${If} ${isUpdated}
+    ${OrIf} $0 == ""
+      MessageBox MB_ICONEXCLAMATION "旧版安装登记不完整。请打开安装向导，选择独立的空文件夹继续。" /SD IDOK
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+  ${EndIf}
 !macroend
 
 !macro customInstall

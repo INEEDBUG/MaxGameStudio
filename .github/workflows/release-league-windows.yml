@@ -102,6 +102,10 @@ jobs:
           packaging/windows/league-standalone/league-update.test.mjs
           packaging/windows/league-standalone/league-profile.test.mjs
 
+      - name: Verify installation registration checks
+        shell: powershell
+        run: ./packaging/windows/league-standalone/test-destination-guard.ps1
+
       - name: Restore League package and Electron download caches
         uses: actions/cache@v4
         with:
@@ -149,6 +153,24 @@ jobs:
           if ($uninstall.Count -ne 1) { throw 'Expected one standalone uninstaller.' }
           $exit = Start-Process -FilePath $uninstall[0].FullName -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
           if ($exit.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe)) { throw 'League uninstall verification failed.' }
+
+      - name: Verify recovery from incomplete League installation registration
+        if: github.repository == 'INEEDBUG/MaxGameStudio'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $metadata = node packaging/windows/release-baseline.mjs league-beta
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current published League beta.' }
+          $baseline = $metadata | ConvertFrom-Json
+          $folder = Join-Path $env:RUNNER_TEMP 'league-repair-baseline'
+          gh release download $baseline.tag --repo $env:GITHUB_REPOSITORY --pattern $baseline.name --dir $folder
+          if ($LASTEXITCODE -ne 0) { throw 'Published League baseline download failed.' }
+          $file = Get-Item -LiteralPath (Join-Path $folder $baseline.name)
+          if ($file.Length -ne $baseline.size -or (Get-FileHash -LiteralPath $file.FullName).Hash -ne $baseline.sha256) {
+            throw 'League baseline installer does not match the published digest.'
+          }
+          ./packaging/windows/league-standalone/verify-registration-repair.ps1 -Installer $env:LEAGUE_INSTALLER -BaselineInstaller $file.FullName
 
       - name: Verify the live RESG provider
         if: github.event_name == 'workflow_dispatch' && inputs.verify_live_resg

@@ -15,11 +15,32 @@ function patchScopeTemplates(templates) {
   const section = join(templates, 'installSection.nsh')
   const original = readFileSync(section, 'utf8')
   const crossScopeUninstall = /^\$\{if\} \$installMode == "all"\r?\n  !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n  !insertmacro handleUninstallResult HKEY_CURRENT_USER\r?\n\$\{endIf\}\r?\n/gm
-  if ([...original.matchAll(crossScopeUninstall)].length !== 1) {
-    throw new Error('Expected one pinned cross-scope uninstall block.')
+  const linkSetup = /^!insertmacro setLinkVars(?=\r?$)/gm
+  const keepShortcuts = /^\$\{if\} \$isTryToKeepShortcuts == "true"(?=\r?$)/gm
+  const sameScopeUninstall = /^!insertmacro uninstallOldVersion SHELL_CONTEXT\r?\n!insertmacro handleUninstallResult SHELL_CONTEXT(?=\r?$)/gm
+  const launchLink = /^\$\{if\} \$\{FileExists\} "\$newStartMenuLink"(?=\r?$)/gm
+  for (const anchor of [crossScopeUninstall, linkSetup, keepShortcuts, sameScopeUninstall, launchLink]) {
+    if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League install section.')
   }
-  // In over-the-shoulder UAC the elevated HKCU belongs to the credential administrator.
-  writeFileSync(section, original.replace(crossScopeUninstall, ''), 'utf8')
+  const patchedSection = original
+    // The elevated HKCU can belong to a different credential administrator.
+    .replace(crossScopeUninstall, '')
+    .replace(linkSetup, (match) => [
+      '!insertmacro leagueBeforeInstall',
+      match,
+      '${if} $LeagueRepair == "1"',
+      '  StrCpy $oldMenuDirectory ""',
+      '${endif}',
+    ].join('\n'))
+    // Never run a command or reuse shortcut information from an incomplete registration.
+    .replace(keepShortcuts, (match) => match + '\n${andIf} $LeagueRepair != "1"')
+    .replace(sameScopeUninstall, (match) => [
+      '${if} $LeagueRepair != "1"',
+      ...match.split(/\r?\n/).map((line) => '  ' + line),
+      '${endif}',
+    ].join('\n'))
+    .replace(launchLink, (match) => match + '\n${andIf} $LeagueRepair != "1"')
+  writeFileSync(section, patchedSection, 'utf8')
   for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
     const path = join(templates, filename)
     const text = readFileSync(path, 'utf8')
