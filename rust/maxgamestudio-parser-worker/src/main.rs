@@ -1,6 +1,8 @@
 //! One request per process. Stdout contains the protocol reply and stderr records failures.
 
 mod replay;
+mod replay_effect_rows;
+mod replay_io;
 
 use parser::first_pass::{
     parser::HEADER_ENDS_AT_BYTE,
@@ -36,6 +38,7 @@ enum Action {
     Probe,
     InspectHeader { path: PathBuf },
     WriteReplayParquet(replay::WriteReplayRequest),
+    ExtractReplayEffectRows(replay_effect_rows::ExtractReplayEffectRowsRequest),
 }
 
 #[derive(Debug)]
@@ -149,11 +152,12 @@ fn run(input: impl Read) -> Result<Value, Failure> {
     }
     match request.action {
         Action::Probe => Ok(json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet"],
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows"],
             "upstream_tag": "v0.41.4"
         })),
         Action::InspectHeader { path } => inspect_header(&path),
         Action::WriteReplayParquet(request) => replay::write(request),
+        Action::ExtractReplayEffectRows(request) => replay_effect_rows::extract(request),
     }
 }
 

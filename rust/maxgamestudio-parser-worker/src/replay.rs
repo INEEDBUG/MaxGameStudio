@@ -1,4 +1,4 @@
-use crate::{parser_inputs, Failure};
+use crate::{parser_inputs, replay_io, Failure};
 use parquet::{
     basic::{Compression, ConvertedType, Repetition, Type as PhysicalType},
     data_type::{BoolType, ByteArray, ByteArrayType, DataType, FloatType, Int32Type, Int64Type},
@@ -11,8 +11,8 @@ use parquet::{
 };
 use parser::{
     first_pass::{
-        parser::HEADER_ENDS_AT_BYTE, parser_settings::rm_user_friendly_names,
-        prop_controller::TICK_ID, read_bits::DemoParserError,
+        parser_settings::rm_user_friendly_names, prop_controller::TICK_ID,
+        read_bits::DemoParserError,
     },
     parse_demo::{DemoOutput, Parser, ParsingMode},
     second_pass::{parser_settings::create_huffman_lookup_table, variants::VarVec},
@@ -21,9 +21,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap},
-    fs::{self, File, OpenOptions},
-    io::ErrorKind,
-    path::{Path, PathBuf},
+    fs::File,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -89,25 +88,11 @@ pub(crate) fn write(request: WriteReplayRequest) -> Result<Value, Failure> {
         return Err(Failure::request("expected an absolute demo path"));
     }
     let staged_path = &request.output_path;
-    if !staged_path.is_absolute()
-        || !staged_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".parquet.partial"))
-    {
-        return Err(Failure::request(
-            "expected an absolute .parquet.partial output path",
-        ));
-    }
-    match fs::symlink_metadata(staged_path) {
-        Ok(_) => return Err(Failure::replay_write("staged replay output already exists")),
-        Err(error) if error.kind() == ErrorKind::NotFound => (),
-        Err(_) => {
-            return Err(Failure::replay_write(
-                "could not inspect staged output path",
-            ))
-        }
-    }
+    replay_io::validate_destination(
+        staged_path,
+        ".parquet.partial",
+        "expected an absolute .parquet.partial output path",
+    )?;
 
     let rounds = sample_rounds(request.rounds, request.tick_rate, request.fps)?;
     let mut wanted_ticks = Vec::new();
@@ -119,7 +104,7 @@ pub(crate) fn write(request: WriteReplayRequest) -> Result<Value, Failure> {
             tick_to_round.insert(tick, round.range.round_number);
         }
     }
-    let output = parse(&request.path, wanted_ticks)?;
+    let output = replay_io::with_demo_bytes(&request.path, |bytes| parse(bytes, wanted_ticks))?;
     let ticks = match output
         .df
         .get(&TICK_ID)
@@ -169,24 +154,9 @@ pub(crate) fn write(request: WriteReplayRequest) -> Result<Value, Failure> {
         })
         .collect();
 
-    let parent = staged_path
-        .parent()
-        .ok_or_else(|| Failure::request("expected a staged replay output directory"))?;
-    let mut file = tempfile::Builder::new()
-        .prefix(".mgs-replay-")
-        .tempfile_in(parent)
-        .map_err(|_| Failure::replay_write("could not create replay scratch file"))?;
-    let (row_groups, parquet_rows) = write_parquet(file.as_file_mut(), &columns, indices_by_round)
-        .map_err(|_| Failure::replay_write("could not encode replay parquet"))?;
-    file.as_file()
-        .sync_all()
-        .map_err(|_| Failure::replay_write("could not flush replay parquet"))?;
-    file.persist_noclobber(staged_path).map_err(|error| {
-        if error.error.kind() == ErrorKind::AlreadyExists {
-            Failure::replay_write("staged replay output already exists")
-        } else {
-            Failure::replay_write("could not stage completed replay parquet")
-        }
+    let (row_groups, parquet_rows) = replay_io::stage(staged_path, |file| {
+        write_parquet(file, &columns, indices_by_round)
+            .map_err(|_| Failure::replay_write("could not encode replay parquet"))
     })?;
     Ok(json!({
         "rows": ticks.len(),
@@ -257,44 +227,7 @@ fn sample_rounds(
     Ok(rounds)
 }
 
-fn parse(path: &Path, wanted_ticks: Vec<i32>) -> Result<DemoOutput, Failure> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_SHARE_READ: u32 = 1;
-        options.share_mode(FILE_SHARE_READ);
-    }
-    let file = options
-        .open(path)
-        .map_err(|_| Failure::read("could not open demo for stable reading"))?;
-    let metadata = file
-        .metadata()
-        .map_err(|_| Failure::read("could not inspect demo"))?;
-    if !metadata.is_file() {
-        return Err(Failure::read("expected a regular demo file"));
-    }
-    if metadata.len() < HEADER_ENDS_AT_BYTE as u64 {
-        return Err(Failure::replay_parse("invalid Source 2 demo framing"));
-    }
-    #[cfg(windows)]
-    // SAFETY: The Windows handle denies write sharing and stays live for the mapping.
-    let bytes = unsafe { memmap2::MmapOptions::new().map(&file) }
-        .map_err(|_| Failure::read("could not map demo"))?;
-    #[cfg(not(windows))]
-    let bytes = {
-        use std::io::Read;
-        let mut file = file;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|_| Failure::read("could not read demo"))?;
-        bytes
-    };
-    if bytes.len() < HEADER_ENDS_AT_BYTE || !bytes.starts_with(b"PBDEMS2\0") {
-        return Err(Failure::replay_parse("invalid Source 2 demo framing"));
-    }
-
+fn parse(bytes: &[u8], wanted_ticks: Vec<i32>) -> Result<DemoOutput, Failure> {
     let wanted_props = RAW_PLAYER_FIELDS
         .iter()
         .map(|field| (*field).to_string())
@@ -311,7 +244,7 @@ fn parse(path: &Path, wanted_ticks: Vec<i32>) -> Result<DemoOutput, Failure> {
         ..parser_inputs(&huffman)
     };
     Parser::new(inputs, ParsingMode::Normal)
-        .parse_demo(&bytes)
+        .parse_demo(bytes)
         .map_err(|error| {
             Failure::replay_parse(match error {
                 DemoParserError::MalformedMessage => "malformed replay demo frame",

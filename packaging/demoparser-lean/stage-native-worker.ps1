@@ -13,7 +13,11 @@ $worker = "rust/maxgamestudio-parser-worker"
 $inputRoot = Join-Path $repo $worker
 $stageRoot = Join-Path $source $worker
 
-foreach ($relative in @("Cargo.toml", "Cargo.lock", "src/main.rs", "src/replay.rs", "tests/ipc.rs")) {
+$files = @(
+    "Cargo.toml", "Cargo.lock", "src/main.rs", "src/replay.rs",
+    "src/replay_effect_rows.rs", "src/replay_io.rs", "tests/ipc.rs"
+)
+foreach ($relative in $files) {
     $destination = Join-Path $stageRoot $relative
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
     Copy-Item -LiteralPath (Join-Path $inputRoot $relative) -Destination $destination -Force

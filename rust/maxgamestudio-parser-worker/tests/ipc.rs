@@ -54,7 +54,7 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(
         result(&probe)["result"],
         json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet"], "upstream_tag": "v0.41.4"
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows"], "upstream_tag": "v0.41.4"
         })
     );
 
@@ -127,6 +127,42 @@ fn replay_writer_errors_leave_no_cache_artifact() {
     );
     assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 1);
     assert_eq!(fs::read(source).unwrap(), b"PBDEMS2");
+}
+
+#[test]
+fn replay_effect_extraction_validates_bounds_and_protects_staged_files() {
+    let scratch = tempfile::tempdir().unwrap();
+    let source = scratch.path().join("invalid.dem");
+    let output = scratch.path().join("raw.effects.jsonl.zst.partial");
+    let call = |end_tick: i32| {
+        request(json!({
+            "protocol": 1, "action": "extract_replay_effect_rows", "path": source,
+            "output_path": output, "start_tick":30,"end_tick":end_tick,
+        }))
+    };
+    fs::write(&source, b"PBDEMS2").unwrap();
+    let invalid = call(40_030);
+    assert_eq!(invalid.status.code(), Some(2));
+    assert_eq!(
+        result(&invalid)["error"]["detail"],
+        "expected an inclusive replay effect window of at most 40000 ticks"
+    );
+    let unreadable = call(40);
+    assert_eq!(unreadable.status.code(), Some(5));
+    assert_eq!(
+        result(&unreadable)["error"]["detail"],
+        "invalid Source 2 demo framing"
+    );
+    assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 1);
+
+    fs::write(&output, b"other worker output").unwrap();
+    let collision = call(40);
+    assert_eq!(collision.status.code(), Some(6));
+    assert_eq!(
+        result(&collision)["error"]["detail"],
+        "staged replay output already exists"
+    );
+    assert_eq!(fs::read(output).unwrap(), b"other worker output");
 }
 
 #[test]
