@@ -84,4 +84,26 @@ class PiniaStateSync {
   assert.equal(store.phase, 'InProgress')
   onUpdate('phase', null, { action: 'update', raw: false, revision: 4 })
   assert.equal(store.phase, null)
+
+  const selected = {}
+  const selecting = new PiniaStateSync({ ipc }).sync('league-client-main', 'champSelect', selected)
+  resolveInitial({
+    currentPickableChampionIds: { value: [2, 30], config: { raw: false } },
+    gridChampions: { value: [], config: { raw: false } },
+  })
+  await selecting
+  assert.deepEqual(selected.currentPickableChampionIds, new Set([2, 30]))
+  assert.deepEqual(selected.gridChampions, [])
+  onUpdate('currentBannableChampionIds', [1], { action: 'update', raw: false, revision: 2 })
+  assert.deepEqual(selected.currentBannableChampionIds, new Set([1]))
+})
+
+test('connects the main title bar drag gesture to the native main window only', () => {
+  const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const component = '<template><div class="shard-area"></div></template>\n<script setup lang="ts">\n</script>'
+  const titlebar = join(stagedSource, 'src/renderer/src-main-window/components/titlebar/MainWindowTitlebar.vue')
+  const native = renderer.transform(component, titlebar)?.code ?? component
+  assert.match(native, /class="shard-area" @mousedown\.self\.left="startNativeDrag"/)
+  assert.match(native, /call\('window-manager-main\/main-window', 'startDragging'\)/)
+  assert.equal(renderer.transform(component, join(stagedSource, 'other.vue')), undefined)
 })

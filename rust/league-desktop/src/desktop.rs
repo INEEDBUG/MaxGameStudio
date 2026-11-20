@@ -4,10 +4,14 @@ use crate::{
 };
 use maxgamestudio_league_core::{
     profile_database::PROFILE_DB_VERSION,
+    resg::RESG_NAMESPACE,
     shell_preferences::{ShellPreference, APP_COMMON, MAIN_WINDOW},
 };
 use serde_json::{json, Map, Value};
-use std::io;
+use std::{
+    io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -16,7 +20,27 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+#[path = "bootstrap.rs"]
+mod bootstrap;
+
+use bootstrap::{AUTO_SELECT, AUX_WINDOW, OPGG_WINDOW};
+
 const SYNC_NAMESPACE: &str = "mobx-utils-main";
+const LOCAL_WINDOWS: [&str; 3] = ["main", "aux", "opgg"];
+
+#[derive(Default)]
+struct SettingsRevision(AtomicU64);
+
+impl SettingsRevision {
+    // Both operations run while holding the profile database lock.
+    fn current(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn next(&self) -> u64 {
+        self.0.fetch_add(1, Ordering::Relaxed) + 1
+    }
+}
 
 fn saved_close_action(profile: &DesktopProfile) -> Result<&'static str, String> {
     let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
@@ -54,12 +78,20 @@ pub(crate) fn emit(
 }
 
 fn publish_window_property(window: &WebviewWindow, key: &str, value: Value) -> tauri::Result<()> {
-    emit(
-        window,
-        SYNC_NAMESPACE,
-        &format!("update-state-prop/{MAIN_WINDOW}:state"),
-        json!([key, value, { "action": "update", "raw": false }]),
-    )
+    let namespace = match window.label() {
+        "main" => MAIN_WINDOW,
+        "aux" => AUX_WINDOW,
+        "opgg" => OPGG_WINDOW,
+        _ => return Ok(()),
+    };
+    let event = format!("update-state-prop/{namespace}:state");
+    let args = json!([key, value, {"action":"update","raw":false}]);
+    for label in LOCAL_WINDOWS {
+        if let Some(target) = window.app_handle().get_webview_window(label) {
+            emit(&target, SYNC_NAMESPACE, &event, args.clone())?;
+        }
+    }
+    Ok(())
 }
 
 fn window_status(window: &WebviewWindow) -> tauri::Result<&'static str> {
@@ -92,18 +124,151 @@ fn field(value: Value) -> Value {
     json!({ "value": value, "config": { "raw": false } })
 }
 
+fn state_fields(fields: Value, revision: Option<u64>) -> Value {
+    let Value::Object(fields) = fields else {
+        unreachable!("renderer state is a JSON object");
+    };
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| {
+                let mut field = field(value);
+                if let Some(revision) = revision {
+                    field["config"]["revision"] = json!(revision);
+                }
+                (key, field)
+            })
+            .collect(),
+    )
+}
+
+fn settings_changed(
+    app: &AppHandle,
+    namespace: &str,
+    key: &str,
+    value: &Value,
+    revision: u64,
+) -> tauri::Result<()> {
+    let event = format!("update-state-prop/{namespace}:settings");
+    let args = json!([key, value, {"action":"update","raw":false,"revision":revision}]);
+    for label in LOCAL_WINDOWS {
+        if let Some(target) = app.get_webview_window(label) {
+            emit(&target, SYNC_NAMESPACE, &event, args.clone())?;
+        }
+    }
+    Ok(())
+}
+
+fn window_label(namespace: &str) -> Option<&'static str> {
+    match namespace {
+        MAIN_WINDOW => Some("main"),
+        AUX_WINDOW => Some("aux"),
+        OPGG_WINDOW => Some("opgg"),
+        _ => None,
+    }
+}
+
+fn window_state(app: &AppHandle, label: &str) -> tauri::Result<Value> {
+    let Some(window) = app.get_webview_window(label) else {
+        return Ok(
+            json!({"status":"normal","focus":"blurred","show":false,"ready":false,"trackedBounds":null}),
+        );
+    };
+    Ok(json!({
+        "status":window_status(&window)?,
+        "focus":if window.is_focused()? { "focused" } else { "blurred" },
+        "show":window.is_visible()?,
+        "ready":true,
+    }))
+}
+
+fn bundled_navigation(url: &tauri::Url) -> bool {
+    url.port().is_none()
+        && matches!(
+            (url.scheme(), url.host_str()),
+            ("tauri", Some("localhost")) | ("http", Some("tauri.localhost"))
+        )
+}
+
+pub(crate) fn show_companion(
+    app: &AppHandle,
+    namespace: &str,
+    inactive: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (label, entry, title, width, height, min_height) = match namespace {
+        AUX_WINDOW => ("aux", "aux-window.html", "小型辅助面板", 340., 420., 420.),
+        OPGG_WINDOW => ("opgg", "opgg-window.html", "OP.GG", 530., 720., 530.),
+        _ => return Err("未知的辅助窗口。".into()),
+    };
+    let profile = app.state::<DesktopProfile>();
+    let (enabled, pinned) = {
+        let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+        let preferences = bootstrap::initial_state(&db, namespace, "settings")
+            .map_err(|error| error.to_string())?
+            .ok_or("辅助窗口设置不可用。")?;
+        (
+            preferences["enabled"] == true,
+            preferences["pinned"] == true,
+        )
+    };
+    if !enabled {
+        return Err("该辅助窗口已关闭。".into());
+    }
+    let target = if let Some(target) = app.get_webview_window(label) {
+        target
+    } else {
+        let created = WebviewWindowBuilder::new(app, label, WebviewUrl::App(entry.into()))
+            .data_directory(profile.webview_directory()?)
+            .title(title)
+            .inner_size(width, height)
+            .min_inner_size(width, min_height)
+            .decorations(false)
+            .always_on_top(pinned)
+            .visible(false)
+            .focused(!inactive)
+            .on_navigation(bundled_navigation)
+            .build();
+        match created {
+            Ok(window) => window,
+            Err(error) => app.get_webview_window(label).ok_or(error)?,
+        }
+    };
+    // A setting can change while WebView2 is creating the window.
+    let enabled = {
+        let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+        bootstrap::backend_pref(namespace, "enabled")
+            .expect("known companion preference")
+            .read(&db)
+            .map_err(|error| error.to_string())?
+            == true
+    };
+    if !enabled {
+        return Err("该辅助窗口已关闭。".into());
+    }
+    target.show()?;
+    if !inactive {
+        target.unminimize()?;
+        target.set_focus()?;
+    }
+    publish_window_property(&target, "ready", json!(true))?;
+    publish_window_property(&target, "show", json!(true))?;
+    Ok(())
+}
+
 #[tauri::command]
-fn league_call(
+async fn league_call(
     window: WebviewWindow,
     profile: State<'_, DesktopProfile>,
     client: State<'_, ClientRuntime>,
+    revision: State<'_, SettingsRevision>,
     namespace: String,
     method: String,
     args: Vec<Value>,
 ) -> Result<Value, String> {
-    if !matches!(window.label(), "main" | "aux" | "opgg") {
+    if !LOCAL_WINDOWS.contains(&window.label()) {
         return Err("此窗口无法调用工具箱。".into());
     }
+    let app = window.app_handle();
     let invoke = || -> Result<Value, Box<dyn std::error::Error>> {
         match (namespace.as_str(), method.as_str()) {
             (APP_COMMON, "getVersion") => Ok(json!(env!("CARGO_PKG_VERSION"))),
@@ -130,6 +295,58 @@ fn league_call(
                 client.select(window.app_handle(), selection)?;
                 Ok(Value::Null)
             }
+            ("ongoing-game-main", "getAll") => Ok(bootstrap::ongoing_game_data()),
+            ("renderer-debug-main", "setSendAllNativeLcuEvents")
+                if args.first() == Some(&json!(false)) =>
+            {
+                Ok(Value::Null)
+            }
+            (AUTO_SELECT, "setPickConfig" | "setBanConfig") if window.label() == "main" => {
+                let group = args
+                    .first()
+                    .and_then(Value::as_str)
+                    .ok_or("缺少选人分组。")?;
+                let patch = args.get(1).ok_or("缺少选人配置。")?;
+                let key = if method == "setPickConfig" {
+                    "pickConfig"
+                } else {
+                    "banConfig"
+                };
+                let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                let value = bootstrap::set_aram_config(&db, key, group, patch)
+                    .map_err(|error| error.to_string())?;
+                let revision = revision.next();
+                drop(db);
+                settings_changed(app, AUTO_SELECT, key, &value, revision)?;
+                Ok(Value::Null)
+            }
+            (
+                RESG_NAMESPACE,
+                method @ ("getSnapshot" | "setEnabled" | "setAutoShow" | "setAlwaysOnTop"
+                | "setDisplayMode"),
+            ) if window.label() == "main" => {
+                let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                let key = match method {
+                    "getSnapshot" => {
+                        return bootstrap::resg_snapshot(&db)
+                            .map_err(|error| error.to_string().into())
+                    }
+                    "setEnabled" => "enabled",
+                    "setAutoShow" => "autoShow",
+                    "setAlwaysOnTop" => "alwaysOnTop",
+                    "setDisplayMode" => "displayMode",
+                    _ => unreachable!("known RESG method"),
+                };
+                let value = args.first().ok_or("缺少 RESG 设置值。")?;
+                bootstrap::backend_pref(RESG_NAMESPACE, key)
+                    .expect("known RESG preference")
+                    .write(&db, value)
+                    .map_err(|error| error.to_string())?;
+                let snapshot = bootstrap::resg_snapshot(&db).map_err(|error| error.to_string())?;
+                // Submit the event before the next database-backed RESG change can overtake it.
+                emit(&window, RESG_NAMESPACE, "changed", json!([snapshot]))?;
+                Ok(snapshot)
+            }
             (SYNC_NAMESPACE, "subscribeAndGetInitialState") => {
                 match (
                     args.first().and_then(Value::as_str),
@@ -155,45 +372,44 @@ fn league_call(
                             let value = preference
                                 .read(&db, profile.system_locale)
                                 .map_err(|error| error.to_string())?;
-                            values.insert(preference.key().into(), field(value));
+                            values.insert(preference.key().into(), value);
                         }
-                        Ok(Value::Object(values))
+                        Ok(state_fields(
+                            Value::Object(values),
+                            Some(revision.current()),
+                        ))
                     }
                     (Some(CLIENT), Some("settings")) => {
                         let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
                         let enabled = ShellPreference::ClientAutoConnect
                             .read(&db, profile.system_locale)
                             .map_err(|error| error.to_string())?;
-                        Ok(json!({ "autoConnect": field(enabled) }))
+                        Ok(state_fields(
+                            json!({"autoConnect":enabled}),
+                            Some(revision.current()),
+                        ))
                     }
-                    (Some(MAIN_WINDOW), Some("state")) if window.label() == "main" => Ok(json!({
-                        "status": field(json!(window_status(&window)?)),
-                        "focus": field(json!(if window.is_focused()? { "focused" } else { "blurred" })),
-                        "show": field(json!(window.is_visible()?)),
-                        "ready": field(json!(true)),
-                    })),
-                    (Some(MAIN_WINDOW), Some("settings")) if window.label() == "main" => {
-                        Ok(json!({
-                            "closeAction": field(json!(saved_close_action(&profile)?)),
-                        }))
+                    (Some(namespace), Some("state")) if window_label(namespace).is_some() => Ok(
+                        state_fields(window_state(app, window_label(namespace).unwrap())?, None),
+                    ),
+                    (Some(namespace), Some(name)) => {
+                        if let Some((revision, fields)) = client.fields(namespace, name)? {
+                            return Ok(state_fields(fields, Some(revision)));
+                        }
+                        let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                        let mut state = bootstrap::initial_state(&db, namespace, name)
+                            .map_err(|error| error.to_string())?
+                            .ok_or("对应的工具箱状态尚未接入 Rust 运行时。")?;
+                        if (namespace, name) == (MAIN_WINDOW, "settings") {
+                            state["closeAction"] = ShellPreference::CloseAction
+                                .read(&db, profile.system_locale)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        Ok(state_fields(
+                            state,
+                            (name == "settings").then(|| revision.current()),
+                        ))
                     }
-                    (Some(namespace), Some(name)) => match client.fields(namespace, name)? {
-                        Some((revision, Value::Object(fields))) => Ok(Value::Object(
-                            fields
-                                .into_iter()
-                                .map(|(key, value)| {
-                                    (
-                                        key,
-                                        json!({
-                                            "value": value,
-                                            "config": { "raw": false, "revision": revision },
-                                        }),
-                                    )
-                                })
-                                .collect(),
-                        )),
-                        _ => Err("对应的工具箱状态尚未接入 Rust 运行时。".into()),
-                    },
                     _ => Err("无效的工具箱状态订阅。".into()),
                 }
             }
@@ -206,33 +422,69 @@ fn league_call(
                     .get(1)
                     .and_then(Value::as_str)
                     .ok_or("缺少设置名称。")?;
-                let preference = ShellPreference::from_ipc(namespace, key)
-                    .filter(|setting| {
-                        *setting != ShellPreference::CloseAction || window.label() == "main"
-                    })
-                    .ok_or("对应的工具箱设置尚未接入 Rust 运行时。")?;
                 let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
-                if method == "get" {
-                    return preference
-                        .read(&db, profile.system_locale)
-                        .map_err(|error| error.to_string().into());
+                let value = if method == "set" {
+                    Some(args.get(2).ok_or("缺少设置值。")?)
+                } else {
+                    None
+                };
+                if let Some(preference) = bootstrap::renderer_pref(window.label(), namespace, key) {
+                    if let Some(value) = value {
+                        preference
+                            .write(&db, value)
+                            .map_err(|error| error.to_string())?;
+                        return Ok(Value::Null);
+                    }
+                    return Ok(preference
+                        .saved(&db)
+                        .map_err(|error| error.to_string())?
+                        .unwrap_or(Value::Null));
                 }
-                let value = args.get(2).ok_or("缺少设置值。")?;
-                preference
-                    .write(&db, value)
-                    .map_err(|error| error.to_string())?;
+                let shell = ShellPreference::from_ipc(namespace, key);
+                if let Some(preference) = shell {
+                    let Some(value) = value else {
+                        return preference
+                            .read(&db, profile.system_locale)
+                            .map_err(|error| error.to_string().into());
+                    };
+                    if preference == ShellPreference::CloseAction && window.label() != "main" {
+                        return Err("只能从主窗修改关闭方式。".into());
+                    }
+                    preference
+                        .write(&db, value)
+                        .map_err(|error| error.to_string())?;
+                    if preference == ShellPreference::ClientAutoConnect {
+                        client.set_auto_connect(value.as_bool().ok_or("无效的自动连接设置。")?)?;
+                    }
+                } else {
+                    let preference = bootstrap::backend_pref(namespace, key)
+                        .filter(|_| namespace != RESG_NAMESPACE)
+                        .ok_or("对应的工具箱设置尚未接入 Rust 运行时。")?;
+                    let Some(value) = value else {
+                        return preference
+                            .read(&db)
+                            .map_err(|error| error.to_string().into());
+                    };
+                    preference
+                        .write(&db, value)
+                        .map_err(|error| error.to_string())?;
+                }
+                let value = value.expect("settings reads have returned");
+                let revision = revision.next();
                 drop(db);
-                if preference == ShellPreference::ClientAutoConnect {
-                    client.set_auto_connect(value.as_bool().ok_or("无效的自动连接设置。")?)?;
-                }
-
-                let event = format!("update-state-prop/{namespace}:settings");
-                let args = json!([key, value, {"action": "update", "raw": false}]);
-                for label in ["main", "aux", "opgg"] {
-                    if let Some(target) = window.app_handle().get_webview_window(label) {
-                        emit(&target, SYNC_NAMESPACE, &event, args.clone())?;
+                if let Some(target) =
+                    window_label(namespace).and_then(|label| app.get_webview_window(label))
+                {
+                    match (key, value.as_bool()) {
+                        ("pinned", Some(pinned)) => target.set_always_on_top(pinned)?,
+                        ("enabled", Some(false)) if target.label() != "main" => {
+                            target.hide()?;
+                            publish_window_property(&target, "show", json!(false))?;
+                        }
+                        _ => {}
                     }
                 }
+                settings_changed(app, namespace, key, value, revision)?;
                 Ok(Value::Null)
             }
             (MAIN_WINDOW, method) if window.label() == "main" => {
@@ -241,6 +493,7 @@ fn league_call(
                     "maximize" => window.maximize()?,
                     "unmaximize" => window.unmaximize()?,
                     "restore" => show_main(window.app_handle())?,
+                    "startDragging" => window.start_dragging()?,
                     "closeMainWindow" => {
                         let action = match args.first() {
                             None | Some(Value::Null) => saved_close_action(&profile)?,
@@ -249,6 +502,30 @@ fn league_call(
                         close_main(&window, action)?;
                     }
                     "closeMainWindowForce" => close_main(&window, "quit")?,
+                    _ => return Err("对应的窗口操作尚未接入 Rust 运行时。".into()),
+                }
+                Ok(Value::Null)
+            }
+            (AUX_WINDOW | OPGG_WINDOW, "show") if window.label() == "main" => {
+                show_companion(
+                    app,
+                    &namespace,
+                    args.first().and_then(Value::as_bool).unwrap_or(false),
+                )?;
+                Ok(Value::Null)
+            }
+            (AUX_WINDOW | OPGG_WINDOW, method)
+                if window_label(&namespace) == Some(window.label()) =>
+            {
+                match method {
+                    "minimize" => window.minimize()?,
+                    "maximize" => window.maximize()?,
+                    "unmaximize" => window.unmaximize()?,
+                    "startDragging" => window.start_dragging()?,
+                    "close" | "hide" => {
+                        window.hide()?;
+                        publish_window_property(&window, "show", json!(false))?;
+                    }
                     _ => return Err("对应的窗口操作尚未接入 Rust 运行时。".into()),
                 }
                 Ok(Value::Null)
@@ -287,6 +564,7 @@ pub(crate) fn run() -> tauri::Result<()> {
             };
             app.manage(profile);
             app.manage(ClientRuntime::new(auto_connect)?);
+            app.manage(SettingsRevision::default());
             let show = MenuItem::with_id(app, "show", "显示工具箱", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出工具箱", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -321,28 +599,27 @@ pub(crate) fn run() -> tauri::Result<()> {
                 .inner_size(1500.0, 860.0)
                 .min_inner_size(840.0, 600.0)
                 .decorations(false)
-                .on_navigation(|url| {
-                    matches!(
-                        (url.scheme(), url.host_str()),
-                        ("tauri", Some("localhost")) | ("http", Some("tauri.localhost"))
-                    )
-                })
+                .on_navigation(bundled_navigation)
                 .build()?;
             tauri::async_runtime::spawn(monitor(app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() != "main" {
+            if !LOCAL_WINDOWS.contains(&window.label()) {
                 return;
             }
-            let Some(webview) = window.app_handle().get_webview_window("main") else {
+            let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
                 return;
             };
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    let profile = window.state::<DesktopProfile>();
-                    let _ = close_main(&webview, saved_close_action(&profile).unwrap_or("ask"));
+                    if window.label() == "main" {
+                        let profile = window.state::<DesktopProfile>();
+                        let _ = close_main(&webview, saved_close_action(&profile).unwrap_or("ask"));
+                    } else if webview.hide().is_ok() {
+                        let _ = publish_window_property(&webview, "show", json!(false));
+                    }
                 }
                 WindowEvent::Focused(focused) => {
                     let _ = publish_window_property(

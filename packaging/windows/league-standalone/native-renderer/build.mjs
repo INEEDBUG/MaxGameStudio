@@ -108,17 +108,49 @@ const NATIVE_STATE_TRANSFORMS = [
       if (revision < (revisions.get(key) ?? -1)) return false
       revisions.set(key, revision)
       return true
+    }
+    const decode = (key: string, value: unknown) => {
+      const championIds = key === 'currentPickableChampionIds' ||
+        key === 'currentBannableChampionIds' || key === 'disabledChampionIds'
+      if (namespace === 'league-client-main' && stateId === 'champSelect' && championIds &&
+          Array.isArray(value) && value.every(Number.isSafeInteger)) {
+        return new Set(value)
+      }
+      return value
     }`
   ],
   [
     '(path, value, { action, raw }) => {',
     `(path, value, { action, raw, revision }) => {
-        if (!accept(path, revision)) return`
+        if (!accept(path, revision)) return
+        value = decode(path, value)`
   ],
   [
     'Object.entries(initial).forEach(([key, { value, config }]) => {',
     `Object.entries(initial).forEach(([key, { value, config }]) => {
-      if (!accept(key, config.revision)) return`
+      if (!accept(key, config.revision)) return
+      value = decode(key, value)`
+  ]
+]
+
+const DRAG_REGIONS = [
+  [
+    'src-main-window/components/titlebar/MainWindowTitlebar.vue',
+    'class="shard-area"',
+    '@mousedown.self.left',
+    'main'
+  ],
+  [
+    'src-aux-window/components/AuxWindowTitlebar.vue',
+    'class="flex h-full flex-1 items-center px-2 pt-1 pb-0.5 transition-all"',
+    '@mousedown.left',
+    'aux'
+  ],
+  [
+    'src-opgg-window/opgg/OpggWindowTitlebar.vue',
+    'class="box-border flex h-full flex-1 items-center pt-1 pr-1 pb-0.5 pl-2 transition-all duration-300"',
+    '@mousedown.left',
+    'opgg'
   ]
 ]
 
@@ -129,6 +161,21 @@ function nativeRendererPlugin(sourceRoot) {
   )
   const piniaSync = join(sourceRoot, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
   transforms.set(piniaSync.replaceAll('\\', '/'), NATIVE_STATE_TRANSFORMS)
+  for (const [relative, anchor, gesture, label] of DRAG_REGIONS) {
+    const file = join(sourceRoot, 'src/renderer', relative).replaceAll('\\', '/')
+    transforms.set(file, [
+      [anchor, `${anchor} ${gesture}="startNativeDrag"`],
+      [
+        '<script setup lang="ts">',
+        `<script setup lang="ts">
+import { useInstance as useNativeShard } from '@renderer-shared/shards'
+import { AkariIpcRenderer as NativeIpc } from '@renderer-shared/shards/ipc'
+
+const nativeWindowIpc = useNativeShard(NativeIpc)
+const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}-window', 'startDragging')`
+      ]
+    ])
+  }
 
   return {
     name: 'mgs-league-native-renderer',
