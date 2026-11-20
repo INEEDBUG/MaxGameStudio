@@ -54,7 +54,7 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(
         result(&probe)["result"],
         json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows"], "upstream_tag": "v0.41.4"
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo"], "upstream_tag": "v0.41.4"
         })
     );
 
@@ -74,6 +74,36 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(header["demo_file_stamp"], "PBDEMS2");
     assert_eq!(header["game_directory"], "csgo");
     assert_eq!(fs::read(sample).unwrap(), data);
+}
+
+#[test]
+fn inspection_preserves_a_real_header_and_unknown_match_fields_without_a_roster() {
+    let scratch = tempfile::tempdir().unwrap();
+    let sample = scratch.path().join("合成 fixture.dem");
+    let source = fixture_header();
+    fs::write(&sample, &source).unwrap();
+    let inspected = request(json!({"protocol":1,"action":"inspect_demo","path":sample}));
+    assert!(
+        inspected.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&inspected.stdout),
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    assert_eq!(
+        result(&inspected)["result"],
+        json!({
+            "players": [],
+            "match_meta": {
+                "map_name":"de_fixture", "server_name":"", "target_player":"",
+                "target_player_user_id":null, "target_steam_id":null,
+                "total_rounds":null, "target_kills":null, "target_deaths":null,
+                "team_a_score":null, "team_b_score":null, "team_a_name":null, "team_b_name":null,
+                "match_date":"", "duration_mins":null, "demo_end_tick":null,
+                "inspection_level":"header_signon",
+            }
+        })
+    );
+    assert_eq!(fs::read(sample).unwrap(), source);
 }
 
 #[test]

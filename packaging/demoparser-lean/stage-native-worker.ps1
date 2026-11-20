@@ -14,7 +14,7 @@ $inputRoot = Join-Path $repo $worker
 $stageRoot = Join-Path $source $worker
 
 $files = @(
-    "Cargo.toml", "Cargo.lock", "src/main.rs", "src/replay.rs",
+    "Cargo.toml", "Cargo.lock", "src/main.rs", "src/case_fold.rs", "src/demo_inspection.rs", "src/replay.rs",
     "src/replay_effect_rows.rs", "src/replay_io.rs", "tests/ipc.rs"
 )
 foreach ($relative in $files) {

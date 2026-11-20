@@ -1,5 +1,7 @@
 //! One request per process. Stdout contains the protocol reply and stderr records failures.
 
+mod case_fold;
+mod demo_inspection;
 mod replay;
 mod replay_effect_rows;
 mod replay_io;
@@ -39,6 +41,7 @@ enum Action {
     InspectHeader { path: PathBuf },
     WriteReplayParquet(replay::WriteReplayRequest),
     ExtractReplayEffectRows(replay_effect_rows::ExtractReplayEffectRowsRequest),
+    InspectDemo { path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -152,12 +155,13 @@ fn run(input: impl Read) -> Result<Value, Failure> {
     }
     match request.action {
         Action::Probe => Ok(json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows"],
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo"],
             "upstream_tag": "v0.41.4"
         })),
         Action::InspectHeader { path } => inspect_header(&path),
         Action::WriteReplayParquet(request) => replay::write(request),
         Action::ExtractReplayEffectRows(request) => replay_effect_rows::extract(request),
+        Action::InspectDemo { path } => demo_inspection::inspect(&path),
     }
 }
 
@@ -171,16 +175,20 @@ fn inspect_header(path: &Path) -> Result<Value, Failure> {
     file.take(MAX_HEADER_BYTES)
         .read_to_end(&mut prefix)
         .map_err(|_| Failure::read("could not read demo header"))?;
-    if prefix.len() < HEADER_ENDS_AT_BYTE {
+    Ok(json!({"header": header_fields(&prefix)?}))
+}
+
+fn header_fields(bytes: &[u8]) -> Result<BTreeMap<String, String>, Failure> {
+    if bytes.len() < HEADER_ENDS_AT_BYTE {
         return Err(Failure::header("truncated demo framing"));
     }
-    if std::str::from_utf8(&prefix[..8]).is_err() {
+    if std::str::from_utf8(&bytes[..8]).is_err() {
         return Err(Failure::header("unrecognized demo format"));
     }
     let huffman = Vec::new(); // Header framing uses varints and protobuf fields.
     let inputs = parser_inputs(&huffman);
     let header = FirstPassParser::new(&inputs)
-        .parse_header_only(&prefix)
+        .parse_header_only(bytes)
         .map_err(|error| {
             Failure::header(match error {
                 DemoParserError::Source1DemoError => "Source 1 demo",
@@ -190,8 +198,7 @@ fn inspect_header(path: &Path) -> Result<Value, Failure> {
                 _ => "native parser rejected the demo header",
             })
         })?;
-    let header: BTreeMap<_, _> = header.into_iter().collect();
-    Ok(json!({"header": header}))
+    Ok(header.into_iter().collect())
 }
 
 fn parser_inputs(huffman: &Vec<(u8, u8)>) -> ParserInputs<'_> {
