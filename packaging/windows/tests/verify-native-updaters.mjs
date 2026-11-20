@@ -99,6 +99,49 @@ async function readFeed(url) {
   return JSON.parse(json)
 }
 
+function browserErrorKind(exception) {
+  const name = exception?.className
+  return ['Error', 'EvalError', 'ReferenceError', 'TypeError', 'SyntaxError'].includes(name) ? name : 'evaluation-error'
+}
+
+export function createCdpSession(socket) {
+  let sequence = 0
+  const send = (method, params, milliseconds = 25_000) => new Promise((resolve, reject) => {
+    const id = ++sequence
+    const finish = (callback, value) => {
+      clearTimeout(timeout)
+      socket.removeEventListener('message', receive)
+      callback(value)
+    }
+    const receive = ({ data }) => {
+      let reply
+      try { reply = JSON.parse(data) } catch { return }
+      if (reply?.id !== id) return
+      if (reply.error || !reply.result) {
+        finish(reject, new Error('The installed updater debugger rejected the request.'))
+      } else {
+        finish(resolve, reply.result)
+      }
+    }
+    const timeout = setTimeout(() => finish(reject, new Error('The installed updater debugger request timed out.')), milliseconds)
+    socket.addEventListener('message', receive)
+    try {
+      socket.send(JSON.stringify({ id, method, params }))
+    } catch {
+      finish(reject, new Error('The installed updater debugger disconnected.'))
+    }
+  })
+  const evaluate = async (expression, milliseconds) => {
+    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, silent: true }, milliseconds)
+    if (reply.exceptionDetails) {
+      throw new Error(`The installed updater evaluation failed in WebView2 (${browserErrorKind(reply.exceptionDetails.exception)}).`)
+    }
+    assert.ok(reply.result, 'The installed updater debugger returned no evaluation result.')
+    return reply.result.value
+  }
+  return { send, evaluate }
+}
+
 async function connectPage(role, port) {
   const paths = role === 'main' ? mainPages : leaguePages
   const target = await waitFor('the installed app WebView2 page', 45_000, async () => {
@@ -123,36 +166,7 @@ async function connectPage(role, port) {
       assert.ok(socket.readyState !== WebSocket.CLOSED, 'The local debugger disconnected.')
       return socket.readyState === WebSocket.OPEN
     })
-    let sequence = 0
-    const evaluate = expression => new Promise((resolve, reject) => {
-      const id = ++sequence
-      const finish = (callback, value) => {
-        clearTimeout(timeout)
-        socket.removeEventListener('message', receive)
-        callback(value)
-      }
-      const receive = ({ data }) => {
-        try {
-          const reply = JSON.parse(data)
-          if (reply.id !== id) return
-          assert.ok(!reply.error, 'The installed updater debugger rejected the evaluation request.')
-          const exception = reply.result?.exceptionDetails
-          if (exception) {
-            const name = exception.exception?.className
-            const kind = ['Error', 'ReferenceError', 'TypeError', 'SyntaxError'].includes(name) ? name : 'evaluation-error'
-            throw new Error(`The installed updater evaluation failed in WebView2 (${kind}).`)
-          }
-          assert.ok(reply.result?.result, 'The installed updater debugger returned no evaluation result.')
-          finish(resolve, reply.result.result.value)
-        } catch (error) {
-          finish(reject, error)
-        }
-      }
-      const timeout = setTimeout(() => finish(reject, new Error('The installed updater call timed out.')), 25_000)
-      socket.addEventListener('message', receive)
-      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
-    })
-    return { socket, evaluate }
+    return { socket, cdp: createCdpSession(socket) }
   } catch (error) {
     socket.close()
     throw error
@@ -180,6 +194,8 @@ const leagueReadiness = `(() => {
   return document.querySelector('#app[data-v-app]') ? 'ready' : 'mount-pending'
 })()`
 
+const leagueIpcFailures = ['ipc-denied', 'ipc-command-missing', 'ipc-invalid-arguments', 'ipc-rejected']
+
 function leagueCall(namespace, method) {
   const args = JSON.stringify({ namespace, method, args: [] })
   return `(async () => {
@@ -195,6 +211,95 @@ function leagueCall(namespace, method) {
   })()`
 }
 
+const leagueBootstrapShards = new Set([
+  'akari-ipc-renderer', 'akari-api-renderer', 'app-common-renderer', 'auto-gameflow-renderer',
+  'auto-misc-renderer', 'auto-select-renderer', 'client-installation-renderer', 'extra-assets-renderer',
+  'game-client-renderer', 'keyboard-shortcuts-renderer', 'league-client-peek-renderer', 'league-client-renderer',
+  'league-client-ux-renderer', 'logger-renderer', 'main-window-ui-renderer', 'ongoing-game-renderer',
+  'pinia-mobx-utils-renderer', 'player-tabs-renderer', 'renderer-debug-renderer', 'riot-client-renderer',
+  'saved-player-renderer', 'self-hosted-lcu-data-renderer', 'self-update-renderer', 'setting-utils-renderer',
+  'setup-in-app-scope-renderer', 'sgp-renderer', 'simple-notifications-renderer', 'storage-renderer', 'window-manager-renderer',
+])
+
+function leagueStartupEvents() {
+  const shards = new Set()
+  const errors = new Set()
+  const assetFailures = new Set()
+  const captureError = exception => {
+    errors.add(browserErrorKind(exception))
+    const description = exception?.description
+    if (typeof description !== 'string') return
+    const shard = /(?:Failed to initialize shard|Failed to trigger onFinish hook of shard) ([a-z-]+)(?=\s|$)/.exec(description)?.[1]
+    if (leagueBootstrapShards.has(shard)) shards.add(shard)
+    if (/dynamically imported module|does not provide an export named|Failed to resolve module specifier/i.test(description)) {
+      errors.add('module-load')
+    }
+  }
+  const receive = ({ data }) => {
+    let event
+    try { event = JSON.parse(data) } catch { return }
+    if (event?.method === 'Runtime.consoleAPICalled') {
+      const { type, args } = event.params ?? {}
+      if (type === 'error' && ['MaxGameStudio 无法正确加载：', 'League Akari 无法正确加载：'].includes(args?.[0]?.value)) {
+        errors.add('bootstrap-rejected')
+        captureError(args[1])
+      }
+    } else if (event?.method === 'Runtime.exceptionThrown') {
+      captureError(event.params?.exceptionDetails?.exception)
+    } else if (event?.method === 'Log.entryAdded') {
+      const entry = event.params?.entry
+      if (entry?.source === 'security' && /content security policy/i.test(entry.text)) errors.add('csp-blocked')
+      if (entry?.source === 'network' && entry.level === 'error' && typeof entry.url === 'string') {
+        const url = URL.parse(entry.url)
+        if (url?.origin === 'http://tauri.localhost' && /^\/assets\/[-\w.]+\.(?:css|m?js)$/i.test(url.pathname)) {
+          assetFailures.add(url.pathname)
+        }
+      }
+    }
+  }
+  return { receive, summary: () =>
+    `shards=${[...shards].sort().join(',') || 'none'} errors=${[...errors].sort().join(',') || 'none'} assetErrors=${assetFailures.size}` }
+}
+
+const leagueEventPermission = `(async () => {
+  try {
+    const main = window.__TAURI__.webviewWindow.getCurrentWebviewWindow()
+    const unlisten = await main.listen('league-ipc-event', () => {})
+    await unlisten()
+    return 'accepted'
+  } catch (error) {
+    const message = typeof error === 'string' ? error : error?.message
+    return /not allowed|permission denied/i.test(message) ? 'denied' : 'failed'
+  }
+})()`
+
+export async function verifyLeaguePage(socket, { send, evaluate }, current, readinessTimeout, report = console.log) {
+  const { receive, summary } = leagueStartupEvents()
+  socket.addEventListener('message', receive)
+  try {
+    // Runtime and Log replay buffered messages when enabled, including early startup failures.
+    const domains = await Promise.allSettled(['Runtime.enable', 'Log.enable'].map(method => send(method, {}, ipcTimeout)))
+    try {
+      return await readLeagueUpdater(evaluate, current, readinessTimeout)
+    } catch (error) {
+      const [versionReply, eventReply] = await Promise.allSettled([
+        evaluate(leagueCall('app-common-main', 'getVersion'), ipcTimeout),
+        evaluate(leagueEventPermission, ipcTimeout),
+      ])
+      const reply = versionReply.value
+      let version = 'unavailable'
+      if (reply?.response?.success === true) version = reply.response.data === current ? 'match' : 'mismatch'
+      else if (leagueIpcFailures.includes(reply?.failure)) version = reply.failure
+      const events = ['accepted', 'denied', 'failed'].includes(eventReply.value) ? eventReply.value : 'unavailable'
+      const streams = domains.filter(result => result.status === 'fulfilled').length
+      report(`LEAGUE_STARTUP_DIAGNOSTICS: ${summary()} version=${version} events=${events} streams=${streams}/2`)
+      throw error
+    }
+  } finally {
+    socket.removeEventListener('message', receive)
+  }
+}
+
 export async function readLeagueUpdater(evaluate, current, readinessTimeout = 15_000) {
   let state = 'not-observed'
   await waitFor(() => `the League main renderer (${state})`, readinessTimeout, async () => {
@@ -207,7 +312,7 @@ export async function readLeagueUpdater(evaluate, current, readinessTimeout = 15
   const invoke = async (label, namespace, method) => {
     const reply = await evaluate(leagueCall(namespace, method))
     const failure = reply?.failure
-    if (['ipc-denied', 'ipc-command-missing', 'ipc-invalid-arguments', 'ipc-rejected'].includes(failure)) {
+    if (leagueIpcFailures.includes(failure)) {
       throw new Error(`The League ${label} call failed (${failure}).`)
     }
     const response = reply?.response
@@ -285,7 +390,8 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
     expected = validateLeagueFeed(manifest, current)
   }
 
-  const { socket, evaluate } = await connectPage(role, port)
+  const { socket, cdp } = await connectPage(role, port)
+  const { evaluate } = cdp
   try {
     if (role === 'main') {
       assert.deepEqual(await evaluate(identityCheck), { id: identifiers[role], version: current })
@@ -302,7 +408,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
         healthStatus: 200, ready: true, version: current, anonymousStatus: 401, configStatus: 200, hasConfig: true,
       })
     } else {
-      const result = await readLeagueUpdater(evaluate, current)
+      const result = await verifyLeaguePage(socket, cdp, current)
       assert.ok(isDeepStrictEqual(result, {
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
       }), 'League returned unexpected update feed metadata.')
