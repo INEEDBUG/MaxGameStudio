@@ -1,0 +1,883 @@
+{
+  "parse": [
+    {
+      "name": "all native sections and fields",
+      "input": {
+        "code": "0;s;1;c;0;p;1;P;c;05;u;00ff00ff;h;0;o;0.5000;t;01;d;1;z;03;0b;1;0a;1.000;0l;004;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1.000;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;future-key;keep-me;A;c;6;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;ads-future;7;S;c;4;s;1.157;o;1;d;1;t;000000"
+      },
+      "output": {
+        "normal": "0;s;1;c;0;p;1;P;c;5;u;00FF00FF;h;0;o;0.5;t;1;d;1;z;3;0b;1;0a;1;0l;4;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;future-key;keep-me;A;c;6;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;ads-future;7;S;c;4;s;1.157;o;1;d;1;t;000000",
+        "canonical": "0;s;1;c;0;p;1;P;c;5;u;00FF00FF;h;0;o;0.5;t;1;d;1;z;3;0b;1;0a;1;0l;4;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;future-key;keep-me;A;c;6;h;0;0a;1;0l;4;0o;2;0f;0;1b;0;ads-future;7;S;c;4;s;1.157;o;1;d;1;t;000000",
+        "known": "0;s;1;c;0;p;1;P;c;5;u;00FF00FF;h;0;o;0.5;t;1;d;1;z;3;0b;1;0a;1;0l;4;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;A;c;6;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;S;c;4;s;1.157;o;1;d;1;t;000000"
+      }
+    },
+    {
+      "name": "order of sections and unknown duplicates",
+      "input": {
+        "code": "0;future;P;p;1;A;0l;4;P;z;01;a;.3335;c;+05;future;one;future;two;S;t;abcdEf;o;1."
+      },
+      "output": {
+        "normal": "0;future;P;p;1;A;0l;4;P;z;1;a;0.334;c;5;future;one;future;two;S;t;ABCDEF;o;1",
+        "canonical": "0;p;1;future;P;A;0l;4;P;c;5;a;0.334;z;1;future;one;future;two;S;o;1;t;ABCDEF",
+        "known": "0;p;1;A;0l;4;P;z;1;a;0.334;c;5;S;t;ABCDEF;o;1"
+      }
+    },
+    {
+      "name": "case-sensitive field keys",
+      "input": {
+        "code": "0;P;C;7;c;5"
+      },
+      "output": {
+        "normal": "0;P;C;7;c;5",
+        "canonical": "0;P;c;5;C;7",
+        "known": "0;P;c;5"
+      }
+    },
+    {
+      "name": "tolerant input and duplicate last value",
+      "input": {
+        "code": " 0;P;c;05;h;true;u;#00ff00;h;off; ;",
+        "strict": false
+      },
+      "output": {
+        "normal": "0;P;c;5;h;1;u;00FF00;h;0",
+        "canonical": "0;P;c;5;u;00FF00;h;0",
+        "known": "0;P;c;5;h;1;u;00FF00;h;0"
+      }
+    },
+    {
+      "name": "tolerant decimal syntax",
+      "input": {
+        "code": "0;P;c;+5.0e0;o;5_005e-4;0l;20e0;0s;2_5e-1",
+        "strict": false
+      },
+      "output": {
+        "normal": "0;P;c;5;o;0.501;0l;20;0s;2.5",
+        "canonical": "0;P;c;5;o;0.501;0l;20;0s;2.5",
+        "known": "0;P;c;5;o;0.501;0l;20;0s;2.5"
+      }
+    },
+    {
+      "name": "unicode digits and a leading BOM",
+      "input": {
+        "code": "\ufeff\ufeff0;P;c;+\uff10\uff15;o;.\u0663\u0663\u0663\u0665"
+      },
+      "output": {
+        "normal": "0;P;c;5;o;0.334",
+        "canonical": "0;P;c;5;o;0.334",
+        "known": "0;P;c;5;o;0.334"
+      }
+    },
+    {
+      "name": "unicode tolerant boolean aliases",
+      "input": {
+        "code": "0;P;h;ye\u017f;d;o\ufb00",
+        "strict": false
+      },
+      "output": {
+        "normal": "0;P;h;1;d;0",
+        "canonical": "0;P;h;1;d;0",
+        "known": "0;P;h;1;d;0"
+      }
+    },
+    {
+      "name": "negative zero and decimal tie rounding",
+      "input": {
+        "code": "0;P;o;-0.000;a;.0005;0s;1.2345;S;s;3.9995"
+      },
+      "output": {
+        "normal": "0;P;o;-0;a;0.001;0s;1.235;S;s;4",
+        "canonical": "0;P;o;-0;a;0.001;0s;1.235;S;s;4",
+        "known": "0;P;o;-0;a;0.001;0s;1.235;S;s;4"
+      }
+    },
+    {
+      "name": "blank",
+      "input": {
+        "code": ""
+      },
+      "error": "crosshair code must not be blank"
+    },
+    {
+      "name": "wrong version",
+      "input": {
+        "code": "1;P;c;5"
+      },
+      "error": "VALORANT crosshair code must start with version 0 (token 0)"
+    },
+    {
+      "name": "missing value",
+      "input": {
+        "code": "0;P;c"
+      },
+      "error": "field key is missing a value (token 2, field c)"
+    },
+    {
+      "name": "blank value",
+      "input": {
+        "code": "0;P;c; "
+      },
+      "error": "field value must not be blank (token 3, field c)"
+    },
+    {
+      "name": "invalid boolean",
+      "input": {
+        "code": "0;P;c;5;h;2"
+      },
+      "error": "expected 0 or 1 (section P, field h) (token 4, section P, field h)"
+    },
+    {
+      "name": "strict nonfinite",
+      "input": {
+        "code": "0;P;c;5;o;NaN"
+      },
+      "error": "expected a finite decimal number (section P, field o) (token 4, section P, field o)"
+    },
+    {
+      "name": "tolerant nonfinite",
+      "input": {
+        "code": "0;P;c;5;o;+Inf",
+        "strict": false
+      },
+      "error": "NaN and infinity are not valid native values (section P, field o) (token 4, section P, field o)"
+    },
+    {
+      "name": "strict exponent",
+      "input": {
+        "code": "0;P;o;1e-1"
+      },
+      "error": "expected a finite decimal number (section P, field o) (token 2, section P, field o)"
+    },
+    {
+      "name": "strict hexadecimal",
+      "input": {
+        "code": "0;P;u;#ff00FF"
+      },
+      "error": "expected a 6- or 8-digit hexadecimal color (section P, field u) (token 2, section P, field u)"
+    },
+    {
+      "name": "invalid field key",
+      "input": {
+        "code": "0;P;custom key;v"
+      },
+      "error": "invalid field key (token 2, field custom key)"
+    },
+    {
+      "name": "duplicate section",
+      "input": {
+        "code": "0;P;c;5;P;c;1"
+      },
+      "error": "profile section is repeated (token 4, section P)"
+    },
+    {
+      "name": "duplicate known field",
+      "input": {
+        "code": "0;P;c;5;c;4"
+      },
+      "error": "known field is repeated (token 4, section P, field c)"
+    },
+    {
+      "name": "empty key token",
+      "input": {
+        "code": "0;P;"
+      },
+      "error": "empty token is not valid (token 2)"
+    },
+    {
+      "name": "version in key slot",
+      "input": {
+        "code": "0;P;0;v"
+      },
+      "error": "version token may only appear at the beginning (token 2)"
+    },
+    {
+      "name": "missing primary",
+      "input": {
+        "code": "0;A;c;5"
+      },
+      "error": "crosshair code must contain a P primary section"
+    },
+    {
+      "name": "primary required by AST",
+      "input": {
+        "code": "0;A;c;5",
+        "require_primary": false
+      },
+      "error": "1 validation error for ValorantCrosshairAST\n  Value error, a VALORANT crosshair AST requires exactly one P section [type=value_error, input_value={'version': 0, 'start_fie...n=True, section='A')])]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "name": "unknown rejected if opted out",
+      "input": {
+        "code": "0;P;future;one",
+        "allow_unknown": false
+      },
+      "error": "unknown field is not allowed (token 2, section P, field future)"
+    },
+    {
+      "name": "below minimum before rounding",
+      "input": {
+        "code": "0;P;o;-.00001"
+      },
+      "error": "must be at least 0 (section P, field o) (token 2, section P, field o)"
+    },
+    {
+      "name": "above maximum before rounding",
+      "input": {
+        "code": "0;P;o;1.00001"
+      },
+      "error": "must be at most 1 (section P, field o) (token 2, section P, field o)"
+    },
+    {
+      "name": "editor-supported Unicode whitespace",
+      "input": {
+        "code": "\u001c0;\u001fP;future;\u001e  keeps inner spaces  \u001d"
+      },
+      "output": {
+        "normal": "0;P;future;keeps inner spaces",
+        "canonical": "0;P;future;keeps inner spaces",
+        "known": "0;P"
+      }
+    },
+    {
+      "name": "key length model limit",
+      "input": {
+        "code": "0;P;kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk;value"
+      },
+      "error": "1 validation error for CrosshairField\nkey\n  String should have at most 64 characters [type=string_too_long, input_value='kkkkkkkkkkkkkkkkkkkkkkkk...kkkkkkkkkkkkkkkkkkkkkkk', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_too_long"
+    },
+    {
+      "name": "raw value length model limit",
+      "input": {
+        "code": "0;P;c;00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005"
+      },
+      "error": "1 validation error for CrosshairField\nraw_value\n  String should have at most 1024 characters [type=string_too_long, input_value='000000000000000000000000...00000000000000000000005', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_too_long"
+    },
+    {
+      "name": "unknown value line break validation",
+      "input": {
+        "code": "0;P;future;open\nclose"
+      },
+      "error": "2 validation errors for CrosshairField\nvalue\n  Value error, crosshair field values cannot contain ';' or line breaks [type=value_error, input_value='open\\nclose', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nraw_value\n  Value error, raw crosshair values cannot contain ';' or line breaks [type=value_error, input_value='open\\nclose', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "name": "start field count model limit",
+      "input": {
+        "code": "0;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;k;v;P"
+      },
+      "error": "1 validation error for ValorantCrosshairAST\nstart_fields\n  List should have at most 128 items after validation, not 129 [type=too_long, input_value=[CrosshairField(key='k', ...False, section='start')], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_long"
+    },
+    {
+      "name": "Python integer conversion digit limit",
+      "input": {
+        "code": "0;P;c;00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005"
+      },
+      "error": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit (section P, field c) (token 2, section P, field c)"
+    },
+    {
+      "name": "Python decimal exponent limit",
+      "input": {
+        "code": "0;P;o;0e1000000000000000000",
+        "strict": false
+      },
+      "error": "expected a finite decimal number (section P, field o) (token 2, section P, field o)"
+    }
+  ],
+  "encode": [
+    {
+      "name": "existing editor fixture",
+      "input": {
+        "P": {
+          "color": "cyan",
+          "outlines": true,
+          "outlineOpacity": 0.8,
+          "outlineThickness": 1,
+          "centerDot": true,
+          "centerDotOpacity": 1,
+          "centerDotThickness": 2,
+          "innerLines": true,
+          "innerLinesOpacity": 1,
+          "innerLinesLength": 6,
+          "innerLinesThickness": 2,
+          "innerLinesOffset": 2,
+          "outerLines": false,
+          "outerLinesOpacity": 0.5,
+          "outerLinesLength": 2,
+          "outerLinesThickness": 2,
+          "outerLinesOffset": 3,
+          "firingError": false,
+          "movementError": false
+        },
+        "A": {
+          "color": "yellow",
+          "outlines": true,
+          "outlineOpacity": 0.8,
+          "outlineThickness": 1,
+          "centerDot": false,
+          "centerDotOpacity": 1,
+          "centerDotThickness": 2,
+          "innerLines": true,
+          "innerLinesOpacity": 1,
+          "innerLinesLength": 4,
+          "innerLinesThickness": 2,
+          "innerLinesOffset": 2,
+          "outerLines": true,
+          "outerLinesOpacity": 0.5,
+          "outerLinesLength": 2,
+          "outerLinesThickness": 2,
+          "outerLinesOffset": 3,
+          "firingError": false,
+          "movementError": false
+        },
+        "S": {
+          "color": "red",
+          "outlines": true,
+          "outlineOpacity": 0.8,
+          "outlineThickness": 1,
+          "centerDot": true,
+          "centerDotOpacity": 1,
+          "centerDotThickness": 2,
+          "innerLines": true,
+          "innerLinesOpacity": 1,
+          "innerLinesLength": 4,
+          "innerLinesThickness": 2,
+          "innerLinesOffset": 2,
+          "outerLines": false,
+          "outerLinesOpacity": 0.5,
+          "outerLinesLength": 2,
+          "outerLinesThickness": 2,
+          "outerLinesOffset": 3,
+          "firingError": false,
+          "movementError": false
+        }
+      },
+      "output": {
+        "code": "0;s;1;P;c;5;h;1;o;0.8;t;1;d;1;a;1;z;2;f;0;0b;1;0a;1;0l;6;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;A;c;4;h;1;o;0.8;t;1;d;0;a;1;z;2;f;0;0b;1;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;1;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;S;c;7;s;2;o;1;d;1",
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "missing profiles use defaults",
+      "input": {},
+      "output": {
+        "code": "0;s;1;P;c;1;h;1;o;0.8;t;1;d;0;a;1;z;2;f;0;0b;1;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;A;c;1;h;1;o;0.8;t;1;d;0;a;1;z;2;f;0;0b;1;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;S;c;1;s;2;o;1;d;0",
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "JSON booleans and numeric strings",
+      "input": {
+        "P": {
+          "outlines": 1,
+          "innerLines": "off",
+          "outlineThickness": "\uff11_\uff10",
+          "centerDot": "ye\u017f",
+          "centerDotThickness": true,
+          "outlineOpacity": " 5.125e-1 ",
+          "unused": []
+        }
+      },
+      "output": {
+        "code": "0;s;1;P;c;1;h;1;o;0.512;t;10;d;1;a;1;z;1;f;0;0b;0;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;A;c;1;h;1;o;0.8;t;1;d;0;a;1;z;2;f;0;0b;1;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;S;c;1;s;2;o;1;d;0",
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "Python float rounding on editor values",
+      "input": {
+        "P": {
+          "outlineOpacity": 0.0625,
+          "centerDotOpacity": 0.0005,
+          "innerLinesOpacity": 0.5125,
+          "outerLinesOpacity": 0.0001
+        }
+      },
+      "output": {
+        "code": "0;s;1;P;c;1;h;1;o;0.062;t;1;d;0;a;0.001;z;2;f;0;0b;1;0a;0.512;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0;1l;2;1t;2;1o;3;1m;0;1f;0;A;c;1;h;1;o;0.8;t;1;d;0;a;1;z;2;f;0;0b;1;0a;1;0l;4;0t;2;0o;2;0m;0;0f;0;1b;0;1a;0.5;1l;2;1t;2;1o;3;1m;0;1f;0;S;c;1;s;2;o;1;d;0",
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "unknown profiles sorted",
+      "input": {
+        "Z": {},
+        "Q": {},
+        "a": {}
+      },
+      "error": "invalid crosshair profile: unsupported crosshair profile(s): Q, Z, a"
+    },
+    {
+      "name": "unknown editor color",
+      "input": {
+        "P": {
+          "color": "not-a-valorant-color"
+        }
+      },
+      "error": "invalid crosshair profile: crosshair color is not a supported preset"
+    },
+    {
+      "name": "nonfinite numeric string",
+      "input": {
+        "P": {
+          "outlineOpacity": "inf"
+        }
+      },
+      "error": "invalid crosshair profile: numeric editor field must be finite and within [0, 1]"
+    },
+    {
+      "name": "nonfinite numeric sign",
+      "input": {
+        "P": {
+          "outlineOpacity": "-NaN"
+        }
+      },
+      "error": "invalid crosshair profile: numeric editor field must be finite and within [0, 1]"
+    },
+    {
+      "name": "nonnumeric string",
+      "input": {
+        "P": {
+          "outlineOpacity": "thin"
+        }
+      },
+      "error": "invalid crosshair profile: numeric editor fields must be finite numbers"
+    },
+    {
+      "name": "invalid underscore in numeric string",
+      "input": {
+        "P": {
+          "outlineOpacity": "0._5"
+        }
+      },
+      "error": "invalid crosshair profile: numeric editor fields must be finite numbers"
+    },
+    {
+      "name": "nonintegral numeric field",
+      "input": {
+        "P": {
+          "innerLinesLength": 1.5
+        }
+      },
+      "error": "invalid crosshair profile: this editor field must be an integer"
+    },
+    {
+      "name": "boolean string validation precedes numeric validation",
+      "input": {
+        "P": {
+          "centerDot": "maybe",
+          "outlineOpacity": 11
+        }
+      },
+      "error": "invalid crosshair profile: boolean editor fields must be true/false or 0/1"
+    },
+    {
+      "name": "floating point is not a boolean alias",
+      "input": {
+        "P": {
+          "firingError": 1.0
+        }
+      },
+      "error": "invalid crosshair profile: boolean editor fields must be true/false or 0/1"
+    },
+    {
+      "name": "sniper has narrower emitted thickness range",
+      "input": {
+        "S": {
+          "centerDotThickness": 5
+        }
+      },
+      "error": "invalid crosshair profile: numeric editor field must be finite and within [0, 4]"
+    }
+  ],
+  "decode": [
+    {
+      "name": "editor payload with all three present",
+      "input": "0;s;1;c;0;p;1;P;c;05;u;00ff00ff;h;0;o;0.5000;t;01;d;1;z;03;0b;1;0a;1.000;0l;004;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1.000;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;future-key;keep-me;A;c;6;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;ads-future;7;S;c;4;s;1.157;o;1;d;1;t;000000",
+      "output": {
+        "code": "0;s;1;c;0;p;1;P;c;5;u;00FF00FF;h;0;o;0.5;t;1;d;1;z;3;0b;1;0a;1;0l;4;0v;4;0g;0;0t;1;0o;2;0m;0;0s;1;0f;0;0e;1.003;1b;0;1a;0.35;1l;2;1v;2;1g;0;1t;1;1o;3;1m;0;1s;1;1f;0;1e;1;future-key;keep-me;A;c;6;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;ads-future;7;S;c;4;s;1.157;o;1;d;1;t;000000",
+        "profiles": {
+          "P": {
+            "color": "cyan",
+            "outlines": false,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": true,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 3.0,
+            "innerLines": true,
+            "innerLinesOpacity": 1.0,
+            "innerLinesLength": 4.0,
+            "innerLinesThickness": 1.0,
+            "innerLinesOffset": 2.0,
+            "outerLines": false,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 1.0,
+            "outerLinesOffset": 3.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "A": {
+            "color": "pink",
+            "outlines": false,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 1.0,
+            "innerLinesLength": 4.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 2.0,
+            "outerLines": false,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "S": {
+            "color": "yellow",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": true,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 1.157,
+            "innerLines": false,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          }
+        },
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "empty primary differs from absent profiles",
+      "input": "0;P",
+      "output": {
+        "code": "0;P",
+        "profiles": {
+          "P": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 0.8,
+            "innerLinesLength": 6.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 3.0,
+            "outerLines": true,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "A": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          },
+          "S": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          }
+        },
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "empty ADS and sniper profiles",
+      "input": "0;S;P;A",
+      "output": {
+        "code": "0;S;P;A",
+        "profiles": {
+          "P": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 0.8,
+            "innerLinesLength": 6.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 3.0,
+            "outerLines": true,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "A": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 0.8,
+            "innerLinesLength": 6.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 3.0,
+            "outerLines": true,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "S": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": true,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": false,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          }
+        },
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "unknown duplicate fields and custom color",
+      "input": "0;P;c;8;future;P;future;two;1f;1;1m;1",
+      "output": {
+        "code": "0;P;c;8;future;P;future;two;1f;1;1m;1",
+        "profiles": {
+          "P": {
+            "color": "white",
+            "outlines": true,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 0.8,
+            "innerLinesLength": 6.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 3.0,
+            "outerLines": true,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": true,
+            "movementError": true
+          },
+          "A": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          },
+          "S": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          }
+        },
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "editor uses primary firing and movement switches first",
+      "input": "0;P;c;5;0f;0;1f;1;0m;0;1m;1",
+      "output": {
+        "code": "0;P;c;5;0f;0;1f;1;0m;0;1m;1",
+        "profiles": {
+          "P": {
+            "color": "cyan",
+            "outlines": true,
+            "outlineOpacity": 0.5,
+            "outlineThickness": 1.0,
+            "centerDot": false,
+            "centerDotOpacity": 1.0,
+            "centerDotThickness": 2.0,
+            "innerLines": true,
+            "innerLinesOpacity": 0.8,
+            "innerLinesLength": 6.0,
+            "innerLinesThickness": 2.0,
+            "innerLinesOffset": 3.0,
+            "outerLines": true,
+            "outerLinesOpacity": 0.35,
+            "outerLinesLength": 2.0,
+            "outerLinesThickness": 2.0,
+            "outerLinesOffset": 10.0,
+            "firingError": false,
+            "movementError": false
+          },
+          "A": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          },
+          "S": {
+            "color": "green",
+            "outlines": true,
+            "outlineOpacity": 0.8,
+            "outlineThickness": 1,
+            "centerDot": false,
+            "centerDotOpacity": 1,
+            "centerDotThickness": 2,
+            "innerLines": true,
+            "innerLinesOpacity": 1,
+            "innerLinesLength": 4,
+            "innerLinesThickness": 2,
+            "innerLinesOffset": 2,
+            "outerLines": false,
+            "outerLinesOpacity": 0.5,
+            "outerLinesLength": 2,
+            "outerLinesThickness": 2,
+            "outerLinesOffset": 3,
+            "firingError": false,
+            "movementError": false
+          }
+        },
+        "format": "valorant-native-v0"
+      }
+    },
+    {
+      "name": "strict decoder rejects tolerant boolean",
+      "input": "0;P;h;false",
+      "error": "invalid VALORANT crosshair code: expected 0 or 1 (section P, field h) (token 2, section P, field h)"
+    },
+    {
+      "name": "duplicate known field",
+      "input": "0;P;c;5;c;4",
+      "error": "invalid VALORANT crosshair code: known field is repeated (token 4, section P, field c)"
+    },
+    {
+      "name": "invalid known field",
+      "input": "0;P;c;9",
+      "error": "invalid VALORANT crosshair code: must be at most 8 (section P, field c) (token 2, section P, field c)"
+    },
+    {
+      "name": "blank input",
+      "input": "  ",
+      "error": "invalid VALORANT crosshair code: crosshair code must not be blank"
+    },
+    {
+      "name": "field metadata errors keep original JSON detail",
+      "input": "0;P;future;open\nclose",
+      "error": "invalid VALORANT crosshair code: 2 validation errors for CrosshairField\nvalue\n  Value error, crosshair field values cannot contain ';' or line breaks [type=value_error, input_value='open\\nclose', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nraw_value\n  Value error, raw crosshair values cannot contain ';' or line breaks [type=value_error, input_value='open\\nclose', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    }
+  ]
+}
