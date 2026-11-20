@@ -1,6 +1,12 @@
-//! Opt-in loopback listener for the native health and CS2 readiness routes.
+//! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
-use crate::{gsi_ready::GsiReady, session_auth::strip_session_query};
+use crate::{
+    gsi_ready::GsiReady,
+    profile_config::{ConfigUpdateError, ProfileConfig},
+    profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
+    runtime_session::RuntimeSession,
+    session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
+};
 use futures_util::future::{select, Either};
 use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::{
@@ -21,15 +27,21 @@ use std::{
     future::Future,
     io,
     net::{Ipv4Addr, TcpListener},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{net::TcpStream, sync::watch, task::JoinSet, time::timeout};
+use tokio::{
+    net::TcpStream,
+    sync::{watch, Semaphore},
+    task::JoinSet,
+    time::timeout,
+};
 
 pub const DEFAULT_PORT: u16 = 19871;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_HEADER_BYTES: usize = 32 * 1024;
-const MAX_GSI_BYTES: usize = 1024 * 1024;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
 const CONNECTION_LIMIT: Duration = Duration::from_secs(10);
 const DRAIN_LIMIT: Duration = Duration::from_secs(1);
 const ALLOWED_ORIGINS: &[&str] = &[
@@ -48,6 +60,25 @@ struct State {
     backend_url: String,
     started: Instant,
     gsi: GsiReady,
+    profile: Option<Arc<ProfileState>>,
+}
+
+/// Paths and identity owned by the desktop launcher. Bundle data is read-only.
+pub struct NativeProfile {
+    pub data_dir: PathBuf,
+    pub config_path: Option<PathBuf>,
+    pub bundle_data_dir: Option<PathBuf>,
+    pub legacy_config_path: Option<PathBuf>,
+    pub instance_id: String,
+    pub session_token: String,
+}
+
+struct ProfileState {
+    config: ProfileConfig,
+    auth: SessionAuth,
+    instance_id: String,
+    session: RuntimeSession,
+    disk: Arc<Semaphore>,
 }
 
 pub struct NativeHttpServer {
@@ -57,6 +88,36 @@ pub struct NativeHttpServer {
 
 impl NativeHttpServer {
     pub fn bind(port: u16, version: String) -> io::Result<Self> {
+        Self::bind_inner(port, version, None)
+    }
+
+    pub fn bind_profile(port: u16, version: String, profile: NativeProfile) -> io::Result<Self> {
+        if profile.session_token.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "desktop session token is required",
+            ));
+        }
+        let state = ProfileState {
+            config: ProfileConfig::new(
+                profile.data_dir,
+                profile.config_path,
+                profile.bundle_data_dir,
+                profile.legacy_config_path,
+            )?,
+            auth: SessionAuth::new(&profile.session_token),
+            instance_id: profile.instance_id.trim().to_owned(),
+            session: RuntimeSession::default(),
+            disk: Arc::new(Semaphore::new(1)),
+        };
+        Self::bind_inner(port, version, Some(Arc::new(state)))
+    }
+
+    fn bind_inner(
+        port: u16,
+        version: String,
+        profile: Option<Arc<ProfileState>>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         listener.set_nonblocking(true)?;
         let backend_url = format!("http://{}", listener.local_addr()?);
@@ -67,6 +128,7 @@ impl NativeHttpServer {
                 backend_url,
                 started: Instant::now(),
                 gsi: GsiReady::default(),
+                profile,
             }),
         })
     }
@@ -216,25 +278,43 @@ enum Route {
     Health,
     Gsi,
     GsiStatus,
+    Config,
+    QuickCheck,
+    FfmpegCheck,
+    DataDirInfo,
+    BackupStatus,
+    RuntimeState,
 }
 
 impl Route {
-    fn from_path(path: &str) -> Option<Self> {
+    fn from_path(path: &str, has_profile: bool) -> Option<Self> {
         match path {
             "/api/health" => Some(Self::Health),
             "/api/gsi/cs2" => Some(Self::Gsi),
             "/api/gsi/status" => Some(Self::GsiStatus),
+            "/api/config" if has_profile => Some(Self::Config),
+            "/api/config/quick-check" if has_profile => Some(Self::QuickCheck),
+            "/api/config/ffmpeg-check" if has_profile => Some(Self::FfmpegCheck),
+            "/api/config/data-dir-info" if has_profile => Some(Self::DataDirInfo),
+            "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
+            "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             _ => None,
         }
+    }
+
+    fn is_guest(&self) -> bool {
+        // These are guest routes in the deployed backend. The game sends no desktop header.
+        matches!(self, Self::Health | Self::Gsi | Self::GsiStatus)
     }
 }
 
 async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
     let path = request.uri().path();
-    let Some(route) = Route::from_path(path) else {
+    let has_profile = state.profile.is_some();
+    let Some(route) = Route::from_path(path, has_profile) else {
         if let Some(canonical) = path
             .strip_suffix('/')
-            .filter(|path| Route::from_path(path).is_some())
+            .filter(|path| Route::from_path(path, has_profile).is_some())
         {
             let mut location = format!("{}{canonical}", state.backend_url);
             if let Some(query) = request.uri().query() {
@@ -252,14 +332,24 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
         }
         return detail(StatusCode::NOT_FOUND, "Not Found");
     };
-    // All three routes are guest routes in the deployed backend. CS2 sends no
-    // desktop session header and the status check is also used by the web UI.
+    if !route.is_guest() {
+        let profile = state.profile.as_ref().expect("profile route");
+        let header = request
+            .headers()
+            .get(SESSION_TOKEN_HEADER)
+            .map(|value| value.to_str().unwrap_or("\u{fffd}"));
+        let query = request.uri().query().unwrap_or_default();
+        if !profile.auth.authorize_http(header, query.as_bytes()) {
+            return detail(StatusCode::UNAUTHORIZED, "Desktop session required");
+        }
+    }
     let allowed = if matches!(route, Route::Gsi) {
         "POST"
     } else {
         "GET"
     };
-    if request.method().as_str() != allowed {
+    let config_update = matches!(route, Route::Config) && request.method() == Method::PUT;
+    if request.method().as_str() != allowed && !config_update {
         let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
         response
             .headers_mut()
@@ -273,7 +363,92 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
         ),
         Route::GsiStatus => json_reply(StatusCode::OK, json!(state.gsi.status())),
         Route::Gsi => notify_gsi(state, request).await,
+        _ => profile_route(state, route, request).await,
     }
+}
+
+async fn profile_route(state: &State, route: Route, request: Request<Incoming>) -> HttpResponse {
+    let profile = state.profile.as_ref().expect("profile route");
+    if matches!(route, Route::RuntimeState) {
+        let data = profile.config.data_dir();
+        let data_path = resolved_path(data).unwrap_or_else(|_| data.to_owned());
+        return json_reply(
+            StatusCode::OK,
+            json!({
+                "pid": std::process::id(),
+                "instance_id": profile.instance_id,
+                "version": state.version,
+                "data_dir": path_text(&data_path),
+                "recovery_required": data.join("recovery-required.json").is_file(),
+                "runtime_session": profile.session.state(),
+                "demoparser_runtime": {
+                    "ready": false,
+                    "installed_version": null,
+                    "required_version": "0.41.4+cs2insight7",
+                    "missing_methods": ["decode_smoke_voxel_journal", "write_replay_parquet", "read_replay_parquet_round", "read_replay_parquet_round_binary"],
+                    "import_error": "Native replay integration is unavailable",
+                },
+            }),
+        );
+    }
+    if request.method() == Method::PUT {
+        let input = match config_body(request).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
+        return profile_disk(profile, move |config| match config.update(input) {
+            Ok(()) => json_reply(StatusCode::OK, json!({"status": "ok"})),
+            Err(ConfigUpdateError::Validation(errors)) => {
+                json_reply(StatusCode::UNPROCESSABLE_ENTITY, json!({"detail": errors}))
+            }
+            Err(ConfigUpdateError::Storage(error)) => profile_io_error(&error),
+        })
+        .await;
+    }
+    profile_disk(profile, move |config| {
+        let result = match route {
+            Route::Config => config.view(),
+            Route::QuickCheck => config.quick_check(),
+            Route::FfmpegCheck => config.ffmpeg_check(),
+            Route::DataDirInfo => data_dir_info(config.data_dir()),
+            Route::BackupStatus => backup_status(config.data_dir()),
+            _ => unreachable!("profile read route"),
+        };
+        match result {
+            Ok(value) => json_reply(StatusCode::OK, value),
+            Err(error) => profile_io_error(&error),
+        }
+    })
+    .await
+}
+
+async fn profile_disk(
+    profile: &Arc<ProfileState>,
+    operation: impl FnOnce(&ProfileConfig) -> HttpResponse + Send + 'static,
+) -> HttpResponse {
+    // Keep file work bounded even if a connection times out while an I/O operation is in progress.
+    let permit = Arc::clone(&profile.disk)
+        .acquire_owned()
+        .await
+        .expect("profile I/O semaphore");
+    let profile = Arc::clone(profile);
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        operation(&profile.config)
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => profile_io_error(&error),
+    }
+}
+
+fn profile_io_error(error: &dyn std::fmt::Display) -> HttpResponse {
+    eprintln!("Native profile I/O failed: {error}");
+    detail(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Configuration could not be read or saved",
+    )
 }
 
 fn is_json(header: Option<&HeaderValue>) -> bool {
@@ -288,34 +463,72 @@ fn is_json(header: Option<&HeaderValue>) -> bool {
     })
 }
 
-async fn notify_gsi(state: &State, request: Request<Incoming>) -> HttpResponse {
+async fn config_body(request: Request<Incoming>) -> Result<Value, Box<HttpResponse>> {
     let is_json = is_json(request.headers().get(CONTENT_TYPE));
-    let body = request.into_body();
+    let bytes = read_body(
+        request.into_body(),
+        "Configuration request body is too large",
+    )
+    .await?;
+    if bytes.is_empty() {
+        return Err(Box::new(missing_config_body()));
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| Box::new(invalid_body()))?;
+    if !is_json {
+        return Ok(json!(text));
+    }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    match serde_json::from_str::<Value>(text) {
+        Ok(Value::Null) => Err(Box::new(missing_config_body())),
+        Ok(value) => Ok(value),
+        Err(error) => Err(Box::new(invalid_json(text, &error))),
+    }
+}
+
+fn missing_config_body() -> HttpResponse {
+    json_reply(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        json!({"detail": [
+            {"type": "missing", "loc": ["body"], "msg": "Field required", "input": null}
+        ]}),
+    )
+}
+
+async fn read_body(body: Incoming, too_large: &str) -> Result<Bytes, Box<HttpResponse>> {
     if body
         .size_hint()
         .upper()
-        .is_some_and(|size| size > MAX_GSI_BYTES as u64)
+        .is_some_and(|size| size > MAX_BODY_BYTES as u64)
     {
-        return oversized();
+        return Err(Box::new(detail(StatusCode::PAYLOAD_TOO_LARGE, too_large)));
     }
-    let bytes = match Limited::new(body, MAX_GSI_BYTES).collect().await {
-        Ok(body) => body.to_bytes(),
-        Err(error) if error.is::<LengthLimitError>() => return oversized(),
-        Err(_) => {
-            return detail(
-                StatusCode::BAD_REQUEST,
-                "There was an error parsing the body",
-            )
+    match Limited::new(body, MAX_BODY_BYTES).collect().await {
+        Ok(body) => Ok(body.to_bytes()),
+        Err(error) if error.is::<LengthLimitError>() => {
+            Err(Box::new(detail(StatusCode::PAYLOAD_TOO_LARGE, too_large)))
         }
+        Err(_) => Err(Box::new(invalid_body())),
+    }
+}
+
+fn invalid_body() -> HttpResponse {
+    detail(
+        StatusCode::BAD_REQUEST,
+        "There was an error parsing the body",
+    )
+}
+
+async fn notify_gsi(state: &State, request: Request<Incoming>) -> HttpResponse {
+    let is_json = is_json(request.headers().get(CONTENT_TYPE));
+    let bytes = match read_body(request.into_body(), "GSI request body is too large").await {
+        Ok(bytes) => bytes,
+        Err(response) => return *response,
     };
     let payload = if bytes.is_empty() {
         json!({})
     } else {
         let Ok(text) = std::str::from_utf8(&bytes) else {
-            return detail(
-                StatusCode::BAD_REQUEST,
-                "There was an error parsing the body",
-            );
+            return invalid_body();
         };
         if !is_json {
             return invalid_dictionary(json!(text));
@@ -332,13 +545,6 @@ async fn notify_gsi(state: &State, request: Request<Incoming>) -> HttpResponse {
         .gsi
         .notify(payload, state.started.elapsed().as_secs_f64());
     json_reply(StatusCode::OK, json!({"ok": true, "ready": ready}))
-}
-
-fn oversized() -> HttpResponse {
-    detail(
-        StatusCode::PAYLOAD_TOO_LARGE,
-        "GSI request body is too large",
-    )
 }
 
 fn invalid_dictionary(input: Value) -> HttpResponse {

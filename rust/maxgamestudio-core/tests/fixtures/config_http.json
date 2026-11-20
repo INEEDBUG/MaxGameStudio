@@ -1,0 +1,583 @@
+{
+  "old": {
+    "obs": {
+      "host": "127.0.0.1",
+      "port": "4456",
+      "password": "fixture-only-OBS",
+      "obs_config_verified": true,
+      "unrecognized": {
+        "remember": "OBS field"
+      }
+    },
+    "llm": {
+      "model": "fixture-model",
+      "base_url": " http://localhost:9412/v1/chat/completions/ ",
+      "api_key": "fixture-only-LLM",
+      "unrecognized": [
+        "LLM field"
+      ]
+    },
+    "cs2_path": "fixture-missing-cs2.exe",
+    "ffmpeg_path": "fixture-missing-ffmpeg.exe",
+    "locale": "zh-HK",
+    "close_to_tray": false,
+    "cs2_extra_launch_args": "-novid",
+    "record_inject_console_lines": "",
+    "kb_overlay_tick_offset": 8,
+    "kill_fx_tick_offset": -3,
+    "steam_api_key": "fixture-only-STEAM",
+    "steam_known_share_code": "CSGO-fixtu-reonl-yfict-ional-AAAAA",
+    "steam_match_share_codes": [
+      "CSGO-fixtu-reonl-yfict-ional-BBBBB"
+    ],
+    "future_setting": {
+      "nested": [
+        "fixture",
+        1,
+        null
+      ]
+    }
+  },
+  "cases": [
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "body": null,
+      "status": 200,
+      "response": {
+        "obs": {
+          "host": "127.0.0.1",
+          "port": 4456,
+          "password": "****-OBS",
+          "obs_path": "",
+          "obs_config_verified": true
+        },
+        "obs_agent_auto_prepare": false,
+        "llm": {
+          "provider": "",
+          "model": "fixture-model",
+          "api_key": "****-LLM",
+          "base_url": "http://localhost:9412/v1"
+        },
+        "experimental": {
+          "pov_enabled": false
+        },
+        "spec_player_verify": {
+          "demo_timescale": 0.05,
+          "max_retries": 4,
+          "per_retry_timeout_sec": 0.6,
+          "settle_sec": 0.12,
+          "pov_goto_delay_extra_sec": null
+        },
+        "ffmpeg_path": "fixture-missing-ffmpeg.exe",
+        "montage_encoder": "auto",
+        "lite_cut_assets_dir": "",
+        "lite_cut_proxy_resolution": 720,
+        "cs2_path": "fixture-missing-cs2.exe",
+        "demo_directory": "",
+        "demo_watch_paths": [],
+        "demo_watch_scan_depth": 2,
+        "ai_mode": false,
+        "locale": "zh-HK",
+        "close_to_tray": false,
+        "close_action": "ask",
+        "expected_parse_players": [],
+        "recording_global_pacing": {},
+        "default_record_warmup": {},
+        "cs2_extra_launch_args": "-novid\n-fullscreen",
+        "cs2_extra_launch_args_user_configured": false,
+        "record_inject_console_lines": "cl_hud_telemetry_frametime_show 0\nengine_no_focus_sleep 0\ncl_demo_predict 0\nfps_max 0\ncl_trueview_show_status 0",
+        "record_inject_console_lines_user_configured": false,
+        "update_github_mirror": "auto",
+        "last_update_check_at": "",
+        "update_check_frequency": "weekly",
+        "obs_transition_enabled": false,
+        "obs_transition_name": "Fade",
+        "obs_transition_duration_ms": 100,
+        "obs_game_scene_name": "CS2 Insight Recording",
+        "obs_black_scene_name": "CS2 Insight Black",
+        "steam_api_key": "****TEAM",
+        "steam_id64": "",
+        "steam_game_auth_code": "",
+        "steam_known_share_code": "CSGO-****-****-****-****-AAAAA",
+        "match_mode": "premier",
+        "match_count": 20,
+        "kb_overlay_enabled": false,
+        "kb_overlay_tick_offset": 8,
+        "kb_overlay_position": "bottom_center",
+        "kill_fx_enabled": false,
+        "kill_fx_tick_offset": 5,
+        "overlay_offsets_independent": true,
+        "effective_locale": "zh-HK"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/quick-check",
+      "body": null,
+      "status": 200,
+      "response": {
+        "obs_configured": true,
+        "cs2_path_ok": false,
+        "ffmpeg_ok": false,
+        "ai_key_ok": true,
+        "cs2_path": "fixture-missing-cs2.exe",
+        "ffmpeg_path": "fixture-missing-ffmpeg.exe"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/config",
+      "body": {
+        "obs": {
+          "port": "4460",
+          "password": " ****match ",
+          "obs_path": " fixture-obs.exe "
+        },
+        "llm": {
+          "model": "updated",
+          "api_key": "****match",
+          "base_url": "http://host/v1/completions"
+        },
+        "demo_watch_paths": [
+          "Archive/./Demos/",
+          "  "
+        ],
+        "demo_watch_scan_depth": "3.0",
+        "close_to_tray": true,
+        "close_action": "exit",
+        "ai_mode": "on",
+        "expected_parse_players": [
+          "  Alice",
+          "Bob ",
+          "Alice",
+          " "
+        ],
+        "recording_global_pacing": {
+          "startDelaySeconds": 4.5
+        },
+        "cs2_extra_launch_args": "",
+        "record_inject_console_lines": "",
+        "obs_transition_name": "  ",
+        "obs_transition_duration_ms": -1,
+        "experimental": {
+          "pov_enabled": true
+        },
+        "steam_api_key": "****match",
+        "steam_known_share_code": "CSGO-****-****-****-****-AAAAA",
+        "match_mode": "bad-mode",
+        "match_count": 50,
+        "update_check_frequency": " MONTHLY ",
+        "last_update_check_at": " 2026-01-01T00:00:00Z ",
+        "not_a_saved_field": true
+      },
+      "status": 200,
+      "response": {
+        "status": "ok"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "body": null,
+      "status": 200,
+      "response": {
+        "obs": {
+          "host": "localhost",
+          "port": 4460,
+          "password": "****-OBS",
+          "obs_path": "fixture-obs.exe",
+          "obs_config_verified": true
+        },
+        "obs_agent_auto_prepare": false,
+        "llm": {
+          "provider": "",
+          "model": "updated",
+          "api_key": "****-LLM",
+          "base_url": "http://host/v1"
+        },
+        "experimental": {
+          "pov_enabled": true
+        },
+        "spec_player_verify": {
+          "demo_timescale": 0.05,
+          "max_retries": 4,
+          "per_retry_timeout_sec": 0.6,
+          "settle_sec": 0.12,
+          "pov_goto_delay_extra_sec": null
+        },
+        "ffmpeg_path": "fixture-missing-ffmpeg.exe",
+        "montage_encoder": "auto",
+        "lite_cut_assets_dir": "",
+        "lite_cut_proxy_resolution": 720,
+        "cs2_path": "fixture-missing-cs2.exe",
+        "demo_directory": "",
+        "demo_watch_paths": [
+          "Archive\\Demos"
+        ],
+        "demo_watch_scan_depth": 3,
+        "ai_mode": true,
+        "locale": "zh-HK",
+        "close_to_tray": false,
+        "close_action": "exit",
+        "expected_parse_players": [
+          "Alice",
+          "Bob"
+        ],
+        "recording_global_pacing": {
+          "startDelaySeconds": 4.5
+        },
+        "default_record_warmup": {},
+        "cs2_extra_launch_args": "",
+        "cs2_extra_launch_args_user_configured": true,
+        "record_inject_console_lines": "",
+        "record_inject_console_lines_user_configured": true,
+        "update_github_mirror": "auto",
+        "last_update_check_at": "2026-01-01T00:00:00Z",
+        "update_check_frequency": "monthly",
+        "obs_transition_enabled": false,
+        "obs_transition_name": "Fade",
+        "obs_transition_duration_ms": 0,
+        "obs_game_scene_name": "CS2 Insight Recording",
+        "obs_black_scene_name": "CS2 Insight Black",
+        "steam_api_key": "****TEAM",
+        "steam_id64": "",
+        "steam_game_auth_code": "",
+        "steam_known_share_code": "CSGO-****-****-****-****-AAAAA",
+        "match_mode": "premier",
+        "match_count": 50,
+        "kb_overlay_enabled": false,
+        "kb_overlay_tick_offset": 8,
+        "kb_overlay_position": "bottom_center",
+        "kill_fx_enabled": false,
+        "kill_fx_tick_offset": 5,
+        "overlay_offsets_independent": true,
+        "effective_locale": "zh-HK"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/config",
+      "body": {
+        "obs": {
+          "host": null,
+          "port": "invalid"
+        },
+        "demo_watch_paths": [
+          "valid",
+          3
+        ],
+        "demo_watch_scan_depth": 33,
+        "ai_mode": "invalid",
+        "close_action": "invalid",
+        "kb_overlay_tick_offset": 1.5
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": [
+              "body",
+              "obs",
+              "host"
+            ],
+            "msg": "Input should be a valid string",
+            "input": null
+          },
+          {
+            "type": "int_parsing",
+            "loc": [
+              "body",
+              "obs",
+              "port"
+            ],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "invalid"
+          },
+          {
+            "type": "string_type",
+            "loc": [
+              "body",
+              "demo_watch_paths",
+              1
+            ],
+            "msg": "Input should be a valid string",
+            "input": 3
+          },
+          {
+            "type": "less_than_equal",
+            "loc": [
+              "body",
+              "demo_watch_scan_depth"
+            ],
+            "msg": "Input should be less than or equal to 32",
+            "input": 33,
+            "ctx": {
+              "le": 32
+            }
+          },
+          {
+            "type": "bool_parsing",
+            "loc": [
+              "body",
+              "ai_mode"
+            ],
+            "msg": "Input should be a valid boolean, unable to interpret input",
+            "input": "invalid"
+          },
+          {
+            "type": "literal_error",
+            "loc": [
+              "body",
+              "close_action"
+            ],
+            "msg": "Input should be 'ask', 'tray' or 'exit'",
+            "input": "invalid",
+            "ctx": {
+              "expected": "'ask', 'tray' or 'exit'"
+            }
+          },
+          {
+            "type": "int_from_float",
+            "loc": [
+              "body",
+              "kb_overlay_tick_offset"
+            ],
+            "msg": "Input should be a valid integer, got a number with a fractional part",
+            "input": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/config",
+      "body": {
+        "steam_known_share_code": " CSGO-fixtu-reonl-yfict-ional-CCCCC "
+      },
+      "status": 200,
+      "response": {
+        "status": "ok"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "body": null,
+      "status": 200,
+      "response": {
+        "obs": {
+          "host": "localhost",
+          "port": 4460,
+          "password": "****-OBS",
+          "obs_path": "fixture-obs.exe",
+          "obs_config_verified": true
+        },
+        "obs_agent_auto_prepare": false,
+        "llm": {
+          "provider": "",
+          "model": "updated",
+          "api_key": "****-LLM",
+          "base_url": "http://host/v1"
+        },
+        "experimental": {
+          "pov_enabled": true
+        },
+        "spec_player_verify": {
+          "demo_timescale": 0.05,
+          "max_retries": 4,
+          "per_retry_timeout_sec": 0.6,
+          "settle_sec": 0.12,
+          "pov_goto_delay_extra_sec": null
+        },
+        "ffmpeg_path": "fixture-missing-ffmpeg.exe",
+        "montage_encoder": "auto",
+        "lite_cut_assets_dir": "",
+        "lite_cut_proxy_resolution": 720,
+        "cs2_path": "fixture-missing-cs2.exe",
+        "demo_directory": "",
+        "demo_watch_paths": [
+          "Archive\\Demos"
+        ],
+        "demo_watch_scan_depth": 3,
+        "ai_mode": true,
+        "locale": "zh-HK",
+        "close_to_tray": false,
+        "close_action": "exit",
+        "expected_parse_players": [
+          "Alice",
+          "Bob"
+        ],
+        "recording_global_pacing": {
+          "startDelaySeconds": 4.5
+        },
+        "default_record_warmup": {},
+        "cs2_extra_launch_args": "",
+        "cs2_extra_launch_args_user_configured": true,
+        "record_inject_console_lines": "",
+        "record_inject_console_lines_user_configured": true,
+        "update_github_mirror": "auto",
+        "last_update_check_at": "2026-01-01T00:00:00Z",
+        "update_check_frequency": "monthly",
+        "obs_transition_enabled": false,
+        "obs_transition_name": "Fade",
+        "obs_transition_duration_ms": 0,
+        "obs_game_scene_name": "CS2 Insight Recording",
+        "obs_black_scene_name": "CS2 Insight Black",
+        "steam_api_key": "****TEAM",
+        "steam_id64": "",
+        "steam_game_auth_code": "",
+        "steam_known_share_code": "CSGO-****-****-****-****-CCCCC",
+        "match_mode": "premier",
+        "match_count": 50,
+        "kb_overlay_enabled": false,
+        "kb_overlay_tick_offset": 8,
+        "kb_overlay_position": "bottom_center",
+        "kill_fx_enabled": false,
+        "kill_fx_tick_offset": 5,
+        "overlay_offsets_independent": true,
+        "effective_locale": "zh-HK"
+      }
+    }
+  ],
+  "saved": {
+    "obs": {
+      "host": "localhost",
+      "port": 4460,
+      "password": "fixture-only-OBS",
+      "obs_path": "fixture-obs.exe",
+      "obs_config_verified": true
+    },
+    "obs_agent_auto_prepare": false,
+    "llm": {
+      "provider": "",
+      "model": "updated",
+      "api_key": "fixture-only-LLM",
+      "base_url": "http://host/v1"
+    },
+    "experimental": {
+      "pov_enabled": true
+    },
+    "spec_player_verify": {
+      "demo_timescale": 0.05,
+      "max_retries": 4,
+      "per_retry_timeout_sec": 0.6,
+      "settle_sec": 0.12,
+      "pov_goto_delay_extra_sec": null
+    },
+    "ffmpeg_path": "fixture-missing-ffmpeg.exe",
+    "montage_encoder": "auto",
+    "lite_cut_assets_dir": "",
+    "lite_cut_proxy_resolution": 720,
+    "cs2_path": "fixture-missing-cs2.exe",
+    "demo_directory": "",
+    "demo_watch_paths": [
+      "Archive\\Demos"
+    ],
+    "demo_watch_scan_depth": 3,
+    "ai_mode": true,
+    "locale": "zh-HK",
+    "close_to_tray": false,
+    "close_action": "exit",
+    "expected_parse_players": [
+      "Alice",
+      "Bob"
+    ],
+    "recording_global_pacing": {
+      "startDelaySeconds": 4.5
+    },
+    "default_record_warmup": {},
+    "cs2_extra_launch_args": "",
+    "cs2_extra_launch_args_user_configured": true,
+    "record_inject_console_lines": "",
+    "record_inject_console_lines_user_configured": true,
+    "update_github_mirror": "auto",
+    "last_update_check_at": "2026-01-01T00:00:00Z",
+    "update_check_frequency": "monthly",
+    "obs_transition_enabled": false,
+    "obs_transition_name": "Fade",
+    "obs_transition_duration_ms": 0,
+    "obs_game_scene_name": "CS2 Insight Recording",
+    "obs_black_scene_name": "CS2 Insight Black",
+    "steam_api_key": "fixture-only-STEAM",
+    "steam_id64": "",
+    "steam_game_auth_code": "",
+    "steam_known_share_code": "CSGO-fixtu-reonl-yfict-ional-CCCCC",
+    "steam_match_share_codes": [],
+    "match_mode": "premier",
+    "match_count": 50,
+    "kb_overlay_enabled": false,
+    "kb_overlay_tick_offset": 8,
+    "kb_overlay_position": "bottom_center",
+    "kill_fx_enabled": false,
+    "kill_fx_tick_offset": 5,
+    "overlay_offsets_independent": true
+  },
+  "first_load": {
+    "obs": {
+      "host": "localhost",
+      "port": 4455,
+      "password": "",
+      "obs_path": "",
+      "obs_config_verified": false
+    },
+    "obs_agent_auto_prepare": false,
+    "llm": {
+      "provider": "",
+      "model": "",
+      "api_key": "",
+      "base_url": null
+    },
+    "experimental": {
+      "pov_enabled": false
+    },
+    "spec_player_verify": {
+      "demo_timescale": 0.05,
+      "max_retries": 4,
+      "per_retry_timeout_sec": 0.6,
+      "settle_sec": 0.12,
+      "pov_goto_delay_extra_sec": null
+    },
+    "ffmpeg_path": "",
+    "montage_encoder": "auto",
+    "lite_cut_assets_dir": "",
+    "lite_cut_proxy_resolution": 720,
+    "cs2_path": "",
+    "demo_directory": "",
+    "demo_watch_paths": [],
+    "demo_watch_scan_depth": 2,
+    "ai_mode": false,
+    "locale": "zh",
+    "close_to_tray": true,
+    "close_action": "ask",
+    "expected_parse_players": [],
+    "recording_global_pacing": {},
+    "default_record_warmup": {},
+    "cs2_extra_launch_args": "-fullscreen",
+    "cs2_extra_launch_args_user_configured": false,
+    "record_inject_console_lines": "cl_hud_telemetry_frametime_show 0\nengine_no_focus_sleep 0\ncl_demo_predict 0\nfps_max 0\ncl_trueview_show_status 0",
+    "record_inject_console_lines_user_configured": false,
+    "update_github_mirror": "auto",
+    "last_update_check_at": "",
+    "update_check_frequency": "weekly",
+    "obs_transition_enabled": false,
+    "obs_transition_name": "Fade",
+    "obs_transition_duration_ms": 100,
+    "obs_game_scene_name": "CS2 Insight Recording",
+    "obs_black_scene_name": "CS2 Insight Black",
+    "steam_api_key": "",
+    "steam_id64": "",
+    "steam_game_auth_code": "",
+    "steam_known_share_code": "",
+    "match_mode": "premier",
+    "match_count": 20,
+    "kb_overlay_enabled": false,
+    "kb_overlay_tick_offset": 6,
+    "kb_overlay_position": "bottom_center",
+    "kill_fx_enabled": false,
+    "kill_fx_tick_offset": 6,
+    "overlay_offsets_independent": true,
+    "effective_locale": "zh"
+  }
+}

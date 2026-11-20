@@ -1,11 +1,13 @@
 #![cfg(feature = "native-http")]
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
+    fs,
     io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream},
+    path::Path,
     process::{Child, Command, Stdio},
     sync::mpsc,
     thread,
@@ -40,9 +42,25 @@ struct RunningServer {
 
 impl RunningServer {
     fn start(version: &str) -> Self {
-        let child = Command::new(env!("CARGO_BIN_EXE_maxgamestudio-native-http"))
+        Self::launch(version, None)
+    }
+
+    fn launch(version: &str, profile: Option<(&Path, &Path)>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_maxgamestudio-native-http"));
+        command
             .args(["--port", "0", "--app-version", version])
             .env("CS2_INSIGHT_SESSION_TOKEN", "synthetic-token")
+            .env_remove("CS2_INSIGHT_DATA_DIR")
+            .env_remove("CS2_INSIGHT_CONFIG")
+            .env_remove("CS2_INSIGHT_BUNDLE_DATA_DIR");
+        if let Some((data, bundle)) = profile {
+            command
+                .env("CS2_INSIGHT_DATA_DIR", data)
+                .env("CS2_INSIGHT_CONFIG", data.join("custom-config.json"))
+                .env("CS2_INSIGHT_BUNDLE_DATA_DIR", bundle)
+                .env("CS2_INSIGHT_INSTANCE_ID", " fixture-process ");
+        }
+        let child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -84,6 +102,302 @@ impl RunningServer {
             thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+fn profile_request(
+    server: &RunningServer,
+    method: &str,
+    path: &str,
+    input: &Value,
+    auth: bool,
+) -> (u16, Value) {
+    let body = if input.is_null() {
+        String::new()
+    } else {
+        input.to_string()
+    };
+    let auth = if auth {
+        "X-CS2-Insight-Token: synthetic-token\r\n"
+    } else {
+        ""
+    };
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth}\r\n{body}",
+        server.addr, body.len()
+    );
+    let response = send_request(server.addr, &request);
+    (
+        response.status,
+        serde_json::from_str(&response.body).unwrap(),
+    )
+}
+
+fn recorded_profile(mut value: Value) -> Value {
+    if let Some(paths) = value
+        .get_mut("demo_watch_paths")
+        .and_then(Value::as_array_mut)
+    {
+        for path in paths {
+            let parts = path.as_str().unwrap().split(['/', '\\']);
+            *path = json!(parts.collect::<std::path::PathBuf>());
+        }
+    }
+    value
+}
+
+#[test]
+fn config_routes_replay_python_and_keep_unrecognized_profile_data() {
+    let scratch = tempfile::tempdir().unwrap();
+    let profile = scratch.path().join("profile");
+    let bundle = scratch.path().join("bundle");
+    fs::create_dir(&profile).unwrap();
+    fs::create_dir(&bundle).unwrap();
+    let config_path = profile.join("custom-config.json");
+    let ini_path = bundle.join("basic.ini");
+    let ini = b"[General]\r\nName=fixture\r\n";
+    fs::write(&ini_path, ini).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!("fixtures/config_http.json")).unwrap();
+    fs::write(&config_path, format!("\u{feff}{}\n", fixture["old"])).unwrap();
+    let server = RunningServer::launch("3.2.0-fixture", Some((&profile, &bundle)));
+    assert_eq!(
+        profile_request(&server, "GET", "/api/config", &Value::Null, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "PUT",
+            "/api/config",
+            &json!({"locale":"en"}),
+            false
+        )
+        .0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "GET", "/api/health", &Value::Null, false),
+        (200, json!({"status":"ok","version":"3.2.0-fixture"}))
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "GET",
+            "/api/config?_session=synthetic-token",
+            &Value::Null,
+            false
+        )
+        .0,
+        200
+    );
+    for case in fixture["cases"].as_array().unwrap() {
+        let method = case["method"].as_str().unwrap();
+        let path = case["path"].as_str().unwrap();
+        let (status, response) = profile_request(&server, method, path, &case["body"], true);
+        assert_eq!(
+            u64::from(status),
+            case["status"].as_u64().unwrap(),
+            "{method} {path}"
+        );
+        assert_eq!(
+            response,
+            recorded_profile(case["response"].clone()),
+            "{method} {path}"
+        );
+    }
+    let bytes = fs::read(&config_path).unwrap();
+    let mut saved: Value = serde_json::from_slice(&bytes).unwrap();
+    for (observed, original) in [
+        (
+            saved
+                .as_object_mut()
+                .unwrap()
+                .remove("future_setting")
+                .unwrap(),
+            &fixture["old"]["future_setting"],
+        ),
+        (
+            saved["obs"]
+                .as_object_mut()
+                .unwrap()
+                .remove("unrecognized")
+                .unwrap(),
+            &fixture["old"]["obs"]["unrecognized"],
+        ),
+        (
+            saved["llm"]
+                .as_object_mut()
+                .unwrap()
+                .remove("unrecognized")
+                .unwrap(),
+            &fixture["old"]["llm"]["unrecognized"],
+        ),
+    ] {
+        assert_eq!(&observed, original);
+    }
+    assert_eq!(saved, recorded_profile(fixture["saved"].clone()));
+    assert_eq!(
+        profile_request(&server, "PUT", "/api/config", &json!({}), true).0,
+        200
+    );
+    assert_eq!(
+        profile_request(&server, "GET", "/api/config", &Value::Null, true).0,
+        200
+    );
+    assert_eq!(fs::read(&config_path).unwrap(), bytes);
+    assert_eq!(fs::read(ini_path).unwrap(), ini);
+    assert!(!profile.join("cs2-insight.config.json").exists());
+    let barrier = std::sync::Barrier::new(2);
+    thread::scope(|scope| {
+        for input in [
+            json!({"close_action":"tray"}),
+            json!({"kill_fx_enabled":true}),
+        ] {
+            let server = &server;
+            let barrier = &barrier;
+            scope.spawn(move || {
+                barrier.wait();
+                assert_eq!(
+                    profile_request(server, "PUT", "/api/config", &input, true),
+                    (200, json!({"status":"ok"}))
+                );
+            });
+        }
+    });
+    let persisted: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    assert_eq!(persisted["close_action"], "tray");
+    assert_eq!(persisted["close_to_tray"], true);
+    assert_eq!(persisted["kill_fx_enabled"], true);
+    assert_eq!(
+        persisted["future_setting"],
+        fixture["old"]["future_setting"]
+    );
+    server.stop();
+}
+
+#[test]
+fn config_startup_uses_bundle_data_and_reports_owned_identity_and_recovery() {
+    let scratch = tempfile::tempdir().unwrap();
+    let profile = scratch.path().join("profile");
+    let bundle = scratch.path().join("bundle");
+    let backup = profile.join(".cs2_config_backup");
+    fs::create_dir_all(&backup).unwrap();
+    fs::create_dir(&bundle).unwrap();
+    let example = bundle.join("cs2-insight.config.example.json");
+    let mut seed: Value = serde_json::from_str(include_str!(
+        "../../../data/cs2-insight.config.example.json"
+    ))
+    .unwrap();
+    seed["cs2_path"] = json!("fixture-missing-cs2.exe");
+    let seed = seed.to_string();
+    fs::write(&example, &seed).unwrap();
+    fs::write(
+        profile.join("recovery-required.json"),
+        r#"{"reason":"fixture"}"#,
+    )
+    .unwrap();
+    fs::write(
+        backup.join("recording_state.json"),
+        r#"{"status":"recording","started_at_iso":"fixture-time"}"#,
+    )
+    .unwrap();
+    fs::write(backup.join("manifest.json"), r#"{"entries":[{"account_id":"456"},{"original":"D:\\Steam\\userdata\\123\\730\\local\\cfg\\cs2_user_keys.vcfg"},{"account_id":"456"}]}"#).unwrap();
+    let server = RunningServer::launch("3.2.0-fixture", Some((&profile, &bundle)));
+    let (status, config) = profile_request(&server, "GET", "/api/config", &Value::Null, true);
+    let mut first_load = serde_json::from_str::<Value>(include_str!("fixtures/config_http.json"))
+        .unwrap()["first_load"]
+        .clone();
+    first_load["cs2_path"] = json!("fixture-missing-cs2.exe");
+    assert_eq!((status, config), (200, first_load));
+    assert_eq!(fs::read_to_string(&example).unwrap(), seed);
+    assert!(profile.join("custom-config.json").is_file());
+
+    assert_eq!(
+        profile_request(
+            &server,
+            "GET",
+            "/api/app/runtime-state",
+            &Value::Null,
+            false
+        )
+        .0,
+        401
+    );
+    let (status, runtime) =
+        profile_request(&server, "GET", "/api/app/runtime-state", &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(runtime["pid"], server.child.id());
+    assert_eq!(runtime["instance_id"], "fixture-process");
+    assert_eq!(runtime["version"], "3.2.0-fixture");
+    assert_eq!(runtime["data_dir"], profile.to_string_lossy().as_ref());
+    assert_eq!(runtime["recovery_required"], true);
+    assert_eq!(
+        runtime["runtime_session"],
+        json!({"busy": false, "owner": null})
+    );
+    assert_eq!(runtime["demoparser_runtime"]["ready"], false);
+    assert!(!runtime.to_string().contains("synthetic-token"));
+
+    let (status, backup_status) = profile_request(
+        &server,
+        "GET",
+        "/api/config-backup/status",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(backup_status["status"], "recording");
+    assert_eq!(backup_status["restore_required"], true);
+    assert_eq!(
+        backup_status["backup_dir"],
+        backup.to_string_lossy().as_ref()
+    );
+    assert_eq!(backup_status["created_at_iso"], "fixture-time");
+    assert_eq!(backup_status["accounts"], json!(["123", "456"]));
+    assert!(backup_status["cs2_running"].is_boolean());
+    let (_, dir_info) = profile_request(
+        &server,
+        "GET",
+        "/api/config/data-dir-info",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(dir_info["path"], profile.to_string_lossy().as_ref());
+    assert_eq!(
+        dir_info["logs_path"],
+        profile.join("logs").to_string_lossy().as_ref()
+    );
+    assert_eq!(dir_info["exists"], true);
+    assert!(dir_info["size_bytes"].as_u64().unwrap() > 100);
+    let (_, no_ffmpeg) = profile_request(
+        &server,
+        "GET",
+        "/api/config/ffmpeg-check",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(
+        no_ffmpeg,
+        json!({"ok": false, "reason": "not_configured", "ffmpeg_path": ""})
+    );
+    let executable = bundle.join("fixture-ffmpeg.exe");
+    fs::write(&executable, []).unwrap();
+    profile_request(
+        &server,
+        "PUT",
+        "/api/config",
+        &json!({"ffmpeg_path": executable}),
+        true,
+    );
+    let (_, found) = profile_request(
+        &server,
+        "GET",
+        "/api/config/ffmpeg-check",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(found, json!({"ok": true, "ffmpeg_path": executable}));
+    server.stop();
+    assert!(profile.join("recovery-required.json").is_file());
 }
 
 impl Drop for RunningServer {
