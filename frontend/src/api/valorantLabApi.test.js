@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import API from "./api.js";
+import { normalizeCrosshairProfiles } from "../utils/valorantLab";
 import {
   VALORANT_LAB_API_CONTRACT,
   applyValorantStretch,
@@ -12,6 +14,11 @@ import {
   unlockValorantStretchCfg,
 } from "./valorantLabApi.js";
 
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...await importOriginal(),
+  invoke: vi.fn(),
+}));
+
 const PROFILES = {
   P: { color: "red" },
   A: { color: "cyan" },
@@ -21,6 +28,11 @@ const PROFILES = {
 describe("Valorant Lab crosshair API contract", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    delete window.__TAURI_INTERNALS__;
+    vi.mocked(invoke).mockReset();
   });
 
   it("declares strict encode/decode endpoints under the shared API base", () => {
@@ -61,5 +73,33 @@ describe("Valorant Lab crosshair API contract", () => {
     expect(API.post).toHaveBeenNthCalledWith(2, "/valorant-lab/crosshair/decode", { code });
     await expect(saveValorantCrosshair(PROFILES)).resolves.toMatchObject({ code: "saved-by-backend" });
     expect(API.put).toHaveBeenCalledWith("/valorant-lab/crosshair", { profiles: expect.any(Object) });
+  });
+
+  it("uses the native desktop codec for import and export without calling the Python API", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    const code = "0;P;c;7;future;keep-me";
+    const post = vi.spyOn(API, "post").mockRejectedValue(new Error("Unexpected HTTP call"));
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ code, format: "valorant-native-v0" })
+      .mockResolvedValueOnce({ code, profiles: PROFILES, format: "valorant-native-v0" });
+
+    await expect(encodeValorantCrosshair(PROFILES)).resolves.toMatchObject({ code });
+    expect(invoke).toHaveBeenNthCalledWith(1, "encode_valorant_crosshair", {
+      profiles: normalizeCrosshairProfiles(PROFILES),
+    });
+    await expect(decodeValorantCrosshair(" " + code + " ")).resolves.toMatchObject({ code });
+    expect(invoke).toHaveBeenNthCalledWith(2, "decode_valorant_crosshair", { code });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("preserves native validation errors and does not retry them through HTTP", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    const detail = "Unsupported crosshair code version (token 0)";
+    const error = { response: { status: 422, data: { detail } } };
+    const post = vi.spyOn(API, "post").mockRejectedValue(new Error("Unexpected HTTP call"));
+    vi.mocked(invoke).mockRejectedValueOnce(error);
+
+    await expect(decodeValorantCrosshair("1;P;c;5")).rejects.toEqual(error);
+    expect(post).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import API, { isTransientAxiosNetworkError } from "./api";
 import { normalizeCrosshairProfiles, normalizeDisplayStatus } from "../utils/valorantLab";
 
@@ -88,18 +89,23 @@ function normalizeCrosshairResponse(value) {
   };
 }
 
-export async function encodeValorantCrosshair(profiles) {
-  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.encodeCrosshair.path, {
-    profiles: normalizeCrosshairProfiles(profiles),
-  });
+async function requestCrosshairCodec(command, path, payload) {
+  const data = window.__TAURI_INTERNALS__
+    ? await invoke(command, payload)
+    : (await API.post(path, payload)).data;
   return normalizeCrosshairResponse(data);
 }
 
-export async function decodeValorantCrosshair(code) {
-  const { data } = await API.post(VALORANT_LAB_API_CONTRACT.decodeCrosshair.path, {
+export function encodeValorantCrosshair(profiles) {
+  return requestCrosshairCodec("encode_valorant_crosshair", VALORANT_LAB_API_CONTRACT.encodeCrosshair.path, {
+    profiles: normalizeCrosshairProfiles(profiles),
+  });
+}
+
+export function decodeValorantCrosshair(code) {
+  return requestCrosshairCodec("decode_valorant_crosshair", VALORANT_LAB_API_CONTRACT.decodeCrosshair.path, {
     code: String(code || "").trim(),
   });
-  return normalizeCrosshairResponse(data);
 }
 
 export async function saveValorantCrosshair(profiles) {

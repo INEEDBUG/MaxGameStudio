@@ -19,6 +19,7 @@ use tauri::{
 };
 
 mod desktop_storage;
+mod valorant_crosshair;
 mod steam_accounts;
 
 pub fn desktop_logs_dir() -> Option<PathBuf> {
@@ -555,6 +556,8 @@ pub fn run() {
             get_close_action,
             hide_to_tray,
             quit_app,
+            valorant_crosshair::encode_valorant_crosshair,
+            valorant_crosshair::decode_valorant_crosshair,
             steam_accounts::get_steam_accounts,
             steam_accounts::switch_steam_account
         ])
