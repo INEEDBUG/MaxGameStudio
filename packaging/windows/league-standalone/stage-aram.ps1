@@ -77,6 +77,7 @@ router.beforeEach((to) => {
       replace: true
     }
   }
+  return true
 })
 
 export { router }

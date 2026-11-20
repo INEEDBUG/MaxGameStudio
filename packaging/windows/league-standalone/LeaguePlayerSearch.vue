@@ -37,11 +37,14 @@ const status = computed(() => {
     : '请启动英雄联盟客户端并登录后查询。国服可通过 WeGame 启动。'
 })
 
-function openPlayer(puuid: string, sgpServerId: string | null, setCurrent = true) {
+async function openPlayer(puuid: string, sgpServerId: string | null, setCurrent = true) {
   if (!activeServer.value) return
   const server = sgpServerId || activeServer.value
-  if (setCurrent) return navigateToTabByPuuidAndSgpServerId(puuid, server)
-  playerTabs.createTab(puuid, server, { setCurrent: false })
+  if (setCurrent) {
+    await navigateToTabByPuuidAndSgpServerId(puuid, server)
+  } else {
+    playerTabs.createTab(puuid, server, { setCurrent: false })
+  }
 }
 </script>
 
