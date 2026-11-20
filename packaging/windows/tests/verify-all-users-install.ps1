@@ -7,7 +7,12 @@ param(
   [Parameter(Mandatory)][string]$LeagueInstaller,
   [Parameter(Mandatory)][string]$LeagueBaselineInstaller,
   [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+-beta\.\d+$')][string]$LeagueBaselineVersion,
-  [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$LeagueBaselineSha256
+  [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$LeagueBaselineSha256,
+  [switch]$NativePayloads,
+  [ValidatePattern('^[a-f0-9]{64}$')][string]$CandidateSha256,
+  [ValidatePattern('^[a-f0-9]{64}$')][string]$LeagueCandidateSha256,
+  [string]$FixturePythonExe,
+  [ValidatePattern('^\d+\.\d+\.\d+$')][string]$FixturePythonVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +54,23 @@ $league = @{
   Product = "Software\$leagueID"; Arp = "$arp\$leagueID"; Location = 'InstallLocation'
   Exe = 'MaxGameStudioLeagueToolbox.exe'; Remove = 'Uninstall MaxGameStudioLeagueToolbox.exe'; Shortcut = '英雄联盟工具箱'; MachineFlag = '/allusers'
   Default = (Join-Path $env:ProgramFiles 'MaxGameStudioLeagueToolbox'); Old = (Join-Path $root 'League per-user program')
+}
+if ($NativePayloads) {
+  if (!$FixturePythonExe -or !$FixturePythonVersion -or
+      (Get-FileHash -LiteralPath $Installer).Hash -ine $CandidateSha256 -or
+      (Get-FileHash -LiteralPath $LeagueInstaller).Hash -ine $LeagueCandidateSha256 -or
+      [IO.Path]::GetFileName($LeagueBaselineInstaller) -cne "MaxGameStudioLeague_${LeagueBaselineVersion}_x64-setup.exe") {
+    throw 'Native acceptance requires the exact verified pair, the League baseline, and the pinned test interpreter.'
+  }
+  $FixturePythonExe = (Resolve-Path -LiteralPath $FixturePythonExe).Path
+  foreach ($program in $root, $previous, $main.Default, $league.Default) {
+    if ($FixturePythonExe.StartsWith($program + '\', [StringComparison]::OrdinalIgnoreCase)) {
+      throw 'SQLite test tooling must be outside the installation fixture.'
+    }
+  }
+  $pythonVersion = & $FixturePythonExe -I -B -c 'import sqlite3, sys; print(".".join(map(str, sys.version_info[:3])))'
+  if ($LASTEXITCODE -ne 0 -or $pythonVersion -cne $FixturePythonVersion) { throw 'Test Python or its standard SQLite module did not match the pinned interpreter.' }
+  . (Join-Path $PSScriptRoot '../league-standalone/retire-user-install.ps1')
 }
 . (Join-Path $PSScriptRoot '../league-standalone/shortcut-target.ps1')
 . (Join-Path $PSScriptRoot 'main-install-diagnostic.ps1')
@@ -119,6 +141,45 @@ function Assert-RetiredUserInstall($Product) {
 function Assert-Hash([string]$Path, [string]$Expected) {
   if ((Get-FileHash -LiteralPath $Path).Hash -cne $Expected) {
     throw "Synthetic fixture or installed file changed unexpectedly: $Path"
+  }
+}
+
+function Get-ProgramFileHashes([string]$Directory) {
+  $hashes = @{}
+  foreach ($file in Get-ChildItem -LiteralPath $Directory -Recurse -File -Force) {
+    $hashes[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName).Hash
+  }
+  return $hashes
+}
+
+function Assert-ProgramFileHashes([string]$Directory, [hashtable]$Expected) {
+  $actual = Get-ProgramFileHashes $Directory
+  if ($actual.Count -ne $Expected.Count) { throw 'The installed native file set changed.' }
+  foreach ($path in $Expected.Keys) {
+    if ($actual[$path] -cne $Expected[$path]) { throw "An installed native file changed: $path" }
+  }
+}
+
+function Assert-NativeInstall($Product) {
+  $dir = $Product.Default
+  $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $dir $Product.Exe))
+  if ($version.ProductVersion -cne $Product.Version) { throw "$($Product.Name) has an unexpected native PE version." }
+  if ($Product.Name -eq 'Main') {
+    if ($version.ProductName -cne 'MaxGameStudio' -or !(Test-Path -LiteralPath (Join-Path $dir 'data\basic.ini') -PathType Leaf)) {
+      throw 'The machine Main installation lacks the native product identity or data resource.'
+    }
+    foreach ($relative in 'python', 'backend', 'league-runtime') {
+      if (Test-Path -LiteralPath (Join-Path $dir $relative)) { throw "Fresh native Main includes a legacy payload directory: $relative" }
+    }
+  } else {
+    $native = Get-LeagueNativeRuntime $dir
+    if (!$native -or $native.Version -cne $Product.Version -or (Test-Path -LiteralPath (Join-Path $dir 'resources\app.asar'))) {
+      throw 'The machine League installation lacks its native executable inventory or still contains Electron.'
+    }
+    $inventory = Get-LeaguePayloadHashes (Join-Path $dir 'maxgamestudio-runtime-hashes.json') -Native
+    foreach ($relative in $inventory.Keys) {
+      if (!(Test-LeagueFileHash $dir $relative $inventory[$relative])) { throw 'The native League payload does not match the installed inventory.' }
+    }
   }
 }
 
@@ -193,26 +254,32 @@ function Assert-StandardProcessOwner([Diagnostics.Process]$Process, $User) {
 
 function Test-BusyMainMachine([Diagnostics.Process]$Running) {
   $executable = Join-Path $main.Default $main.Exe
-  $extensions = @(Get-ChildItem -LiteralPath (Join-Path $main.Default 'python\Lib\site-packages\demoparser2') -Filter '*.pyd' -File)
-  if ($extensions.Count -ne 1) { throw 'Expected a single installed Main parser extension.' }
-  $parser = $extensions[0].FullName
-  $exeHash = (Get-FileHash -LiteralPath $executable).Hash
-  $parserHash = (Get-FileHash -LiteralPath $parser).Hash
+  if ($NativePayloads) {
+    $files = Get-ProgramFileHashes $main.Default
+  } else {
+    $extensions = @(Get-ChildItem -LiteralPath (Join-Path $main.Default 'python\Lib\site-packages\demoparser2') -Filter '*.pyd' -File)
+    if ($extensions.Count -ne 1) { throw 'Expected a single installed Main parser extension.' }
+    $parser = $extensions[0].FullName
+    $files = @{
+      $executable = (Get-FileHash -LiteralPath $executable).Hash
+      $parser = (Get-FileHash -LiteralPath $parser).Hash
+    }
+  }
 
   Invoke-Installer $Installer '/S /UPDATE /ALLUSERS' -Rejected
-  Assert-Hash $executable $exeHash
-  Assert-Hash $parser $parserHash
+  if ($NativePayloads) { Assert-ProgramFileHashes $main.Default $files }
+  else { foreach ($path in $files.Keys) { Assert-Hash $path $files[$path] } }
   if ($Running.HasExited) { throw 'The rejected machine updater stopped the other user''s Main process.' }
   Assert-Installed $main HKLM $main.Version $main.Default
 
   # Read the real rejection code instead of the self-copying uninstaller launcher's status.
   # https://nsis.sourceforge.io/Docs/AppendixD.html#D.1
   Invoke-Installer (Join-Path $main.Default $main.Remove) "/S /ALLUSERS _?=$($main.Default)" -Rejected
-  Assert-Hash $executable $exeHash
-  Assert-Hash $parser $parserHash
+  if ($NativePayloads) { Assert-ProgramFileHashes $main.Default $files }
+  else { foreach ($path in $files.Keys) { Assert-Hash $path $files[$path] } }
   if ($Running.HasExited) { throw 'The rejected machine uninstaller stopped the other user''s Main process.' }
   Assert-Installed $main HKLM $main.Version $main.Default
-  Write-Host 'BUSY_MACHINE_MAIN_VERIFIED: updater and removal both refused while another standard user ran Main, preserving its process, executable and parser.'
+  Write-Host 'BUSY_MACHINE_MAIN_VERIFIED: updater and removal both refused while another standard user ran Main, preserving its process and installed program files.'
 }
 
 function Open-StandardProfiles($User, [switch]$CheckMachineBusy) {
@@ -339,13 +406,13 @@ function Invoke-ScopeTransition($Product, [switch]$Rejected) {
   }
 }
 
-function Write-InstalledSize($Product) {
-  $files = Get-ChildItem -LiteralPath $Product.Default -Recurse -File -Force
+function Write-InstalledSize($Product, [string]$Directory = $Product.Default, [string]$Package = $Product.Installer, [string]$Role = 'candidate') {
+  $files = Get-ChildItem -LiteralPath $Directory -Recurse -File -Force
   [long]$programBytes = ($files | Measure-Object Length -Sum).Sum
-  [long]$installerBytes = (Get-Item -LiteralPath $Product.Installer).Length
-  $sample = @{ product = $Product.Name; installerBytes = $installerBytes; programBytes = $programBytes }
+  [long]$installerBytes = (Get-Item -LiteralPath $Package).Length
+  $sample = @{ product = $Product.Name; role = $Role; installerBytes = $installerBytes; programBytes = $programBytes }
   Write-Host ('ALL_USERS_PACKAGE_SIZE: ' + ($sample | ConvertTo-Json -Compress))
-  if ($programBytes -le 0 -or $programBytes -gt $Product.Limit) {
+  if ($programBytes -le 0 -or ($Role -eq 'candidate' -and $programBytes -gt $Product.Limit)) {
     throw "$($Product.Name) exceeded its installed program budget ($programBytes bytes)."
   }
 }
@@ -388,6 +455,10 @@ Invoke-Installer $BaselineInstaller "/S /D=$($main.Old)"
 Assert-Installed $main HKCU $BaselineVersion $main.Old
 Invoke-Installer $LeagueBaselineInstaller "/S /D=$($league.Old)"
 Assert-Installed $league HKCU $LeagueBaselineVersion $league.Old
+if ($NativePayloads) {
+  Write-InstalledSize $main $main.Old $BaselineInstaller 'baseline'
+  Write-InstalledSize $league $league.Old $LeagueBaselineInstaller 'baseline'
+}
 
 # Replay the real data-page handoff for the baseline, then let the packaged
 # app commit the new dedicated fixture profile before any scope transition.
@@ -428,7 +499,7 @@ else:
     assert connection.execute("select kind from mgs_all_users_acceptance").fetchone() == (label,)
 connection.close()
 '@ | Set-Content -LiteralPath $fixture -Encoding utf8
-$oldPython = Join-Path $main.Old 'python\python.exe'
+$oldPython = if ($NativePayloads) { $FixturePythonExe } else { Join-Path $main.Old 'python\python.exe' }
 foreach ($kind in 'Main', 'League') {
   $database = if ($kind -eq 'Main') { $mainDb } else { $leagueDb }
   & $oldPython -I -B $fixture seed $database $kind
@@ -449,6 +520,7 @@ foreach ($path in $mainConfig, $mainDb, $leagueConfig, $leagueDb, $leagueLocator
 }
 $oldMainHash = (Get-FileHash -LiteralPath (Join-Path $main.Old $main.Exe)).Hash
 $oldLeagueHash = (Get-FileHash -LiteralPath (Join-Path $league.Old 'resources\app.asar')).Hash
+if ($NativePayloads) { $oldLeagueExeHash = (Get-FileHash -LiteralPath (Join-Path $league.Old $league.Exe)).Hash }
 
 $accounts = [Collections.Generic.List[Security.Principal.SecurityIdentifier]]::new()
 try {
@@ -502,6 +574,7 @@ try {
     Remove-Item -LiteralPath $product.Default
     Invoke-ScopeTransition $product
     Assert-Installed $product HKLM $product.Version $product.Default
+    if ($NativePayloads) { Assert-NativeInstall $product }
     Assert-CommonShortcuts $product
     if ($mediumCaller) {
       Assert-RetiredUserInstall $product
@@ -516,10 +589,16 @@ try {
   $machineLeagueArchive = Join-Path $league.Default 'resources\app.asar'
   $machineMainHash = (Get-FileHash -LiteralPath $machineMain).Hash
   $machineLeagueHash = (Get-FileHash -LiteralPath $machineLeague).Hash
-  $machineLeagueArchiveHash = (Get-FileHash -LiteralPath $machineLeagueArchive).Hash
-  # A same-version League scope reinstall can legitimately contain identical app.asar bytes.
-  if ($machineMainHash -eq $oldMainHash -or
-      ($leagueVersion -ne $LeagueBaselineVersion -and $machineLeagueArchiveHash -eq $oldLeagueHash)) {
+  if ($NativePayloads) {
+    $machineMainFiles = Get-ProgramFileHashes $main.Default
+    $machineLeagueFiles = Get-ProgramFileHashes $league.Default
+    $leaguePayloadIsOld = $machineLeagueHash -eq $oldLeagueExeHash
+  } else {
+    $machineLeagueArchiveHash = (Get-FileHash -LiteralPath $machineLeagueArchive).Hash
+    # A same-version League scope reinstall can legitimately contain identical app.asar bytes.
+    $leaguePayloadIsOld = $leagueVersion -ne $LeagueBaselineVersion -and $machineLeagueArchiveHash -eq $oldLeagueHash
+  }
+  if ($machineMainHash -eq $oldMainHash -or $leaguePayloadIsOld) {
     throw 'The machine programs did not contain the candidate application payloads.'
   }
 
@@ -537,16 +616,22 @@ try {
     Assert-Installed $league HKCU $LeagueBaselineVersion $league.Old
     Assert-Hash (Join-Path $main.Old $main.Exe) $oldMainHash
     Assert-Hash (Join-Path $league.Old 'resources\app.asar') $oldLeagueHash
+    if ($NativePayloads) { Assert-Hash (Join-Path $league.Old $league.Exe) $oldLeagueExeHash }
   }
   Assert-Hash $machineMain $machineMainHash
   Assert-Hash $machineLeague $machineLeagueHash
-  Assert-Hash $machineLeagueArchive $machineLeagueArchiveHash
+  if ($NativePayloads) {
+    Assert-ProgramFileHashes $main.Default $machineMainFiles
+    Assert-ProgramFileHashes $league.Default $machineLeagueFiles
+  } else {
+    Assert-Hash $machineLeagueArchive $machineLeagueArchiveHash
+  }
   foreach ($path in $expectedFiles.Keys) { Assert-Hash $path $expectedFiles[$path] }
   if ((Get-ItemPropertyValue -LiteralPath $storageKey -Name LocationV1) -cne $layout) {
     throw 'The machine transition or update changed the initiating user Main data locator.'
   }
 
-  $python = Join-Path $main.Default 'python\python.exe'
+  $python = if ($NativePayloads) { $FixturePythonExe } else { Join-Path $main.Default 'python\python.exe' }
   foreach ($kind in 'Main', 'League') {
     $database = if ($kind -eq 'Main') { $mainDb } else { $leagueDb }
     & $python -I -B $fixture verify $database $kind
@@ -602,13 +687,15 @@ Remove-MachineFixture $main
 Assert-Installed $league HKLM $league.Version $league.Default
 Assert-CommonShortcuts $league
 Assert-Hash $machineLeague $machineLeagueHash
-Assert-Hash $machineLeagueArchive $machineLeagueArchiveHash
+if ($NativePayloads) { Assert-ProgramFileHashes $league.Default $machineLeagueFiles }
+else { Assert-Hash $machineLeagueArchive $machineLeagueArchiveHash }
 Invoke-Installer $Installer '/S /ALLUSERS'
 Assert-Installed $main HKLM $main.Version $main.Default
 Remove-MachineFixture $league
 Assert-Installed $main HKLM $main.Version $main.Default
 Assert-CommonShortcuts $main
 Assert-Hash $machineMain $machineMainHash
+if ($NativePayloads) { Assert-ProgramFileHashes $main.Default $machineMainFiles }
 
 Write-Host 'ALL_USERS_INSTALL_VERIFIED: both machine uninstallers preserved the other product, the original fixtures and both private profiles.'
 Write-Host 'Interactive UAC consent requires a real interactive Windows user session; this runner checked only its observed token route.'
