@@ -7,6 +7,15 @@ mod profile;
 mod desktop;
 
 #[cfg(windows)]
+mod client_discovery;
+
+#[cfg(windows)]
+mod client_runtime;
+
+#[cfg(windows)]
+mod lcu;
+
+#[cfg(windows)]
 fn main() {
     if let Err(error) = desktop::run() {
         rfd::MessageDialog::new()

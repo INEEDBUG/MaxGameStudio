@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { stripTypeScriptTypes } from 'node:module'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 
@@ -32,4 +33,55 @@ test('selects the three bundled windows and allows local Tauri IPC in their CSP'
     }),
     html.replace("connect-src 'self'", "connect-src ipc: http://ipc.localhost 'self'")
   )
+})
+
+test('later client events take precedence over a delayed initial state', async () => {
+  const renderer = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const filename = join(stagedSource, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
+  const fixture = `
+interface PropConfig {
+  raw: boolean
+}
+class PiniaStateSync {
+  constructor(private readonly _context: any) {}
+  async sync(namespace: string, stateId: string, store: any) {
+    this._context.ipc.onEvent(
+      'mobx-utils-main',
+      'update',
+      (path, value, { action, raw }) => {
+        if (action === 'update' || action === 'create') {
+          store[path] = value
+        } else if (action === 'delete') {
+          delete store[path]
+        }
+      }
+    )
+    const initial: Record<string, { value: any; config: PropConfig }> = await this._context.ipc.call()
+    Object.entries(initial).forEach(([key, { value, config }]) => {
+      store[key] = value
+    })
+  }
+}`
+  const transformed = renderer.transform(fixture, filename)?.code ?? fixture
+  const script = stripTypeScriptTypes(transformed, { mode: 'transform' })
+  const PiniaStateSync = new Function(`${script}\nreturn PiniaStateSync`)()
+  let onUpdate
+  let resolveInitial
+  const ipc = {
+    onEvent(_namespace, _name, callback) { onUpdate = callback },
+    call() { return new Promise((resolve) => { resolveInitial = resolve }) },
+  }
+  const store = {}
+  const pending = new PiniaStateSync({ ipc }).sync('league-client-main', 'gameflow', store)
+  onUpdate('phase', 'InProgress', { action: 'update', raw: false, revision: 3 })
+  resolveInitial({
+    phase: { value: 'ChampSelect', config: { raw: false, revision: 2 } },
+    session: { value: null, config: { raw: false, revision: 2 } },
+  })
+  await pending
+  assert.deepEqual(store, { phase: 'InProgress', session: null })
+  onUpdate('phase', 'ChampSelect', { action: 'update', raw: false, revision: 2 })
+  assert.equal(store.phase, 'InProgress')
+  onUpdate('phase', null, { action: 'update', raw: false, revision: 4 })
+  assert.equal(store.phase, null)
 })

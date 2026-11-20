@@ -1,6 +1,12 @@
-use crate::profile::DesktopProfile;
-use maxgamestudio_league_core::profile_database::PROFILE_DB_VERSION;
-use serde_json::{json, Value};
+use crate::{
+    client_runtime::{client_from_view, monitor, ClientRuntime, CLIENT},
+    profile::DesktopProfile,
+};
+use maxgamestudio_league_core::{
+    profile_database::PROFILE_DB_VERSION,
+    shell_preferences::{ShellPreference, APP_COMMON, MAIN_WINDOW},
+};
+use serde_json::{json, Map, Value};
 use std::io;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -10,18 +16,14 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
-const MAIN_WINDOW: &str = "window-manager-main/main-window";
-const CLOSE_ACTION: &str = "window-manager-main/main-window/closeAction";
 const SYNC_NAMESPACE: &str = "mobx-utils-main";
 
 fn saved_close_action(profile: &DesktopProfile) -> Result<&'static str, String> {
-    let saved = profile
-        .database
-        .lock()
-        .map_err(|_| "数据库连接中断。")?
-        .setting(CLOSE_ACTION)
+    let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+    let saved = ShellPreference::CloseAction
+        .read(&db, profile.system_locale)
         .map_err(|error| error.to_string())?;
-    Ok(match saved.as_ref().and_then(Value::as_str) {
+    Ok(match saved.as_str() {
         Some("minimize-to-tray") => "minimize-to-tray",
         Some("quit") => "quit",
         _ => "ask",
@@ -38,7 +40,7 @@ fn show_main(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn emit(
+pub(crate) fn emit(
     window: &WebviewWindow,
     namespace: &str,
     event_name: &str,
@@ -94,6 +96,7 @@ fn field(value: Value) -> Value {
 fn league_call(
     window: WebviewWindow,
     profile: State<'_, DesktopProfile>,
+    client: State<'_, ClientRuntime>,
     namespace: String,
     method: String,
     args: Vec<Value>,
@@ -103,15 +106,28 @@ fn league_call(
     }
     let invoke = || -> Result<Value, Box<dyn std::error::Error>> {
         match (namespace.as_str(), method.as_str()) {
-            ("app-common-main", "getVersion") => Ok(json!(env!("CARGO_PKG_VERSION"))),
-            ("app-common-main", "openUserDataDir") => {
+            (APP_COMMON, "getVersion") => Ok(json!(env!("CARGO_PKG_VERSION"))),
+            (APP_COMMON, "openUserDataDir") => {
                 window
                     .opener()
                     .open_path(profile.directory.to_string_lossy(), None::<String>)?;
                 Ok(Value::Null)
             }
-            ("app-common-main", "exit") => {
+            (APP_COMMON, "exit") => {
                 window.app_handle().exit(0);
+                Ok(Value::Null)
+            }
+            (CLIENT, "connect" | "disconnect") if window.label() == "main" => {
+                let selection = if method == "connect" {
+                    Some(
+                        args.first()
+                            .and_then(client_from_view)
+                            .ok_or("无效的客户端进程。")?,
+                    )
+                } else {
+                    None
+                };
+                client.select(window.app_handle(), selection)?;
                 Ok(Value::Null)
             }
             (SYNC_NAMESPACE, "subscribeAndGetInitialState") => {
@@ -129,6 +145,27 @@ fn league_call(
                             "usingHigherVersionDb": field(json!(version > PROFILE_DB_VERSION)),
                         }))
                     }
+                    (Some(APP_COMMON), Some("state")) => Ok(json!({
+                        "platform": field(json!("win32")),
+                    })),
+                    (Some(APP_COMMON), Some("settings")) => {
+                        let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                        let mut values = Map::new();
+                        for preference in ShellPreference::APP_SETTINGS {
+                            let value = preference
+                                .read(&db, profile.system_locale)
+                                .map_err(|error| error.to_string())?;
+                            values.insert(preference.key().into(), field(value));
+                        }
+                        Ok(Value::Object(values))
+                    }
+                    (Some(CLIENT), Some("settings")) => {
+                        let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                        let enabled = ShellPreference::ClientAutoConnect
+                            .read(&db, profile.system_locale)
+                            .map_err(|error| error.to_string())?;
+                        Ok(json!({ "autoConnect": field(enabled) }))
+                    }
                     (Some(MAIN_WINDOW), Some("state")) if window.label() == "main" => Ok(json!({
                         "status": field(json!(window_status(&window)?)),
                         "focus": field(json!(if window.is_focused()? { "focused" } else { "blurred" })),
@@ -140,31 +177,62 @@ fn league_call(
                             "closeAction": field(json!(saved_close_action(&profile)?)),
                         }))
                     }
-                    _ => Err("对应的工具箱状态尚未接入 Rust 运行时。".into()),
+                    (Some(namespace), Some(name)) => match client.fields(namespace, name)? {
+                        Some((revision, Value::Object(fields))) => Ok(Value::Object(
+                            fields
+                                .into_iter()
+                                .map(|(key, value)| {
+                                    (
+                                        key,
+                                        json!({
+                                            "value": value,
+                                            "config": { "raw": false, "revision": revision },
+                                        }),
+                                    )
+                                })
+                                .collect(),
+                        )),
+                        _ => Err("对应的工具箱状态尚未接入 Rust 运行时。".into()),
+                    },
+                    _ => Err("无效的工具箱状态订阅。".into()),
                 }
             }
-            ("setting-factory-main", "set")
-                if window.label() == "main"
-                    && args.first().and_then(Value::as_str) == Some(MAIN_WINDOW)
-                    && args.get(1).and_then(Value::as_str) == Some("closeAction") =>
-            {
-                let action = args
-                    .get(2)
+            ("setting-factory-main", "get" | "set") => {
+                let namespace = args
+                    .first()
                     .and_then(Value::as_str)
-                    .filter(|action| matches!(*action, "ask" | "minimize-to-tray" | "quit"))
-                    .ok_or("无效的关闭方式。")?;
-                profile
-                    .database
-                    .lock()
-                    .map_err(|_| "数据库连接中断。")?
-                    .set_setting(CLOSE_ACTION, &json!(action))
+                    .ok_or("缺少设置分组。")?;
+                let key = args
+                    .get(1)
+                    .and_then(Value::as_str)
+                    .ok_or("缺少设置名称。")?;
+                let preference = ShellPreference::from_ipc(namespace, key)
+                    .filter(|setting| {
+                        *setting != ShellPreference::CloseAction || window.label() == "main"
+                    })
+                    .ok_or("对应的工具箱设置尚未接入 Rust 运行时。")?;
+                let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
+                if method == "get" {
+                    return preference
+                        .read(&db, profile.system_locale)
+                        .map_err(|error| error.to_string().into());
+                }
+                let value = args.get(2).ok_or("缺少设置值。")?;
+                preference
+                    .write(&db, value)
                     .map_err(|error| error.to_string())?;
-                emit(
-                    &window,
-                    SYNC_NAMESPACE,
-                    &format!("update-state-prop/{MAIN_WINDOW}:settings"),
-                    json!(["closeAction", action, {"action": "update", "raw": false}]),
-                )?;
+                drop(db);
+                if preference == ShellPreference::ClientAutoConnect {
+                    client.set_auto_connect(value.as_bool().ok_or("无效的自动连接设置。")?)?;
+                }
+
+                let event = format!("update-state-prop/{namespace}:settings");
+                let args = json!([key, value, {"action": "update", "raw": false}]);
+                for label in ["main", "aux", "opgg"] {
+                    if let Some(target) = window.app_handle().get_webview_window(label) {
+                        emit(&target, SYNC_NAMESPACE, &event, args.clone())?;
+                    }
+                }
                 Ok(Value::Null)
             }
             (MAIN_WINDOW, method) if window.label() == "main" => {
@@ -206,7 +274,19 @@ pub(crate) fn run() -> tauri::Result<()> {
             let profile = DesktopProfile::prepare(app)
                 .map_err(|error| io::Error::other(format!("工具箱数据无法准备。{error}")))?;
             let webview_directory = profile.webview_directory()?;
+            let auto_connect = {
+                let db = profile
+                    .database
+                    .lock()
+                    .map_err(|_| io::Error::other("数据库连接中断。"))?;
+                ShellPreference::ClientAutoConnect
+                    .read(&db, profile.system_locale)
+                    .map_err(io::Error::other)?
+                    .as_bool()
+                    .unwrap_or(true)
+            };
             app.manage(profile);
+            app.manage(ClientRuntime::new(auto_connect)?);
             let show = MenuItem::with_id(app, "show", "显示工具箱", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出工具箱", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -248,6 +328,7 @@ pub(crate) fn run() -> tauri::Result<()> {
                     )
                 })
                 .build()?;
+            tauri::async_runtime::spawn(monitor(app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {

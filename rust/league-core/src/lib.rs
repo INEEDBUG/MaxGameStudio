@@ -1,4 +1,5 @@
 pub mod auto_select;
+pub mod lcu_lockfile;
 pub mod league_session;
 pub mod profile_database;
 pub mod profile_location;
@@ -6,5 +7,6 @@ pub mod profile_migration;
 pub mod profile_path;
 pub mod profile_snapshot;
 pub mod resg;
+pub mod shell_preferences;
 pub mod update;
 pub mod window_demand;

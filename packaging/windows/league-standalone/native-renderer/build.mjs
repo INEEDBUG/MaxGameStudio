@@ -96,11 +96,39 @@ import { invokeLeagueCall } from '${IPC_MODULE}'`
   ]
 }
 
+const NATIVE_STATE_TRANSFORMS = [
+  ['  raw: boolean\n}', '  raw: boolean\n  revision?: number\n}'],
+  [
+    '  async sync(namespace: string, stateId: string, store: any) {',
+    `  async sync(namespace: string, stateId: string, store: any) {
+    // Tauri can deliver a state event before the older initial response.
+    const revisions = new Map<string, number>()
+    const accept = (key: string, revision?: number) => {
+      if (revision === undefined) return true
+      if (revision < (revisions.get(key) ?? -1)) return false
+      revisions.set(key, revision)
+      return true
+    }`
+  ],
+  [
+    '(path, value, { action, raw }) => {',
+    `(path, value, { action, raw, revision }) => {
+        if (!accept(path, revision)) return`
+  ],
+  [
+    'Object.entries(initial).forEach(([key, { value, config }]) => {',
+    `Object.entries(initial).forEach(([key, { value, config }]) => {
+      if (!accept(key, config.revision)) return`
+  ]
+]
+
 function nativeRendererPlugin(sourceRoot) {
   const ipcDirectory = join(sourceRoot, 'src/renderer-shared/shards/ipc').replaceAll('\\', '/')
   const transforms = new Map(
     Object.entries(IPC_TRANSFORMS).map(([file, patches]) => [`${ipcDirectory}/${file}`, patches])
   )
+  const piniaSync = join(sourceRoot, 'src/renderer-shared/shards/pinia-mobx-utils/pinia-state-sync.ts')
+  transforms.set(piniaSync.replaceAll('\\', '/'), NATIVE_STATE_TRANSFORMS)
 
   return {
     name: 'mgs-league-native-renderer',

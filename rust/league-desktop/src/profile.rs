@@ -13,12 +13,14 @@ use std::{
 use tauri::Manager;
 use windows_sys::Win32::{
     Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS},
+    Globalization::GetUserDefaultLocaleName,
     System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ},
 };
 
 pub(crate) struct DesktopProfile {
     pub(crate) directory: PathBuf,
     pub(crate) database: Mutex<LeagueProfileDatabase>,
+    pub(crate) system_locale: &'static str,
 }
 
 impl DesktopProfile {
@@ -37,6 +39,7 @@ impl DesktopProfile {
         Ok(Self {
             directory,
             database,
+            system_locale: desktop_locale(),
         })
     }
 
@@ -45,6 +48,17 @@ impl DesktopProfile {
             league_profile_path(&self.directory.join("WebView2")).map_err(io::Error::other)?;
         fs::create_dir_all(&directory)?;
         Ok(directory)
+    }
+}
+
+fn desktop_locale() -> &'static str {
+    // This buffer can hold LOCALE_NAME_MAX_LENGTH UTF-16 code units, including NUL.
+    let mut name = [0u16; 85];
+    let length = unsafe { GetUserDefaultLocaleName(name.as_mut_ptr(), name.len() as i32) };
+    if length > 2 && name.starts_with(&[b'z' as u16, b'h' as u16]) {
+        "zh-CN"
+    } else {
+        "en"
     }
 }
 

@@ -1,0 +1,261 @@
+//! Disconnect-safe snapshots from the local League client for the existing renderer.
+
+use crate::{
+    client_discovery::{discover_clients, ClientInstance, LocalClient},
+    desktop::emit,
+    lcu::{LcuError, LcuTransport},
+};
+pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
+use serde_json::{json, Value};
+use std::{sync::Mutex, time::Duration};
+use tauri::{AppHandle, Manager};
+
+const CLIENT_DISCOVERY: &str = "league-client-ux-main";
+
+#[derive(Default, PartialEq)]
+struct Snapshot {
+    known_clients: Vec<ClientInstance>,
+    active: Option<ActiveClient>,
+}
+
+#[derive(PartialEq)]
+struct ActiveClient {
+    instance: ClientInstance,
+    phase: String,
+    session: Value,
+    summoner: Value,
+}
+
+fn client_identity(instance: ClientInstance) -> Value {
+    // The lockfile is local and does not identify the Riot or Tencent shard.
+    json!({
+        "pid": instance.pid,
+        "processCreationTime": instance.created_at.to_string(),
+        "region": "",
+        "rsoPlatformId": "",
+    })
+}
+
+pub(crate) fn client_from_view(value: &Value) -> Option<ClientInstance> {
+    Some(ClientInstance {
+        pid: u32::try_from(value["pid"].as_u64()?).ok()?,
+        created_at: value["processCreationTime"].as_str()?.parse().ok()?,
+    })
+}
+
+impl Snapshot {
+    fn fields(&self, namespace: &str, name: &str) -> Option<Value> {
+        let active = self.active.as_ref();
+        match (namespace, name) {
+            (CLIENT_DISCOVERY, "state") => Some(json!({
+                "launchedClients": self.known_clients.iter().copied().map(client_identity).collect::<Vec<_>>(),
+            })),
+            (CLIENT, "state") => Some(json!({
+                "connectionState": if active.is_some() { "connected" } else { "disconnected" },
+                "auth": active.map(|client| client_identity(client.instance)),
+                "connectingClient": null,
+            })),
+            (CLIENT, "gameflow") => Some(json!({
+                "phase": active.map(|client| client.phase.as_str()),
+                "session": active.map(|client| &client.session),
+            })),
+            (CLIENT, "summoner") => Some(json!({"me": active.map(|client| &client.summoner)})),
+            _ => None,
+        }
+    }
+}
+
+const PUBLIC_STATES: [(&str, &str); 4] = [
+    (CLIENT_DISCOVERY, "state"),
+    (CLIENT, "state"),
+    (CLIENT, "gameflow"),
+    (CLIENT, "summoner"),
+];
+
+#[derive(Default)]
+struct RuntimeState {
+    generation: u64,
+    revision: u64,
+    auto_connect: bool,
+    manual_client: Option<ClientInstance>,
+    manually_disconnected: bool,
+    snapshot: Snapshot,
+}
+
+pub(crate) struct ClientRuntime {
+    transport: LcuTransport,
+    state: Mutex<RuntimeState>,
+    wake: tokio::sync::Notify,
+}
+
+impl ClientRuntime {
+    pub(crate) fn new(auto_connect: bool) -> Result<Self, LcuError> {
+        Ok(Self {
+            transport: LcuTransport::new()?,
+            state: Mutex::new(RuntimeState {
+                auto_connect,
+                ..Default::default()
+            }),
+            wake: tokio::sync::Notify::new(),
+        })
+    }
+
+    pub(crate) fn fields(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Option<(u64, Value)>, &'static str> {
+        let state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        Ok(state
+            .snapshot
+            .fields(namespace, name)
+            .map(|fields| (state.revision, fields)))
+    }
+
+    pub(crate) fn set_auto_connect(&self, enabled: bool) -> Result<(), &'static str> {
+        let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        if state.auto_connect != enabled {
+            state.auto_connect = enabled;
+            if enabled {
+                state.manually_disconnected = false;
+            }
+            state.generation += 1;
+            self.wake.notify_one();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn select(
+        &self,
+        app: &AppHandle,
+        selection: Option<ClientInstance>,
+    ) -> Result<(), &'static str> {
+        let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        if selection.is_some_and(|client| !state.snapshot.known_clients.contains(&client)) {
+            return Err("客户端已退出或尚未完成检测。");
+        }
+        state.generation += 1;
+        state.manual_client = selection;
+        state.manually_disconnected = selection.is_none();
+        let previous = Snapshot {
+            active: state.snapshot.active.take(),
+            known_clients: state.snapshot.known_clients.clone(),
+        };
+        state.revision += 1;
+        publish_changes(app, &previous, &state.snapshot, state.revision);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    async fn sample(&self, client: &LocalClient) -> Result<Option<ActiveClient>, LcuError> {
+        if !client.alive() {
+            return Ok(None);
+        }
+        let target = client.target()?;
+        let Some(phase) = self.transport.read_phase(&target).await? else {
+            return Ok(None);
+        };
+        let summoner = self.transport.read_current_summoner(&target).await?;
+        let session = self
+            .transport
+            .read_gameflow_session(&target)
+            .await?
+            .filter(|session| session.phase == phase);
+        Ok(client.alive().then(|| ActiveClient {
+            instance: client.instance,
+            phase,
+            session: json!(session),
+            summoner: json!(summoner),
+        }))
+    }
+
+    async fn refresh(&self, app: &AppHandle) {
+        let (generation, manual, connected, auto_connect) = {
+            let Ok(state) = self.state.lock() else {
+                return;
+            };
+            (
+                state.generation,
+                state.manual_client,
+                state.snapshot.active.as_ref().map(|client| client.instance),
+                state.auto_connect && !state.manually_disconnected,
+            )
+        };
+        let clients = tauri::async_runtime::spawn_blocking(discover_clients)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        let find_client = |instance| clients.iter().find(|client| client.instance == instance);
+        let candidate = if let Some(selection) = manual {
+            find_client(selection)
+        } else {
+            connected
+                .and_then(find_client)
+                .or_else(|| (auto_connect && clients.len() == 1).then(|| &clients[0]))
+        };
+        let active = match candidate {
+            Some(client) => tokio::time::timeout(Duration::from_secs(4), self.sample(client))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten(),
+            None => None,
+        };
+        let mut known_clients: Vec<_> = clients.iter().map(|client| client.instance).collect();
+        known_clients.sort_unstable();
+        let snapshot = Snapshot {
+            known_clients,
+            active,
+        };
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if generation == state.generation {
+            if snapshot.active.is_some()
+                || state
+                    .manual_client
+                    .is_some_and(|client| !snapshot.known_clients.contains(&client))
+            {
+                state.manual_client = None;
+            }
+            if state.snapshot != snapshot {
+                state.revision += 1;
+                publish_changes(app, &state.snapshot, &snapshot, state.revision);
+                state.snapshot = snapshot;
+            }
+        }
+    }
+}
+
+pub(crate) async fn monitor(app: AppHandle) {
+    let runtime = app.state::<ClientRuntime>();
+    loop {
+        runtime.refresh(&app).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), runtime.wake.notified()).await;
+    }
+}
+
+fn publish_changes(app: &AppHandle, before: &Snapshot, after: &Snapshot, revision: u64) {
+    for (namespace, name) in PUBLIC_STATES {
+        let (Some(Value::Object(before)), Some(Value::Object(after))) = (
+            before.fields(namespace, name),
+            after.fields(namespace, name),
+        ) else {
+            continue;
+        };
+        for (key, value) in after {
+            if before.get(&key) == Some(&value) {
+                continue;
+            }
+            let event = format!("update-state-prop/{namespace}:{name}");
+            let args =
+                json!([key, value, { "action": "update", "raw": false, "revision": revision }]);
+            for label in ["main", "aux", "opgg"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    let _ = emit(&window, "mobx-utils-main", &event, args.clone());
+                }
+            }
+        }
+    }
+}
