@@ -870,6 +870,7 @@ FunctionEnd
   StrCpy $R7 "首次静默安装需要通过 /D= 指定程序目录。尚未复制应用文件。"
   Call CS2_AbortMigrationInstall
   mgs_silent_path_done:
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
   !ifdef MGS_DUAL_SCOPE
     ${If} $MGSMachineScope != 1
   !endif
@@ -904,9 +905,11 @@ FunctionEnd
   !if /FileExists "${CS2_TAURI_RELEASE_DIR}\libunwind.dll"
     File /a "/oname=libunwind.dll" "${CS2_TAURI_RELEASE_DIR}\libunwind.dll"
   !endif
+  !endif
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow.libs"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow-25.0.0.dist-info"
@@ -948,6 +951,7 @@ FunctionEnd
     MessageBox MB_ICONEXCLAMATION|MB_OK "旧版内嵌工作台的程序文件未全部清理。已保留原配置。" /SD IDOK
   ${EndIf}
   mgs_retire_embedded_league_done:
+  !endif
   !ifdef MGS_DUAL_SCOPE
     ${If} $MGSInnerInstaller = 1
       !insertmacro UAC_AsUser_Call Function MGS_FinalizeOriginalUser 0
@@ -963,9 +967,11 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
   Delete "$INSTDIR\WebView2Loader.dll"
   Delete "$INSTDIR\libunwind.dll"
   ; The generated uninstaller tries to remove $INSTDIR before this custom
   ; file is deleted. Retry non-recursively once the loader is gone.
   RmDir "$INSTDIR"
+  !endif
 !macroend

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCargoReleaseRoot } from "./cargo-release-root.mjs";
@@ -20,6 +20,7 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriRoot = join(frontendRoot, "src-tauri");
+const nativeRuntime = process.env.MGS_MAIN_NATIVE_PACKAGE === "1";
 const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") || "PATH";
 const buildEnv = {
   ...process.env,
@@ -91,18 +92,38 @@ function assertBundledFrontendVersion(root, expectedVersion) {
   console.log(`[desktop] validated frontend version ${expectedVersion}: ${sidebarBundle}`);
 }
 
-run(
-  process.execPath,
-  [join(frontendRoot, "scripts", "stage-python-runtime.mjs")],
-  buildEnv,
-  false,
-);
-run(
-  process.execPath,
-  [join(frontendRoot, "scripts", "stage-tauri-resources.mjs")],
-  buildEnv,
-  false,
-);
+if (nativeRuntime) {
+  if (process.platform !== "win32") {
+    throw new Error("The Main native NSIS candidate must be built on Windows");
+  }
+  const catalog = buildEnv.MGS_MAIN_NATIVE_CATALOG;
+  if (!catalog || !statSync(catalog, { throwIfNoEntry: false })?.isFile() ||
+      !/^[a-f0-9]{64}$/i.test(buildEnv.MGS_MAIN_NATIVE_CATALOG_SHA256 ?? "")) {
+    throw new Error("Set MGS_MAIN_NATIVE_CATALOG and its independently verified MGS_MAIN_NATIVE_CATALOG_SHA256");
+  }
+  const work = mkdtempSync(join(realpathSync(tmpdir()), "mgs-native-main-"));
+  process.once("exit", () => {
+    if (existsSync(work) && realpathSync(work) === work) rmSync(work, { recursive: true, force: true });
+  });
+  buildEnv.MGS_MAIN_NATIVE_CATALOG = realpathSync(catalog);
+  buildEnv.MGS_MAIN_NATIVE_WORK = work;
+  buildEnv.MGS_MAIN_NATIVE_GNU = isGnuBuild(buildEnv) ? "1" : "0";
+  buildEnv.MGS_MAIN_NATIVE_LOADER = join(releaseRoot, "WebView2Loader.dll");
+  buildEnv.MGS_MAIN_NATIVE_UNWIND = join(releaseRoot, "libunwind.dll");
+} else {
+  run(
+    process.execPath,
+    [join(frontendRoot, "scripts", "stage-python-runtime.mjs")],
+    buildEnv,
+    false,
+  );
+  run(
+    process.execPath,
+    [join(frontendRoot, "scripts", "stage-tauri-resources.mjs")],
+    buildEnv,
+    false,
+  );
+}
 
 const stagedLibunwind =
   process.platform === "win32" ? stageLibunwind({ env: buildEnv, releaseRoot }) : null;
@@ -131,7 +152,11 @@ if (certificateThumbprint) {
     },
   };
 }
-const shortResources = prepareWindowsResourceBundle(join(tauriRoot, "bundle-resources"));
+if (nativeRuntime) {
+  // The Windows native template includes only its explicit native assets.
+  buildConfig.bundle = { ...buildConfig.bundle, resources: { "bundle-resources/": null } };
+}
+const shortResources = nativeRuntime ? null : prepareWindowsResourceBundle(join(tauriRoot, "bundle-resources"));
 if (shortResources) {
   buildConfig.bundle = {
     ...buildConfig.bundle,
@@ -147,7 +172,7 @@ if (shortResources) {
 rmSync(join(frontendRoot, "dist"), { recursive: true, force: true });
 run(
   process.execPath,
-  [tauri, "build", "--config", JSON.stringify(buildConfig)],
+  [tauri, "build", "--config", JSON.stringify(buildConfig), ...(nativeRuntime ? ["--features", "native-runtime"] : [])],
   buildEnv,
   false,
 );
@@ -182,10 +207,13 @@ if (process.platform === "win32") {
     throw new Error(`Non-GNU Tauri build unexpectedly contains ${libunwind}`);
   }
   const hookBody = readFileSync(hook, "utf8");
-  if (gnuBuild && !hookBody.includes('File /a "/oname=WebView2Loader.dll"')) {
+  const nativePayload = nativeRuntime ? readFileSync(join(tauriRoot, "windows", "main-native-payload.nsh"), "utf8") : "";
+  if (gnuBuild && !(nativeRuntime ? nativePayload.includes('File "$%MGS_MAIN_NATIVE_LOADER%"') :
+    hookBody.includes('File /a "/oname=WebView2Loader.dll"'))) {
     throw new Error("NSIS hook does not install WebView2Loader.dll beside the Tauri executable");
   }
-  if (gnuBuild && !hookBody.includes('File /a "/oname=libunwind.dll"')) {
+  if (gnuBuild && !(nativeRuntime ? nativePayload.includes('File "$%MGS_MAIN_NATIVE_UNWIND%"') :
+    hookBody.includes('File /a "/oname=libunwind.dll"'))) {
     throw new Error("NSIS hook does not install libunwind.dll beside the Tauri executable");
   }
   const installerScript = existsSync(generatedInstaller)

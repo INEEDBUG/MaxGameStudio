@@ -217,6 +217,28 @@ Function MGS_FinalizeOriginalUser
   ReadRegStr $0 HKCU "${UNINSTKEY}" "UninstallString"
   StrCmp $0 '$\"$MGSUserProgramDir\uninstall.exe$\"' 0 mgs_retire_user_deferred
   IfFileExists "$MGSUserProgramDir\uninstall.exe" 0 mgs_retire_user_deferred
+  !ifdef MGS_MAIN_NATIVE_PACKAGE
+    !insertmacro MGS_NativeProgramAction "Retire" "$MGSUserProgramDir" ""
+    StrCmp $R0 0 0 mgs_retire_user_deferred
+    ; Keep unrelated or retargeted shortcuts, even at our usual names.
+    !insertmacro IsShortcutTarget "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$MGSUserProgramDir\${MAINBINARYNAME}.exe"
+    Pop $0
+    ${If} $0 = 1
+      Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    ${EndIf}
+    !insertmacro IsShortcutTarget "$SMPROGRAMS\${PRODUCTNAME}\${PRODUCTNAME}.lnk" "$MGSUserProgramDir\${MAINBINARYNAME}.exe"
+    Pop $0
+    ${If} $0 = 1
+      Delete "$SMPROGRAMS\${PRODUCTNAME}\${PRODUCTNAME}.lnk"
+      RMDir "$SMPROGRAMS\${PRODUCTNAME}"
+    ${EndIf}
+    !insertmacro IsShortcutTarget "$DESKTOP\${PRODUCTNAME}.lnk" "$MGSUserProgramDir\${MAINBINARYNAME}.exe"
+    Pop $0
+    ${If} $0 = 1
+      Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+    ${EndIf}
+    DeleteRegKey HKCU "${UNINSTKEY}"
+  !else
   SetOutPath "$WINDIR"
   ; _?= stops NSIS from spawning a detached temporary copy. The uninstaller
   ; cannot delete its own running image in this mode, so remove it afterward.
@@ -226,6 +248,7 @@ Function MGS_FinalizeOriginalUser
   StrCmp $0 0 0 mgs_retire_user_deferred
   IfFileExists "$MGSUserProgramDir\${MAINBINARYNAME}.exe" mgs_retire_user_deferred 0
   Delete "$MGSUserProgramDir\uninstall.exe"
+  !endif
   RMDir "$MGSUserProgramDir"
   ReadRegStr $0 HKCU "${MANUPRODUCTKEY}" ""
   StrCmp $0 $MGSUserProgramDir 0 mgs_retire_user_done

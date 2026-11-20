@@ -56,6 +56,9 @@ ${StrCase}
 ${StrLoc}
 
 !define MGS_DUAL_SCOPE
+!if "$%MGS_MAIN_NATIVE_PACKAGE%" == "1"
+  !define MGS_MAIN_NATIVE_PACKAGE
+!endif
 Var MGSMachineProgramDir
 Var MGSUserProgramDir
 Var MGSMachineTarget
@@ -111,6 +114,9 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+!ifdef MGS_MAIN_NATIVE_PACKAGE
+  !include "${MGS_WINDOWS_DIR}\main-native-payload.nsh"
+!endif
 !include "${MGS_WINDOWS_DIR}\install-scope.nsh"
 
 Name "${PRODUCTNAME}"
@@ -194,8 +200,11 @@ Page custom MGS_ShowInstallScope MGS_LeaveInstallScope
 
 ; 4. Custom page to ask user if he wants to reinstall/uninstall
 ;    only if a previous installation was detected
-Var ReinstallPageCheck
-Page custom PageReinstall PageLeaveReinstall
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
+    Var ReinstallPageCheck
+    Page custom PageReinstall PageLeaveReinstall
+  !endif
+!ifndef MGS_MAIN_NATIVE_PACKAGE
 Function PageReinstall
   StrCmp $MGSMachineScope 1 0 +2
     Abort
@@ -403,6 +412,7 @@ Function PageLeaveReinstall
     ${EndIf}
   reinst_done:
 FunctionEnd
+!endif
 
 ; 5. Choose install directory page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE MGS_SkipOverlayDirectory
@@ -478,6 +488,9 @@ Var DeleteAppDataCheckboxState
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add add a `Delete app data` check box
+  !ifdef MGS_MAIN_NATIVE_PACKAGE
+    Return
+  !endif
   StrCmp $MGSMachineScope 1 0 +2
     Return
   ; $1 inner dialog HWND
@@ -510,6 +523,9 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
+  !ifdef MGS_MAIN_NATIVE_PACKAGE
+    Return
+  !endif
   StrCmp $MGSMachineScope 1 0 +2
     Return
   SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
@@ -678,6 +694,9 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
+  !ifdef MGS_MAIN_NATIVE_PACKAGE
+    !insertmacro MGS_InstallNativeProgram
+  !else
   SetOutPath $INSTDIR
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
@@ -697,6 +716,7 @@ Section Install
   {{#each binaries}}
     File /a "/oname={{this}}" "{{no-escape @key}}"
   {{/each}}
+  !endif
 
   ; Create file associations
   {{#each file_associations as |association| ~}}
@@ -714,7 +734,9 @@ Section Install
   {{/each}}
 
   ; Create uninstaller
-  WriteUninstaller "$INSTDIR\uninstall.exe"
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+  !endif
 
   ; Save $INSTDIR in registry for future installations
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR
@@ -725,11 +747,13 @@ Section Install
 
   ; Remove old main binary if it doesn't match new main binary name
   ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
   ${If} $MGSMachineScope != 1
   ${AndIf} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
     Delete "$INSTDIR\$OldMainBinaryName"
   ${EndIf}
+  !endif
 
   ; Save current MAINBINARYNAME for future updates
   WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "${MAINBINARYNAME}.exe"
@@ -821,6 +845,9 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
+  !ifdef MGS_MAIN_NATIVE_PACKAGE
+    !insertmacro MGS_RemoveNativeProgram
+  !else
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Delete the app directory and its content from disk
@@ -836,6 +863,7 @@ Section Uninstall
   {{#each binaries}}
     Delete "$INSTDIR\\{{this}}"
   {{/each}}
+  !endif
 
   ; Delete app associations
   {{#each file_associations as |association| ~}}
@@ -854,11 +882,13 @@ Section Uninstall
 
 
   ; Delete uninstaller
-  Delete "$INSTDIR\uninstall.exe"
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
+    Delete "$INSTDIR\uninstall.exe"
 
   {{#each resources_ancestors}}
   RMDir /REBOOTOK "$INSTDIR\\{{this}}"
   {{/each}}
+  !endif
   RMDir "$INSTDIR"
 
   ; Remove shortcuts if not updating
@@ -907,6 +937,7 @@ Section Uninstall
 
   ; Delete app data if the checkbox is selected
   ; and if not updating
+  !ifndef MGS_MAIN_NATIVE_PACKAGE
   ${If} $MGSMachineScope != 1
   ${AndIf} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
@@ -923,6 +954,7 @@ Section Uninstall
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}
+  !endif
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL
     !insertmacro NSIS_HOOK_POSTUNINSTALL

@@ -243,7 +243,7 @@ for (const scenario of ['registered', 'uninstall-fallback', 'missing-registratio
     writeFileSync(join(existing, 'cs2-insight-agent-desktop.exe'), 'fixture');
     const key = `Software\\MaxGameStudioInstallerTests\\${randomUUID()}`;
     const functions = hook.slice(hook.indexOf('Function MGS_'), hook.indexOf('Function CS2_AbortMigrationInstall'));
-    const preinstall = hook.split('!macro NSIS_HOOK_PREINSTALL')[1].split('  Call CS2_PrepareRunningApps')[0];
+    const preinstall = hook.split('!macro NSIS_HOOK_PREINSTALL')[1].split('  !ifndef MGS_MAIN_NATIVE_PACKAGE')[0];
     const registry = ['registered', 'explicit', 'manual-overlay'].includes(scenario)
       ? `WriteRegStr HKCU "${key}\\Product" "" "${existing}"`
       : scenario === 'stale-registration'
