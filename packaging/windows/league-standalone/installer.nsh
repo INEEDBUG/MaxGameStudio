@@ -91,6 +91,7 @@ Function LeagueRunForUser
   StrCpy $R1 $LeagueProgramPath
   StrCpy $R2 $LeagueDataPath
   StrCpy $R3 $installMode
+  StrCpy $R6 ""
   StrCpy $R7 "error"
   ${If} ${UAC_IsInnerInstance}
     !insertmacro UAC_AsUser_Call Function LeagueUserAction ${UAC_SYNCREGISTERS}
@@ -134,7 +135,17 @@ Function LeagueShowDestinationError
   ${ElseIf} $R7 == 6
     MessageBox MB_ICONEXCLAMATION "无法验证 Program Files 中的共用程序目录。请检查现有安装，或选择仅为我安装。" /SD IDOK
   ${Else}
-    MessageBox MB_ICONEXCLAMATION "无法验证工具箱安装。请选择独立的空目录，或确认当前安装的登记和文件完整。" /SD IDOK
+    StrCpy $0 "LG00"
+    ${If} $R6 == "LG01"
+    ${OrIf} $R6 == "LG02"
+    ${OrIf} $R6 == "LG03"
+    ${OrIf} $R6 == "LG04"
+    ${OrIf} $R6 == "LG05"
+      StrCpy $0 $R6
+    ${ElseIf} $R7 == "error"
+      StrCpy $0 "LGPS"
+    ${EndIf}
+    MessageBox MB_ICONEXCLAMATION "无法验证工具箱安装（$0）。请选择独立的空目录，或确认当前安装的登记和文件完整。" /SD IDOK
   ${EndIf}
 FunctionEnd
 
@@ -168,8 +179,10 @@ Function LeagueUserAction
   StrCpy $0 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
   IfFileExists "$0" +2 0
   StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
-  nsExec::Exec '"$0" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\mgs-league-destination.ps1"'
+  nsExec::ExecToStack '"$0" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\mgs-league-destination.ps1"'
   Pop $R7
+  Pop $R6
+  StrCpy $R6 $R6 4
 FunctionEnd
 
 Function LeagueDataPage
@@ -199,10 +212,10 @@ Function LeagueDataPage
     Quit
   ${endif}
   ${If} $installMode == "all"
-    StrCpy $1 "所有用户共用 Program Files 中的程序。每位用户的数据独立保存。"
+    StrCpy $LeagueProgramPath "$PROGRAMFILES64\MaxGameStudioLeagueToolbox"
+    StrCpy $1 "所有用户版的程序目录固定在 Program Files。个人数据单独保存。"
     IntOp $0 $LeagueIncompleteScopes & 16
     ${If} $0 != 0
-      StrCpy $LeagueProgramPath "$PROGRAMFILES64\MaxGameStudioLeagueToolbox"
       StrCpy $1 "旧版安装不完整。若共用程序目录仍有文件，请选择仅为我安装。"
     ${EndIf}
   ${Else}
@@ -219,12 +232,12 @@ Function LeagueDataPage
   Pop $0
   ${NSD_CreateDirRequest} 0 22u 76% 13u "$LeagueProgramPath"
   Pop $LeagueProgramEdit
-  ${NSD_CreateBrowseButton} 79% 21u 21% 15u "浏览..."
-  Pop $0
-  ${NSD_OnClick} $0 LeagueProgramBrowse
   ${If} $installMode == "all"
     EnableWindow $LeagueProgramEdit 0
-    EnableWindow $0 0
+  ${Else}
+    ${NSD_CreateBrowseButton} 79% 21u 21% 15u "浏览..."
+    Pop $0
+    ${NSD_OnClick} $0 LeagueProgramBrowse
   ${EndIf}
   ${If} $LeagueDeferUserData == "1"
     ${NSD_CreateLabel} 0 48u 100% 40u "当前管理员会话仅安装共用程序。请使用自己的 Windows 帐户正常启动，工具箱会继续使用该帐户的数据。"
@@ -261,8 +274,25 @@ Function LeagueDataBrowse
   ${endif}
 FunctionEnd
 
+Function LeagueSetProgramDirectory
+  ; NSIS GetFullPathName clears its output if the selected directory does not exist yet.
+  ; Keep the validated absolute path without creating it before the final check.
+  System::Call 'kernel32::GetFullPathNameW(w "$LeagueProgramPath", i ${NSIS_MAX_STRLEN}, w .r0, p 0) i.r1'
+  ${If} $1 == 0
+  ${OrIf} $1 >= ${NSIS_MAX_STRLEN}
+    StrCpy $R7 2
+    Return
+  ${EndIf}
+  StrCpy $INSTDIR $0
+  StrCpy $R7 0
+FunctionEnd
+
 Function LeagueDataLeave
-  ${NSD_GetText} $LeagueProgramEdit $LeagueProgramPath
+  ${If} $installMode == "all"
+    StrCpy $LeagueProgramPath "$PROGRAMFILES64\MaxGameStudioLeagueToolbox"
+  ${Else}
+    ${NSD_GetText} $LeagueProgramEdit $LeagueProgramPath
+  ${EndIf}
   ${If} $LeagueDeferUserData == "0"
     ${NSD_GetText} $LeagueDataEdit $LeagueDataPath
     ${If} $LeagueDataPath == ""
@@ -275,7 +305,11 @@ Function LeagueDataLeave
     Call LeagueShowDestinationError
     Abort
   ${EndIf}
-  GetFullPathName $INSTDIR "$LeagueProgramPath"
+  Call LeagueSetProgramDirectory
+  ${If} $R7 != 0
+    MessageBox MB_ICONEXCLAMATION "无法确定程序安装目录。请检查路径，或选择一个较短的本机目录。"
+    Abort
+  ${EndIf}
 FunctionEnd
 !macroend
 

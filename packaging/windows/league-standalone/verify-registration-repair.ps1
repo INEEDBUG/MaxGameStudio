@@ -119,24 +119,122 @@ function Assert-PreservedFixture([switch]$Machine) {
   if (!$Machine) { Assert-NoMachineRegistration }
 }
 
-function Assert-RecoveryWizard {
-  Add-Type -Path (Join-Path $PSScriptRoot '../tests/AllUsersInstallerNative.cs')
-  . (Join-Path $PSScriptRoot '../tests/fixture-process-stop.ps1')
-  $wizard = Start-Process -FilePath $Installer -ArgumentList '/currentuser' -PassThru
+Add-Type -Path (Join-Path $PSScriptRoot '../tests/AllUsersInstallerNative.cs')
+. (Join-Path $PSScriptRoot '../tests/fixture-process-stop.ps1')
+
+function Assert-RecoveryWizard([string]$Destination, [switch]$Machine) {
+  if ($Machine) {
+    if (!(Test-Path -LiteralPath $Destination -PathType Container) -or
+        (Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1)) {
+      throw 'Machine recovery requires the existing, empty Program Files fixture.'
+    }
+  } elseif (Test-Path -LiteralPath $Destination) {
+    throw 'The current-user recovery wizard must create a new program directory.'
+  }
+  $scope = if ($Machine) { '/allusers' } else { '/currentuser' }
+  $pageText = if ($Machine) {
+    '旧版安装不完整。若共用程序目录仍有文件'
+  } else {
+    '旧版安装不完整。请选择独立的空文件夹'
+  }
+  $wizard = Start-Process -FilePath $Installer -PassThru
   try {
+    $scopeLabel = if ($Machine) { '所有\s*(?:用户|人)' } else { '当前(?:登录)?用户|仅(?:为|限)?我|只(?:为|限)?我|仅限本人' }
+    $deadline = [DateTime]::UtcNow.AddSeconds(25)
+    $picked = $false
+    $advancedWelcome = $false
+    $advanced = $false
+    do {
+      if ($wizard.HasExited) { break }
+      $controls = [MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id)
+      $radio = @($controls | Where-Object { $_.Enabled -and $_.IsRadioButton -and ($_.Text -replace '&', '') -match $scopeLabel })
+      $next = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and ($_.Text -replace '&', '') -match '^下一步' })
+      if ($radio.Count -eq 1 -and $next.Count -eq 1) {
+        if ([MgsAllUsersNative]::CheckedState($radio[0].Handle) -eq 1) {
+          if (![MgsAllUsersNative]::Click($next[0].Handle)) { throw 'Could not advance from the scope page.' }
+          $advanced = $true
+          break
+        }
+        if (!$picked) { $picked = [MgsAllUsersNative]::Click($radio[0].Handle) }
+      } elseif (!$advancedWelcome -and $next.Count -eq 1 -and $controls.Text -match '欢迎') {
+        $advancedWelcome = [MgsAllUsersNative]::Click($next[0].Handle)
+      }
+      Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (!$advanced) { throw "The recovery wizard did not allow selecting $scope." }
+
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
       if ($wizard.HasExited) { break }
-      $texts = @([MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id) | ForEach-Object Text)
-      if (($texts -match '旧版安装不完整。请选择独立的空文件夹') -and $texts -ccontains $profileDir) {
-        Write-Host 'LEAGUE_RECOVERY_WIZARD_VERIFIED: Chinese directory page retained the selected data path.'
+      $controls = [MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id)
+      $installButton = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and ($_.Text -replace '&', '').Trim() -match '^安装(?:\([A-Z]\))?$' })
+      if ($installButton.Count -eq 1 -and $controls.Text -match $pageText) { break }
+      Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($wizard.HasExited -or $installButton.Count -ne 1 -or !($controls.Text -match $pageText)) {
+      throw "The $scope recovery wizard did not show its Chinese directory page."
+    }
+
+    $edits = @($controls | Where-Object IsEdit)
+    if ($Machine) {
+      $browse = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and $_.Text -match '^浏览' })
+      if ($edits.Count -ne 1 -or $edits[0].Enabled -or $edits[0].Text -cne $Destination -or $browse.Count) {
+        throw 'Machine recovery exposed a program folder picker or did not lock the dedicated Program Files directory.'
+      }
+    } else {
+      $program = @($edits | Where-Object { $_.Text -cne $profileDir })
+      if ($edits.Count -ne 2 -or $program.Count -ne 1 -or !$program[0].Enabled -or
+          ![MgsAllUsersNative]::SetEditText($program[0].Handle, $Destination)) {
+        throw 'User recovery did not retain the profile or accept the new program directory.'
+      }
+      $editTexts = @([MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id) | Where-Object IsEdit | ForEach-Object Text)
+      if ($editTexts -cnotcontains $Destination -or $editTexts -cnotcontains $profileDir) {
+        throw 'The directory page did not retain both requested paths.'
+      }
+    }
+    if ((!$Machine -and (Test-Path -LiteralPath $Destination)) -or
+        ![MgsAllUsersNative]::Click($installButton[0].Handle)) {
+      throw "Could not start the $scope recovery install."
+    }
+    Write-Host "LEAGUE_RECOVERY_WIZARD_INSTALL_CLICKED: $scope"
+
+    $confirmed = !$Machine
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
+    do {
+      if ($wizard.HasExited) { throw "The $scope recovery wizard exited before Finish with code $($wizard.ExitCode)." }
+      $controls = [MgsAllUsersNative]::VisibleControls([uint32]$wizard.Id)
+      $failure = $controls.Text -match '无法验证工具箱安装|无法验证 Program Files|工具箱程序文件不完整|无法完成启动用户的数据设置'
+      if ($failure) {
+        throw "The $scope recovery wizard reported an installation error before Finish. $($failure -join ' ')"
+      }
+      if (!$confirmed) {
+        $notice = @($controls | Where-Object { $_.Text -like '所有用户版已安装。个人数据设置及已有个人版均保留。*' })
+        if ($notice.Count -eq 1) {
+          $ok = @($controls | Where-Object { $_.Dialog -eq $notice[0].Dialog -and $_.IsButton -and $_.Enabled -and $_.Id -eq 1 })
+          if ($ok.Count -ne 1 -or ![MgsAllUsersNative]::Click($ok[0].Handle)) {
+            throw 'Could not acknowledge the all-users installation confirmation.'
+          }
+          $confirmed = $true
+        }
+      }
+      $finish = @($controls | Where-Object { $_.Enabled -and $_.IsButton -and ($_.Text -replace '&', '').Trim() -match '^完成(?:\([A-Z]\))?$' })
+      if ($confirmed -and $finish.Count -eq 1) {
+        $run = @($controls | Where-Object { $_.Dialog -eq $finish[0].Dialog -and $_.IsCheckBox -and ($_.Text -replace '&', '').Trim() -match '^运行' })
+        if ($run.Count -ne 1 -or ![MgsAllUsersNative]::ClearCheckBox($run[0].Handle) -or
+            ![MgsAllUsersNative]::Click($finish[0].Handle)) {
+          throw 'Could not clear the launch option and safely finish recovery.'
+        }
+        if (!$wizard.WaitForExit(15000)) { throw 'The recovery wizard did not exit after Finish.' }
+        if ($wizard.ExitCode -ne 0) { throw "The $scope recovery wizard returned $($wizard.ExitCode), expected 0." }
+        Write-Host "LEAGUE_RECOVERY_WIZARD_VERIFIED: $scope"
         return
       }
       Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'The recovery wizard did not show the directory page and existing profile.'
+    throw "Timed out waiting for the $scope recovery wizard to reach Finish."
   } finally {
-    Stop-CiFixtureProcess $wizard
+    if (!$wizard.HasExited) { Stop-CiFixtureProcess $wizard }
+    $wizard.Dispose()
   }
 }
 
@@ -159,7 +257,11 @@ Assert-PreservedFixture
 Write-Host 'LEAGUE_OLD_UNINSTALLER_FAILURE_VERIFIED'
 
 foreach ($scenario in @('MissingLocation', 'NonLeadingQuote', 'MissingExecutable')) {
-  $repaired = Join-Path $root "Repaired Toolbox $scenario"
+  $repaired = if ($scenario -eq 'MissingLocation') {
+    Join-Path $root 'New Program Parent\Repaired Toolbox'
+  } else {
+    Join-Path $root "Repaired Toolbox $scenario"
+  }
   $child = Join-Path $old 'New Child'
   if ($scenario -eq 'MissingLocation') {
     Remove-ItemProperty -LiteralPath $product -Name InstallLocation
@@ -190,7 +292,6 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote', 'MissingExecutable
     Write-Host "LEAGUE_BETA2_REGISTRATION_FAILURE_REPRODUCED: $scenario"
   }
   if ($scenario -eq 'MissingLocation') {
-    Assert-RecoveryWizard
     Invoke-FixtureInstaller $Installer '/S /currentuser' 2
     Invoke-FixtureInstaller $Installer "/S /currentuser --updated $destinationArgument" 2
   }
@@ -209,7 +310,11 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote', 'MissingExecutable
   }
   Assert-PreservedFixture
 
-  Invoke-FixtureInstaller $Installer "/S /currentuser $destinationArgument" 0
+  if ($scenario -eq 'MissingLocation') {
+    Assert-RecoveryWizard $repaired
+  } else {
+    Invoke-FixtureInstaller $Installer "/S /currentuser $destinationArgument" 0
+  }
   Assert-RegisteredProgram $repaired $candidateVersion
   if ($candidateVersion -cne $baselineVersion -and
       (Get-FileHash -LiteralPath (Join-Path $repaired 'resources\app.asar')).Hash -ceq $saved[$oldArchive]) {
@@ -247,7 +352,7 @@ if ([IO.File]::ReadAllText($occupied) -ne 'keep' -or (Test-Path -LiteralPath (Jo
   throw 'The rejected repair touched an occupied machine directory.'
 }
 [IO.File]::Delete($occupied)
-Invoke-FixtureInstaller $Installer "/S /allusers /D=$machineDir" 0
+Assert-RecoveryWizard $machineDir -Machine
 Assert-RegisteredProgram $machineDir $candidateVersion -Machine
 Assert-PreservedFixture -Machine
 $programBytes = (Get-ChildItem -LiteralPath $machineDir -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum

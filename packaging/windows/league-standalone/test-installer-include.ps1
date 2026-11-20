@@ -59,6 +59,21 @@ Function .onInit
 
   SetOutPath $INSTDIR
   StrCpy $installMode "CurrentUser"
+  ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_PATH_HANDOFF"
+  ${If} $0 == "1"
+    StrCpy $LeagueProgramPath $INSTDIR
+    StrCpy $INSTDIR ""
+    Call LeagueSetProgramDirectory
+    ${If} $R7 != 0
+    ${OrIf} $INSTDIR != $LeagueProgramPath
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+    StrCpy $LeagueProgramPath $INSTDIR
+    Call LeagueValidateDestination
+    SetErrorLevel $R7
+    Quit
+  ${EndIf}
   ReadEnvStr $0 "MGS_LEAGUE_FIXTURE_MACHINE"
   ${If} $0 == "check"
     StrCpy $LeagueProgramPath $INSTDIR
@@ -119,6 +134,14 @@ try {
   }
   $env:MGS_LEAGUE_FIXTURE_MACHINE = $null
   Write-Host 'League NSIS machine bridge approved the protected default without creating a directory.'
+  $uncreated = Join-Path $scratch 'Not Created\Nested Toolbox'
+  $env:MGS_LEAGUE_FIXTURE_PATH_HANDOFF = '1'
+  $checked = Start-Process -FilePath $out -ArgumentList '/S', "/D=$uncreated" -WindowStyle Hidden -Wait -PassThru
+  $env:MGS_LEAGUE_FIXTURE_PATH_HANDOFF = $null
+  if ($checked.ExitCode -ne 0 -or (Test-Path -LiteralPath (Split-Path -Parent $uncreated))) {
+    throw 'A new program directory must survive the wizard handoff without being created before validation.'
+  }
+  Write-Host 'League NSIS preserved a not-yet-created program directory through the final check.'
   $occupied = Join-Path $scratch 'wrong-folder'
   $empty = Join-Path $scratch 'empty-program'
   $overlap = Join-Path $main 'Overlapping Toolbox'
@@ -155,6 +178,7 @@ try {
   Write-Host 'League NSIS accepted an independent directory, blocked protected paths, and refused registration when the copied EXE was missing.'
 } finally {
   $env:MGS_LEAGUE_FIXTURE_MACHINE = $null
+  $env:MGS_LEAGUE_FIXTURE_PATH_HANDOFF = $null
   $env:MGS_LEAGUE_FIXTURE_CHECK_PAYLOAD = $null
   $env:APPDATA = $originalAppData
   $env:USERPROFILE = $originalUserProfile

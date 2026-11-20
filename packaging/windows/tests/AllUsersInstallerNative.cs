@@ -40,12 +40,17 @@ public static class MgsAllUsersNative
     private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")]
+    private static extern int GetDlgCtrlID(IntPtr window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr parameter,
         StringBuilder text, uint flags, uint milliseconds, out IntPtr result);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
     private static extern IntPtr SendMessageTimeoutValue(IntPtr window, uint message, IntPtr parameter,
         IntPtr data, uint flags, uint milliseconds, out IntPtr result);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern IntPtr SendMessageTimeoutText(IntPtr window, uint message, IntPtr parameter,
+        string text, uint flags, uint milliseconds, out IntPtr result);
     [DllImport("user32.dll")]
     private static extern bool PostMessage(IntPtr window, uint message, IntPtr parameter, IntPtr data);
 
@@ -86,8 +91,12 @@ public static class MgsAllUsersNative
     public sealed class Control
     {
         public IntPtr Handle { get; set; }
+        public IntPtr Dialog { get; set; }
+        public int Id { get; set; }
         public string Text { get; set; }
         public bool IsButton { get; set; }
+        public bool IsEdit { get; set; }
+        public bool IsCheckBox { get; set; }
         public bool Enabled { get; set; }
         public bool IsRadioButton { get; set; }
     }
@@ -102,16 +111,20 @@ public static class MgsAllUsersNative
             EnumChildWindows(window, (child, unused) =>
             {
                 if (!IsWindowVisible(child)) return true;
-                var text = new StringBuilder(2048);
-                if (SendMessageTimeout(child, 0x000D, new IntPtr(text.Capacity), text, 2, 250, out _) == IntPtr.Zero
-                    || text.Length == 0) return true;
                 var className = new StringBuilder(64);
                 GetClassName(child, className, className.Capacity);
-                bool isButton = className.ToString() == "Button";
+                string kind = className.ToString();
+                bool isButton = kind == "Button";
+                bool isEdit = kind == "Edit";
+                var text = new StringBuilder(2048);
+                if (SendMessageTimeout(child, 0x000D, new IntPtr(text.Capacity), text, 2, 250, out _) == IntPtr.Zero
+                    || (text.Length == 0 && !isEdit)) return true;
                 int buttonStyle = GetWindowLong(child, -16) & 0x0f;
                 controls.Add(new Control {
-                    Handle = child, Text = text.ToString(), IsButton = isButton,
+                    Handle = child, Dialog = window, Id = GetDlgCtrlID(child), Text = text.ToString(),
+                    IsButton = isButton, IsEdit = isEdit,
                     Enabled = IsWindowEnabled(child),
+                    IsCheckBox = isButton && (buttonStyle == 2 || buttonStyle == 3 || buttonStyle == 5 || buttonStyle == 6),
                     IsRadioButton = isButton && (buttonStyle == 4 || buttonStyle == 9)
                 });
                 return true;
@@ -123,10 +136,18 @@ public static class MgsAllUsersNative
 
     public static bool Click(IntPtr button) => PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero);
 
+    public static bool SetEditText(IntPtr edit, string text) =>
+        SendMessageTimeoutText(edit, 0x000C, IntPtr.Zero, text, 2, 500, out IntPtr result) != IntPtr.Zero
+        && result != IntPtr.Zero;
+
+    public static bool ClearCheckBox(IntPtr button) =>
+        SendMessageTimeoutValue(button, 0x00F1, IntPtr.Zero, IntPtr.Zero, 2, 500, out _) != IntPtr.Zero
+        && CheckedState(button) == 0;
+
     public static int CheckedState(IntPtr button)
     {
         IntPtr success = SendMessageTimeoutValue(button, 0x00F0, IntPtr.Zero, IntPtr.Zero, 2, 500, out IntPtr state);
-        if (success == IntPtr.Zero) throw new InvalidOperationException("Could not read the installer radio state.");
+        if (success == IntPtr.Zero) throw new InvalidOperationException("Could not read the installer button state.");
         return state.ToInt32();
     }
 }

@@ -259,5 +259,13 @@ try {
   if ($incomplete[$scope]) { exit 5 }
   exit 0
 } catch {
+  # Return an installer support code without copying registry contents or paths into the dialog.
+  switch -Exact ($_.Exception.Message) {
+    'Invalid local directory.' { Write-Output 'LG01' }
+    'Directory overlap.' { Write-Output 'LG02' }
+    'New program folder is not empty.' { Write-Output 'LG03' }
+    'New data folder is not empty.' { Write-Output 'LG04' }
+    'League registration does not own the selected executable.' { Write-Output 'LG05' }
+  }
   exit 2
 }
