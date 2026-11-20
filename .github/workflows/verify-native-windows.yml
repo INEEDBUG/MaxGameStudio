@@ -170,14 +170,5 @@ jobs:
             $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
             $expected = if ($path -eq $pair.Installer) { $pair.CandidateSha256 } else { $pair.LeagueCandidateSha256 }
             if ($hash -cne $expected) { throw 'A verified installer changed during the run.' }
-            "$hash *$(Split-Path -Leaf $path)" | Set-Content -LiteralPath "$path.sha256" -Encoding ascii
+            Write-Host "NATIVE_SMOKE_PACKAGE_VERIFIED: $(Split-Path -Leaf $path) sha256=$hash source=$env:GITHUB_SHA"
           }
-          $env:GITHUB_SHA | Set-Content -LiteralPath (Join-Path $out 'source-commit.txt') -Encoding ascii
-
-      - name: Keep the verified internal smoke inputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-windows-smoke-${{ github.sha }}
-          path: ${{ runner.temp }}/mgs-native-candidates/*
-          if-no-files-found: error
-          retention-days: 7
