@@ -53,6 +53,7 @@ function patchScopeTemplates(templates) {
       '!insertmacro registryAddInstallInfo',
     ].join('\n'))
   writeFileSync(section, patchedSection, 'utf8')
+  patchInstallUtilities(join(templates, 'include', 'installUtil.nsh'))
   patchNativeUninstaller(join(templates, 'uninstaller.nsh'))
   patchExtractionRetries(join(templates, 'include', 'extractAppPackage.nsh'))
   for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
@@ -76,6 +77,18 @@ function patchScopeTemplates(templates) {
     }
     writeFileSync(path, localized, 'utf8')
   }
+}
+
+function patchInstallUtilities(path) {
+  const original = readFileSync(path, 'utf8')
+  const oldPathHelpers = /^Function GetInQuotes\r?\n[\s\S]*?^Function GetFileParent\r?\n[\s\S]*?^FunctionEnd(?=\r?$)/gm
+  const oldUninstaller = /^!macro readReg VAR ROOT_KEY SUB_KEY NAME\r?\n[\s\S]*?^!macro uninstallOldVersion ROOT_KEY\r?\n[\s\S]*?^!macroend(?=\r?$)/gm
+  for (const anchor of [oldPathHelpers, oldUninstaller]) {
+    if ([...original.matchAll(anchor)].length !== 1) throw new Error('Expected the pinned League old-uninstaller utilities.')
+  }
+  // The copy and shortcut macros are still used by the native installer.
+  const electronOnly = (match) => '!ifndef MGS_LEAGUE_NATIVE_PACKAGE\n' + match + '\n!endif'
+  writeFileSync(path, original.replace(oldPathHelpers, electronOnly).replace(oldUninstaller, electronOnly), 'utf8')
 }
 
 function patchNativeUninstaller(path) {

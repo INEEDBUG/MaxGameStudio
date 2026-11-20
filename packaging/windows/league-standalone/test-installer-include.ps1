@@ -20,6 +20,9 @@ $nativeInputs = @('prior-program-hashes.json', 'MicrosoftEdgeWebview2Setup.exe',
 foreach ($name in $nativeInputs) { [IO.File]::WriteAllText((Join-Path $scratch $name), 'compile-only fixture') }
 $script = Join-Path $scratch 'include-test.nsi'
 $out = Join-Path $scratch 'include-test.exe'
+$patchedTemplates = Join-Path $scratch 'stock-nsis'
+$strictScript = Join-Path $scratch 'strict-install-util.nsi'
+$strictOutput = Join-Path $scratch 'strict-install-util.exe'
 $originalAppData = $env:APPDATA
 $originalUserProfile = $env:USERPROFILE
 $env:APPDATA = Join-Path $scratch 'fixture-appdata'
@@ -35,9 +38,13 @@ InstallDir "$TEMP\MaxGameStudioLeagueIncludeTest"
 !addplugindir "${LEAGUE_PLUGINS}"
 !include "LogicLib.nsh"
 !include "UAC.nsh"
+!ifndef BUILD_UNINSTALLER
 Var installMode
 Var hasPerUserInstallation
 Var hasPerMachineInstallation
+!else ifdef MGS_LEAGUE_NATIVE_PACKAGE
+Var installMode
+!endif
 !define UNINSTALL_FILENAME "Fixture-Uninstall.exe"
 !macro installApplicationFiles
 !macroend
@@ -62,6 +69,7 @@ Function .onInit
   Quit
 FunctionEnd
 Section "Uninstall"
+  StrCpy $installMode "CurrentUser"
   !insertmacro customRemoveFiles
 SectionEnd
 !endif
@@ -132,8 +140,47 @@ try {
   $launcher = Join-Path $PSScriptRoot 'run-league-nsis.cjs'
   node -e "const fs = require('node:fs'); const { patchInstallerTemplate } = require(process.argv[1]); const script = process.argv[2]; fs.writeFileSync(script, patchInstallerTemplate(fs.readFileSync(script, 'utf8')));" $launcher $script
   if ($LASTEXITCODE -ne 0) { throw 'Could not patch the NSIS test startup template.' }
+  node -e "const fs = require('node:fs'); fs.cpSync(process.argv[2], process.argv[3], { recursive: true }); require(process.argv[1]).patchScopeTemplates(process.argv[3]);" $launcher (Split-Path -Parent $headers) $patchedTemplates
+  if ($LASTEXITCODE -ne 0) { throw 'Could not patch the pinned League template fixtures.' }
+  [IO.File]::WriteAllText($strictScript, @'
+Unicode true
+RequestExecutionLevel user
+Name "League strict install utility fixture"
+OutFile "${LEAGUE_OUTPUT}"
+!addplugindir "${LEAGUE_PLUGINS}"
+!include "LogicLib.nsh"
+!include "${LEAGUE_TEMPLATES}\include\StdUtils.nsh"
+!define isDeleteAppData '"" == "1"'
+!define UNINSTALL_REGISTRY_KEY "Software\MaxGameStudioInstallerTests\Fixture"
+!define INSTALL_REGISTRY_KEY "Software\MaxGameStudioInstallerTests\Fixture"
+Var installMode
+Var appExe
+LangString uninstallFailed 1033 "fixture"
+LangString appCannotBeClosed 1033 "fixture"
+!include "${LEAGUE_TEMPLATES}\include\installUtil.nsh"
+Section
+  StrCpy $installMode "CurrentUser"
+  StrCpy $appExe "$TEMP\fixture.exe"
+  !insertmacro setIsTryToKeepShortcuts
+  DetailPrint "$installMode $appExe $isTryToKeepShortcuts"
+  !ifndef MGS_LEAGUE_NATIVE_PACKAGE
+    !insertmacro uninstallOldVersion SHELL_CONTEXT
+    !insertmacro handleUninstallResult SHELL_CONTEXT
+  !endif
+SectionEnd
+'@)
+  foreach ($mode in 'native', 'electron') {
+    $flags = @('/V2', '/WX', "/DLEAGUE_OUTPUT=$strictOutput", "/DLEAGUE_PLUGINS=$plugins", "/DLEAGUE_TEMPLATES=$patchedTemplates")
+    if ($mode -eq 'native') { $flags += '/DMGS_LEAGUE_NATIVE_PACKAGE' }
+    & $compiler @flags $strictScript
+    if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $strictOutput -PathType Leaf)) {
+      throw "Pinned League install utilities failed warnings-as-errors in $mode mode."
+    }
+    Remove-Item -LiteralPath $strictOutput
+    Write-Host "Pinned League install utilities passed warnings-as-errors in $mode mode."
+  }
   foreach ($mode in @('native-uninstaller', 'native-installer', 'uninstaller', 'installer')) {
-    $flags = @('/V2', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out", "/DLEAGUE_HEADERS=$headers", "/DLEAGUE_PLUGINS=$plugins")
+    $flags = @('/V2', '/WX', "/DLEAGUE_CUSTOM_NSIS=$include", "/DLEAGUE_OUTPUT=$out", "/DLEAGUE_HEADERS=$headers", "/DLEAGUE_PLUGINS=$plugins")
     if ($mode -like 'native-*') { $flags += '/DMGS_LEAGUE_NATIVE_PACKAGE' }
     if ($mode -like '*uninstaller') { $flags += '/DBUILD_UNINSTALLER' }
     & $compiler @flags $script
@@ -210,6 +257,16 @@ try {
     if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
   }
   if (Test-Path -LiteralPath $out -PathType Leaf) { Remove-Item -LiteralPath $out }
+  foreach ($file in $strictScript, $strictOutput) {
+    if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
+  }
+  if (Test-Path -LiteralPath $patchedTemplates -PathType Container) {
+    $templateItem = Get-Item -LiteralPath $patchedTemplates -Force
+    if ($templateItem.FullName -ne (Join-Path $scratch 'stock-nsis') -or $templateItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+      throw 'Unexpected strict template fixture path.'
+    }
+    [IO.Directory]::Delete($templateItem.FullName, $true)
+  }
   Remove-Item -LiteralPath $script
   foreach ($name in 'installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1', 'maxgamestudio-runtime-hashes.json') {
     Remove-Item -LiteralPath (Join-Path $scratch $name)
