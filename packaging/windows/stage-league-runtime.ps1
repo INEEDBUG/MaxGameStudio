@@ -773,11 +773,22 @@ try {
     }
     # Keep this staging script ASCII-only for Windows PowerShell 5.1. Build
     # the Chinese labels from code points instead of embedding them literally.
-    $zhCloseLeagueWorkspace = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
+    $closeTitle = if ($Standalone) { 'Close League Toolbox' } else { 'Close League Workspace' }
+    $closeActionLabel = if ($Standalone) { 'Toolbox Close Action' } else { 'League Workspace Close Action' }
+    $closeDescription = if ($Standalone) { 'The action to take when closing the League toolbox' } else { 'The action to take when closing the League workspace' }
+    $closeQuitLabel = if ($Standalone) { 'Exit Toolbox' } else { 'Return to MaxGameStudio' }
+    $zhLeagueProduct = if ($Standalone) {
+      & $makeUnicodeText @(0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x5177, 0x7BB1)
+    } else {
+      & $makeUnicodeText @(0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0)
+    }
+    $zhCloseLeagueWorkspace = (& $makeUnicodeText @(0x5173, 0x95ED)) + $zhLeagueProduct
     $zhHideToSystemTray = & $makeUnicodeText @(0x9690, 0x85CF, 0x5230, 0x7CFB, 0x7EDF, 0x6258, 0x76D8)
     $zhReturnToMaxGameStudio = (& $makeUnicodeText @(0x8FD4, 0x56DE)) + ' MaxGameStudio'
-    $zhLeagueWorkspaceCloseAction = & $makeUnicodeText @(0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x5173, 0x95ED, 0x884C, 0x4E3A)
-    $zhCloseLeagueWorkspaceDescription = & $makeUnicodeText @(0x5173, 0x95ED, 0x82F1, 0x96C4, 0x8054, 0x76DF, 0x5DE5, 0x4F5C, 0x53F0, 0x65F6, 0x6267, 0x884C, 0x7684, 0x64CD, 0x4F5C)
+    $zhStandaloneQuit = & $makeUnicodeText @(0x5F7B, 0x5E95, 0x5173, 0x95ED)
+    $zhCloseQuitLabel = if ($Standalone) { $zhStandaloneQuit } else { $zhReturnToMaxGameStudio }
+    $zhLeagueWorkspaceCloseAction = $zhLeagueProduct + (& $makeUnicodeText @(0x5173, 0x95ED, 0x884C, 0x4E3A))
+    $zhCloseLeagueWorkspaceDescription = $zhCloseLeagueWorkspace + (& $makeUnicodeText @(0x65F6, 0x6267, 0x884C, 0x7684, 0x64CD, 0x4F5C))
     $zhQuitCommonAppName = (& $makeUnicodeText @(0x9000, 0x51FA)) + ' $t(common:appName)'
     $zhMinimizeToTray = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x5230, 0x6258, 0x76D8, 0x533A)
     $zhMinimizeToTraySettings = & $makeUnicodeText @(0x6700, 0x5C0F, 0x5316, 0x5230, 0x6258, 0x76D8)
@@ -785,25 +796,25 @@ try {
     $zhMainWindowCloseAction = & $makeUnicodeText @(0x4E3B, 0x7A97, 0x53E3, 0x5173, 0x95ED, 0x7B56, 0x7565)
     $zhMainWindowCloseDescription = & $makeUnicodeText @(0x5F53, 0x5173, 0x95ED, 0x4E3B, 0x7A97, 0x53E3, 0x65F6, 0x6240, 0x6267, 0x884C, 0x7684, 0x884C, 0x4E3A)
     $zhAskEveryTime = & $makeUnicodeText @(0x6BCF, 0x6B21, 0x8BE2, 0x95EE)
-    Replace-TextExactlyOnce $shellEnglishPath "    title: Quit `$t(common:appName)" "    title: Close League Workspace"
+    Replace-TextExactlyOnce $shellEnglishPath "    title: Quit `$t(common:appName)" "    title: $closeTitle"
     Replace-TextExactlyOnce $shellEnglishPath "      minimize-to-tray: Minimize to tray" "      minimize-to-tray: Hide to system tray"
-    Replace-TextExactlyOnce $shellEnglishPath "      quit: Quit" "      quit: Return to MaxGameStudio"
+    Replace-TextExactlyOnce $shellEnglishPath "      quit: Quit" "      quit: $closeQuitLabel"
     Replace-TextExactlyOnce $shellChinesePath ("    title: " + $zhQuitCommonAppName) ("    title: " + $zhCloseLeagueWorkspace)
     Replace-TextExactlyOnce $shellChinesePath ("      minimize-to-tray: " + $zhMinimizeToTray) ("      minimize-to-tray: " + $zhHideToSystemTray)
-    Replace-TextExactlyOnce $shellChinesePath ("      quit: " + $zhQuitApplication) ("      quit: " + $zhReturnToMaxGameStudio)
-    Replace-TextExactlyOnce $settingsEnglishPath "        label: Main Window Close Action" "        label: League Workspace Close Action"
-    Replace-TextExactlyOnce $settingsEnglishPath "        description: The action to be executed when the main window is closed" "        description: The action to take when closing the League workspace"
+    Replace-TextExactlyOnce $shellChinesePath ("      quit: " + $zhQuitApplication) ("      quit: " + $zhCloseQuitLabel)
+    Replace-TextExactlyOnce $settingsEnglishPath "        label: Main Window Close Action" "        label: $closeActionLabel"
+    Replace-TextExactlyOnce $settingsEnglishPath "        description: The action to be executed when the main window is closed" "        description: $closeDescription"
     Replace-TextExactlyOnce $settingsEnglishPath "          minimize-to-tray: Minimize to tray" "          minimize-to-tray: Hide to system tray"
-    Replace-TextExactlyOnce $settingsEnglishPath "          quit: Quit" "          quit: Return to MaxGameStudio"
+    Replace-TextExactlyOnce $settingsEnglishPath "          quit: Quit" "          quit: $closeQuitLabel"
     Replace-TextExactlyOnce $settingsChinesePath ("        label: " + $zhMainWindowCloseAction) ("        label: " + $zhLeagueWorkspaceCloseAction)
     Replace-TextExactlyOnce $settingsChinesePath ("        description: " + $zhMainWindowCloseDescription) ("        description: " + $zhCloseLeagueWorkspaceDescription)
     Replace-TextExactlyOnce $settingsChinesePath ("          minimize-to-tray: " + $zhMinimizeToTraySettings) ("          minimize-to-tray: " + $zhHideToSystemTray)
-    Replace-TextExactlyOnce $settingsChinesePath ("          quit: " + $zhQuitApplication) ("          quit: " + $zhReturnToMaxGameStudio)
+    Replace-TextExactlyOnce $settingsChinesePath ("          quit: " + $zhQuitApplication) ("          quit: " + $zhCloseQuitLabel)
     $closeCopyContracts = @(
-      @{ Path = $shellEnglishPath; Values = @('Close League Workspace', 'Hide to system tray', 'Return to MaxGameStudio') }
-      @{ Path = $settingsEnglishPath; Values = @('League Workspace Close Action', 'Hide to system tray', 'Return to MaxGameStudio', 'Ask every time') }
-      @{ Path = $shellChinesePath; Values = @($zhCloseLeagueWorkspace, $zhHideToSystemTray, $zhReturnToMaxGameStudio) }
-      @{ Path = $settingsChinesePath; Values = @($zhLeagueWorkspaceCloseAction, $zhCloseLeagueWorkspaceDescription, $zhHideToSystemTray, $zhReturnToMaxGameStudio, $zhAskEveryTime) }
+      @{ Path = $shellEnglishPath; Values = @($closeTitle, 'Hide to system tray', $closeQuitLabel) }
+      @{ Path = $settingsEnglishPath; Values = @($closeActionLabel, 'Hide to system tray', $closeQuitLabel, 'Ask every time') }
+      @{ Path = $shellChinesePath; Values = @($zhCloseLeagueWorkspace, $zhHideToSystemTray, $zhCloseQuitLabel) }
+      @{ Path = $settingsChinesePath; Values = @($zhLeagueWorkspaceCloseAction, $zhCloseLeagueWorkspaceDescription, $zhHideToSystemTray, $zhCloseQuitLabel, $zhAskEveryTime) }
     )
     foreach ($contract in $closeCopyContracts) {
       $closeCopyText = Get-Content -LiteralPath $contract.Path -Raw -Encoding utf8

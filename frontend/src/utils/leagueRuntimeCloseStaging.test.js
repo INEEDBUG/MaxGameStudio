@@ -104,6 +104,22 @@ describe("embedded League runtime close staging contract", () => {
     expect(stagingScript).toContain("$makeUnicodeText");
   });
 
+  it("chooses toolbox exit copy for the standalone build and keeps the embedded option", () => {
+    expect(stagingScript).toContain(
+      "$closeQuitLabel = if ($Standalone) { 'Exit Toolbox' } else { 'Return to MaxGameStudio' }",
+    );
+    expect(stagingScript).toContain(
+      "$zhStandaloneQuit = & $makeUnicodeText @(0x5F7B, 0x5E95, 0x5173, 0x95ED)",
+    );
+    expect(stagingScript).toContain(
+      "$zhCloseQuitLabel = if ($Standalone) { $zhStandaloneQuit } else { $zhReturnToMaxGameStudio }",
+    );
+    expect(stagingScript).toContain('"      quit: $closeQuitLabel"');
+    expect(stagingScript).toContain('"          quit: $closeQuitLabel"');
+    expect(stagingScript).toContain('("      quit: " + $zhCloseQuitLabel)');
+    expect(stagingScript).toContain('("          quit: " + $zhCloseQuitLabel)');
+  });
+
   pinnedIntegrationTest(
     "executes the pinned main-window close branches with hide, ask, and quit behavior",
     () => {

@@ -359,6 +359,24 @@ Write-Host ('LEAGUE_REPAIR_SIZE: ' + (@{
 # With complete registration, the same installer takes the ordinary update path.
 Invoke-FixtureInstaller $Installer '/S /allusers --updated' 0
 Assert-RegisteredProgram $machineDir $candidateVersion -Machine
+
+# Exercise the exact installed executable without opening the data-preservation
+# fixture. Use a disposable profile and restore the original locator bytes.
+$closeProfile = Join-Path $root 'Close Behavior Profile'
+[IO.Directory]::CreateDirectory($closeProfile) | Out-Null
+$locatorBytes = [IO.File]::ReadAllBytes($locator)
+try {
+  [IO.File]::WriteAllText($locator, $closeProfile, [Text.Encoding]::Unicode)
+  node (Join-Path $PSScriptRoot 'verify-close.mjs') (Join-Path $machineDir $programName) $closeProfile
+  if ($LASTEXITCODE -ne 0) { throw 'Packaged toolbox close verification failed.' }
+} finally {
+  [IO.File]::WriteAllBytes($locator, $locatorBytes)
+}
+$remaining = @(Get-Process -Name 'MaxGameStudioLeagueToolbox' -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -ieq (Join-Path $machineDir $programName) })
+if ($remaining -or (Get-Process -Name 'cs2-insight-agent-desktop' -ErrorAction SilentlyContinue)) {
+  throw 'Closing the League toolbox left its own process running or opened MaxGameStudio.'
+}
 Invoke-FixtureInstaller (Join-Path $machineDir $removeName) '/S /allusers' 0
 if ((Test-Path -LiteralPath $machineDir) -or (Test-Path -LiteralPath $product) -or (Test-Path -LiteralPath $arp)) {
   throw 'Machine repair, update or removal left a program or changed the current-user registration.'
