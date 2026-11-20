@@ -3,7 +3,7 @@
 use crate::{
     client_discovery::{discover_clients, ClientInstance, LocalClient},
     desktop::emit,
-    lcu::{LcuError, LcuTransport},
+    lcu::{player_search::PlayerSearchShard, LcuError, LcuTransport},
     resg_window::{ResgAction, ResgWindow},
 };
 pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
@@ -12,6 +12,7 @@ use std::{sync::Mutex, time::Duration};
 use tauri::{AppHandle, Manager};
 
 const CLIENT_DISCOVERY: &str = "league-client-ux-main";
+const SGP: &str = "sgp-main";
 
 #[derive(Default, PartialEq)]
 struct Snapshot {
@@ -26,6 +27,7 @@ struct ActiveClient {
     session: Value,
     summoner: Value,
     resg: Option<ResgTarget>,
+    shard: Option<PlayerSearchShard>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,13 +37,12 @@ pub(crate) struct ResgTarget {
     pub(crate) champion_id: u32,
 }
 
-fn client_identity(instance: ClientInstance) -> Value {
-    // The lockfile is local and does not identify the Riot or Tencent shard.
+fn client_identity(instance: ClientInstance, shard: Option<&PlayerSearchShard>) -> Value {
     json!({
         "pid": instance.pid,
         "processCreationTime": instance.created_at.to_string(),
-        "region": "",
-        "rsoPlatformId": "",
+        "region": shard.map_or("", |shard| shard.region.as_str()),
+        "rsoPlatformId": shard.map_or("", |shard| shard.rso_platform.as_str()),
     })
 }
 
@@ -55,13 +56,17 @@ pub(crate) fn client_from_view(value: &Value) -> Option<ClientInstance> {
 impl Snapshot {
     fn fields(&self, namespace: &str, name: &str) -> Option<Value> {
         let active = self.active.as_ref();
+        let shard = active.and_then(|client| client.shard.as_ref());
         match (namespace, name) {
             (CLIENT_DISCOVERY, "state") => Some(json!({
-                "launchedClients": self.known_clients.iter().copied().map(client_identity).collect::<Vec<_>>(),
+                "launchedClients": self.known_clients.iter().copied().map(|instance| {
+                    let known_shard = active.filter(|client| client.instance == instance).and(shard);
+                    client_identity(instance, known_shard)
+                }).collect::<Vec<_>>(),
             })),
             (CLIENT, "state") => Some(json!({
                 "connectionState": if active.is_some() { "connected" } else { "disconnected" },
-                "auth": active.map(|client| client_identity(client.instance)),
+                "auth": active.map(|client| client_identity(client.instance, shard)),
                 "connectingClient": null,
             })),
             (CLIENT, "gameflow") => Some(json!({
@@ -69,16 +74,27 @@ impl Snapshot {
                 "session": active.map(|client| &client.session),
             })),
             (CLIENT, "summoner") => Some(json!({"me": active.map(|client| &client.summoner)})),
+            (SGP, "state") => Some(json!({
+                "availability": {
+                    "region": shard.map_or("", |shard| shard.region.as_str()),
+                    "rsoPlatform": shard.map_or("", |shard| shard.rso_platform.as_str()),
+                    "sgpServerId": shard.map_or("", |shard| shard.sgp_server_id.as_str()),
+                    "serversSupported": { "matchHistory": false, "common": false },
+                },
+                "isTokenReady": false, "supportedQueues": [],
+                "connectionSuccessesCounted": 0, "connectionFailuresCounted": 0,
+            })),
             _ => None,
         }
     }
 }
 
-const PUBLIC_STATES: [(&str, &str); 4] = [
+const PUBLIC_STATES: [(&str, &str); 5] = [
     (CLIENT_DISCOVERY, "state"),
     (CLIENT, "state"),
     (CLIENT, "gameflow"),
     (CLIENT, "summoner"),
+    (SGP, "state"),
 ];
 
 #[derive(Default)]
@@ -129,6 +145,59 @@ impl ClientRuntime {
         self.wake.notify_one();
     }
 
+    pub(crate) async fn lookup_player(&self, shard: &str, input: &str) -> Result<Value, String> {
+        let (instance, own_puuid, generation) = {
+            let state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+            let active = state
+                .snapshot
+                .active
+                .as_ref()
+                .ok_or("请启动并登录英雄联盟客户端。")?;
+            let own_puuid = active.summoner["puuid"]
+                .as_str()
+                .ok_or("请登录英雄联盟客户端后查询。")?;
+            if active
+                .shard
+                .as_ref()
+                .is_none_or(|active| active.sgp_server_id != shard)
+            {
+                return Err("当前区服不可用，请检查客户端登录状态。".to_owned());
+            }
+            (active.instance, own_puuid.to_owned(), state.generation)
+        };
+        let local = tauri::async_runtime::spawn_blocking(move || {
+            discover_clients()
+                .ok()?
+                .into_iter()
+                .find(|client| client.instance == instance)
+        })
+        .await
+        .map_err(|_| "无法读取当前客户端。")?
+        .ok_or("客户端已退出，请重新连接。")?;
+        let target = local.target().map_err(|error| error.to_string())?;
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            self.transport
+                .lookup_player(&target, &own_puuid, Some(shard), input),
+        )
+        .await
+        .map_err(|_| "玩家查询超时，请重试。")?
+        .map_err(|error| error.to_string())?;
+        let state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
+        let same_account = state.snapshot.active.as_ref().is_some_and(|active| {
+            active.instance == instance
+                && active.summoner["puuid"].as_str() == Some(own_puuid.as_str())
+                && active
+                    .shard
+                    .as_ref()
+                    .is_some_and(|current| current.sgp_server_id == shard)
+        });
+        if state.generation != generation || !same_account || !local.alive() {
+            return Err("客户端或登录账号已变更，请重新查询。".to_owned());
+        }
+        serde_json::to_value(result).map_err(|error| error.to_string())
+    }
+
     pub(crate) fn set_auto_connect(&self, enabled: bool) -> Result<(), &'static str> {
         let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
         if state.auto_connect != enabled {
@@ -169,6 +238,7 @@ impl ClientRuntime {
         client: &LocalClient,
         resg_enabled: bool,
         previous_chart: Option<ResgTarget>,
+        previous_shard: Option<(String, PlayerSearchShard)>,
     ) -> Result<Option<ActiveClient>, LcuError> {
         if !client.alive() {
             return Ok(None);
@@ -183,6 +253,23 @@ impl ClientRuntime {
             .read_gameflow_session(&target)
             .await?
             .filter(|session| session.phase == phase);
+        let mut shard = None;
+        if let Some(player) = summoner.as_ref() {
+            shard = if let Some((_, shard)) =
+                previous_shard.filter(|(puuid, _)| *puuid == player.puuid)
+            {
+                Some(shard)
+            } else {
+                tokio::time::timeout(
+                    Duration::from_millis(550),
+                    self.transport
+                        .read_player_search_shard(&target, &player.puuid),
+                )
+                .await
+                .ok()
+                .and_then(Result::ok)
+            };
+        }
         let mut resg = None;
         if let Some(game) = session
             .as_ref()
@@ -228,11 +315,12 @@ impl ClientRuntime {
             session: json!(session),
             summoner: json!(summoner),
             resg,
+            shard,
         }))
     }
 
     async fn refresh(&self, app: &AppHandle, resg_enabled: bool) {
-        let (generation, manual, connected, auto_connect, previous_chart) = {
+        let (generation, manual, connected, auto_connect, previous_chart, previous_shard) = {
             let Ok(state) = self.state.lock() else {
                 return;
             };
@@ -246,6 +334,12 @@ impl ClientRuntime {
                     .active
                     .as_ref()
                     .and_then(|client| client.resg),
+                state.snapshot.active.as_ref().and_then(|client| {
+                    Some((
+                        client.summoner["puuid"].as_str()?.to_owned(),
+                        client.shard.clone()?,
+                    ))
+                }),
             )
         };
         let clients = tauri::async_runtime::spawn_blocking(discover_clients)
@@ -264,7 +358,12 @@ impl ClientRuntime {
         let active = match candidate {
             Some(client) => tokio::time::timeout(
                 Duration::from_secs(4),
-                self.sample(client, resg_enabled, previous_chart),
+                self.sample(
+                    client,
+                    resg_enabled,
+                    previous_chart,
+                    previous_shard.filter(|_| Some(client.instance) == connected),
+                ),
             )
             .await
             .ok()

@@ -314,6 +314,14 @@ async fn league_call(
         }
         return Ok(response(update_call(&window, &method, &args).await));
     }
+    if namespace == "player-search-main" && method == "lookup" && window.label() == "main" {
+        let [shard, input] = args.as_slice() else {
+            return Err("缺少玩家查询条件。".into());
+        };
+        let shard = shard.as_str().ok_or("缺少区服。")?;
+        let input = input.as_str().ok_or("缺少玩家名称和标签。")?;
+        return Ok(response(client.lookup_player(shard, input).await));
+    }
     let app = window.app_handle();
     let invoke = || -> Result<Value, Box<dyn std::error::Error>> {
         match (namespace.as_str(), method.as_str()) {

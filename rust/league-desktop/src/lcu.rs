@@ -40,6 +40,9 @@ XWehWA==
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 
+#[path = "player_search.rs"]
+pub(crate) mod player_search;
+
 /// Borrow the port and token that trusted desktop discovery verified for the same client generation.
 pub(crate) struct LcuTarget<'a> {
     port: NonZeroU16,
