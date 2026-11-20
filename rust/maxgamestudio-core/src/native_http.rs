@@ -6,6 +6,7 @@ mod demo_open;
 mod demo_query;
 mod demo_radar;
 mod demo_watch;
+mod recordings;
 mod replay_body;
 
 use crate::{
@@ -356,6 +357,7 @@ enum Route {
     Demos(DemoRoute),
     ReplayBinary,
     ReplayCache,
+    Recordings(recordings::Route),
 }
 
 impl Route {
@@ -372,7 +374,9 @@ impl Route {
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
             "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
-            _ if has_profile => DemoRoute::from_path(path).map(Self::Demos),
+            _ if has_profile => DemoRoute::from_path(path)
+                .map(Self::Demos)
+                .or_else(|| recordings::Route::from_path(path).map(Self::Recordings)),
             _ => None,
         }
     }
@@ -458,6 +462,14 @@ async fn route(
                 state.profile.as_ref().expect("profile route"),
                 request,
                 extended_request,
+            )
+            .await
+        }
+        Route::Recordings(route) => {
+            recordings::read(
+                state.profile.as_ref().expect("profile route"),
+                route,
+                request,
             )
             .await
         }

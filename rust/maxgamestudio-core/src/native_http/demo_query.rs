@@ -163,6 +163,17 @@ pub(super) fn parse_discovered(query: &str) -> Result<DemoPage, Vec<Value>> {
     }
 }
 
+pub(super) fn parse_clip_page(query: &str) -> Result<(i64, i64), Vec<Value>> {
+    let mut query = Query::new(query);
+    let limit = query.integer("limit", 1, Some(1000)).unwrap_or(300);
+    let offset = query.integer("offset", 0, None).unwrap_or(0);
+    if query.errors.is_empty() {
+        Ok((limit, offset))
+    } else {
+        Err(query.errors)
+    }
+}
+
 struct Query<'a> {
     values: HashMap<Cow<'a, str>, Cow<'a, str>>,
     errors: Vec<Value>,

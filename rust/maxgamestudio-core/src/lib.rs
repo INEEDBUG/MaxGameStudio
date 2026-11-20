@@ -6,9 +6,13 @@ pub mod gsi_ready;
 #[cfg(feature = "native-http")]
 pub mod native_http;
 #[cfg(feature = "native-http")]
+mod obs_wire;
+#[cfg(feature = "native-http")]
 mod profile_config;
 #[cfg(feature = "native-http")]
 mod profile_platform;
+#[cfg(feature = "native-http")]
+mod recorded_clips;
 #[cfg(feature = "native-http")]
 mod replay_cache;
 #[cfg(feature = "native-http")]

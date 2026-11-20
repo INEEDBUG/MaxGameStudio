@@ -72,6 +72,10 @@ impl ProfileConfig {
         self.path.with_file_name("cs2-insight.db")
     }
 
+    pub(crate) fn obs_settings(&self) -> io::Result<crate::obs_wire::ObsSettings> {
+        serde_json::from_value(self.read(false)?["obs"].take()).map_err(io::Error::from)
+    }
+
     pub(crate) fn view(&self) -> io::Result<Value> {
         let mut data = self.read(true)?;
         mask(&mut data["llm"]["api_key"], 0, 4, "****");
