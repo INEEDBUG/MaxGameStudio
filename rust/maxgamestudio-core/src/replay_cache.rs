@@ -1,14 +1,14 @@
 //! Look up the shipped whole-match replay cache without creating or rebuilding it.
 
 use crate::{
-    profile_platform::path_text,
+    profile_platform::{path_text, resolved_path},
     replay_packet::{replay_parquet_binary_packet, MAX_SAMPLE_TICKS},
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{self, Read},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -18,6 +18,139 @@ pub(crate) const REQUIRED_PARSER_VERSION: &str = "0.41.4+cs2insight7";
 const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
 const CURRENT_CACHE: &str = "cache/demo-replay/matches";
 const LEGACY_CACHE: &str = "replay-match";
+
+#[derive(Clone, Copy, Default)]
+struct CacheUsage {
+    files: u64,
+    bytes: u64,
+}
+
+impl CacheUsage {
+    fn add(&mut self, other: Self) {
+        self.files = self.files.saturating_add(other.files);
+        self.bytes = self.bytes.saturating_add(other.bytes);
+    }
+
+    fn as_json(self) -> Value {
+        json!({"files": self.files, "bytes": self.bytes})
+    }
+}
+
+pub(crate) fn cache_summary(data: &Path) -> io::Result<Value> {
+    let namespaces = [
+        ("matches", CURRENT_CACHE, LEGACY_CACHE),
+        ("frames", "cache/demo-replay/rounds", "replay-frames"),
+        (
+            "effects",
+            "cache/demo-replay/effects",
+            "replay-effects-cache",
+        ),
+    ];
+    let mut details = serde_json::Map::new();
+    let mut total = CacheUsage::default();
+    let mut total_legacy = CacheUsage::default();
+    for (namespace, current, legacy) in namespaces {
+        let current = data.join(current);
+        let legacy = data.join(legacy);
+        let old_usage = directory_usage(&legacy)?;
+        let aliases = fs::canonicalize(&current)
+            .ok()
+            .zip(fs::canonicalize(&legacy).ok())
+            .is_some_and(|(current, legacy)| {
+                path_text(&current).eq_ignore_ascii_case(&path_text(&legacy))
+            });
+        let usage = if aliases {
+            old_usage
+        } else {
+            let mut usage = directory_usage(&current)?;
+            usage.add(old_usage);
+            usage
+        };
+        details.insert(namespace.to_owned(), usage.as_json());
+        total.add(usage);
+        total_legacy.add(old_usage);
+    }
+    Ok(json!({
+        "path": path_text(&resolved_path(&data.join("cache/demo-replay"))?),
+        "persistent": true,
+        "files": total.files,
+        "bytes": total.bytes,
+        "legacy_files": total_legacy.files,
+        "legacy_bytes": total_legacy.bytes,
+        "namespaces": details,
+    }))
+}
+
+fn directory_usage(path: &Path) -> io::Result<CacheUsage> {
+    let files = match fs::read_dir(path) {
+        Ok(files) => files,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(CacheUsage::default());
+        }
+        Err(error) => return Err(error),
+    };
+    let mut usage = CacheUsage::default();
+    for entry in files {
+        let entry = entry?;
+        // A cache file may vanish while a window closes. Skip it and do not descend into folders.
+        match fs::metadata(entry.path()) {
+            Ok(info) if info.is_file() => usage.add(CacheUsage {
+                files: 1,
+                bytes: info.len(),
+            }),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(usage)
+}
+
+#[cfg(test)]
+mod cache_usage_tests {
+    use super::*;
+
+    #[test]
+    fn counts_flat_current_and_legacy_replay_namespaces_without_creating_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let data = fixture.path().join("Existing Profile");
+        let matches = data.join(CURRENT_CACHE);
+        let legacy_effects = data.join("replay-effects-cache");
+        fs::create_dir_all(matches.join("ignored-directory")).unwrap();
+        fs::create_dir_all(&legacy_effects).unwrap();
+        fs::write(matches.join("synthetic.parquet"), [0; 5]).unwrap();
+        fs::write(matches.join("synthetic.meta.json"), [0; 7]).unwrap();
+        fs::write(matches.join("ignored-directory/unknown.bin"), [0; 32]).unwrap();
+        fs::write(legacy_effects.join("effects.json"), [0; 11]).unwrap();
+        fs::write(data.join("unrelated-profile.json"), [0; 64]).unwrap();
+
+        let summary = cache_summary(&data).unwrap();
+        assert_eq!(summary["files"], 3);
+        assert_eq!(summary["bytes"], 23);
+        assert_eq!(summary["legacy_files"], 1);
+        assert_eq!(summary["legacy_bytes"], 11);
+        assert_eq!(
+            summary["namespaces"],
+            json!({
+                "matches": {"files": 2, "bytes": 12},
+                "frames": {"files": 0, "bytes": 0},
+                "effects": {"files": 1, "bytes": 11},
+            })
+        );
+        assert!(!data.join("cache/demo-replay/rounds").exists());
+        assert_eq!(
+            fs::metadata(data.join("unrelated-profile.json"))
+                .unwrap()
+                .len(),
+            64
+        );
+    }
+}
 
 pub(crate) struct ReplayRequest {
     pub path: String,

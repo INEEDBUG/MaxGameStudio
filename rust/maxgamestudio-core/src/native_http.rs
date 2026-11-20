@@ -11,7 +11,7 @@ use crate::{
     gsi_ready::GsiReady,
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
-    replay_cache::{load_packet, ReplayCacheError, REQUIRED_PARSER_VERSION},
+    replay_cache::{cache_summary, load_packet, ReplayCacheError, REQUIRED_PARSER_VERSION},
     runtime_session::RuntimeSession,
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
     wire_json::json_decode_error,
@@ -341,6 +341,7 @@ enum Route {
     RuntimeState,
     Demos(DemoRoute),
     ReplayBinary,
+    ReplayCache,
 }
 
 impl Route {
@@ -356,6 +357,7 @@ impl Route {
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
+            "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
             _ if has_profile => DemoRoute::from_path(path).map(Self::Demos),
             _ => None,
         }
@@ -660,6 +662,7 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
             Route::FfmpegCheck => config.ffmpeg_check(),
             Route::DataDirInfo => data_dir_info(config.data_dir()),
             Route::BackupStatus => backup_status(config.data_dir()),
+            Route::ReplayCache => cache_summary(config.data_dir()),
             _ => unreachable!("profile read route"),
         };
         match result {
