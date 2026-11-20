@@ -1,5 +1,5 @@
 use crate::{
-    demo_library::{DemoListKind, DemoListQuery},
+    demo_library::{DemoListKind, DemoListQuery, DemoPage},
     wire_json::integer_from_text,
 };
 use percent_encoding::percent_decode_str;
@@ -12,8 +12,12 @@ const INTEGER_MESSAGE: &str =
 
 pub(super) enum DemoRoute {
     List(DemoListKind),
+    Discovered,
+    Stream,
+    InspectPath,
     Detail,
     PlayerStats,
+    Remark,
 }
 
 impl DemoRoute {
@@ -23,13 +27,14 @@ impl DemoRoute {
             "/api/demos" => Some(Self::List(DemoListKind::Full)),
             "/api/demos/compact" => Some(Self::List(DemoListKind::Compact)),
             "/api/demos/ids" => Some(Self::List(DemoListKind::Ids)),
+            "/api/demos/discovered" => Some(Self::Discovered),
+            "/api/demos/stream" => Some(Self::Stream),
+            "/api/demos/watch-path/inspect" => Some(Self::InspectPath),
             _ => {
                 let rest = path.strip_prefix("/api/demos/")?;
                 if matches!(
                     rest,
-                    "" | "stream"
-                        | "discovered"
-                        | "scan"
+                    "" | "scan"
                         | "sync-match-times"
                         | "batch-resolve-players"
                         | "batch-summary"
@@ -39,6 +44,7 @@ impl DemoRoute {
                 }
                 match rest.split_once('/') {
                     Some((id, "player-stats")) if !id.is_empty() => Some(Self::PlayerStats),
+                    Some((id, "remark")) if !id.is_empty() => Some(Self::Remark),
                     Some(_) => None,
                     None => Some(Self::Detail),
                 }
@@ -75,16 +81,8 @@ pub(super) fn parse_list(query: &str, kind: DemoListKind) -> Result<DemoListQuer
     } else {
         200
     };
-    let mut params = Query {
-        // Like Starlette, the last value wins if a key is sent more than once.
-        values: form_urlencoded::parse(query.as_bytes()).collect(),
-        errors: Vec::new(),
-    };
-    let limit = params
-        .integer("limit", 1, Some(1000))
-        .unwrap_or(default_limit);
-    let offset = params.integer("offset", 0, None).unwrap_or_default();
-    let q = params.trimmed("q", 200);
+    let mut params = Query::new(query);
+    let page = params.page(default_limit);
     let map_names = csv(
         params.text("map_names", 4000).as_deref(),
         params.text("map_name", 200).as_deref(),
@@ -120,9 +118,7 @@ pub(super) fn parse_list(query: &str, kind: DemoListKind) -> Result<DemoListQuer
     }
     Ok(DemoListQuery {
         kind,
-        limit,
-        offset,
-        q,
+        page,
         map_names,
         statuses,
         min_kills,
@@ -142,12 +138,40 @@ pub(super) fn parse_list(query: &str, kind: DemoListKind) -> Result<DemoListQuer
     })
 }
 
+pub(super) fn parse_discovered(query: &str) -> Result<DemoPage, Vec<Value>> {
+    let mut params = Query::new(query);
+    let page = params.page(200);
+    if params.errors.is_empty() {
+        Ok(page)
+    } else {
+        Err(params.errors)
+    }
+}
+
 struct Query<'a> {
     values: HashMap<Cow<'a, str>, Cow<'a, str>>,
     errors: Vec<Value>,
 }
 
-impl Query<'_> {
+impl<'a> Query<'a> {
+    fn new(query: &'a str) -> Self {
+        Self {
+            // Like Starlette, the last value wins if a key is sent more than once.
+            values: form_urlencoded::parse(query.as_bytes()).collect(),
+            errors: Vec::new(),
+        }
+    }
+
+    fn page(&mut self, default_limit: i64) -> DemoPage {
+        DemoPage {
+            limit: self
+                .integer("limit", 1, Some(1000))
+                .unwrap_or(default_limit),
+            offset: self.integer("offset", 0, None).unwrap_or_default(),
+            q: self.trimmed("q", 200),
+        }
+    }
+
     fn text(&mut self, key: &str, max_length: usize) -> Option<String> {
         let input = self.values.get(key)?.as_ref();
         if input.chars().count() > max_length {

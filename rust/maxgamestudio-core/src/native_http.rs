@@ -1,9 +1,12 @@
 //! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
+mod demo_body;
+mod demo_events;
 mod demo_query;
+mod demo_watch;
 
 use crate::{
-    demo_library::{DemoLibrary, DemoReadError},
+    demo_library::{DemoEdit, DemoLibrary, DemoReadError},
     gsi_ready::GsiReady,
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
@@ -11,15 +14,17 @@ use crate::{
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
     wire_json::json_decode_error,
 };
+use demo_events::DemoEvents;
 use demo_query::DemoRoute;
 use futures_util::future::{select, Either};
-use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full, LengthLimitError, Limited};
 use hyper::{
     body::{Body, Bytes, Incoming},
     header::{
         HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
         ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS,
-        ACCESS_CONTROL_REQUEST_METHOD, ALLOW, CONTENT_TYPE, LOCATION, ORIGIN, VARY,
+        ACCESS_CONTROL_REQUEST_METHOD, ALLOW, CACHE_CONTROL, CONNECTION, CONTENT_TYPE, LOCATION,
+        ORIGIN, VARY,
     },
     server::conn::http1,
     service::service_fn,
@@ -33,7 +38,10 @@ use std::{
     io,
     net::{Ipv4Addr, TcpListener},
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -58,7 +66,8 @@ const ALLOWED_ORIGINS: &[&str] = &[
 ];
 const PREFLIGHT_METHODS: &[&str] = &["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"];
 
-type HttpResponse = Response<Full<Bytes>>;
+type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
+type HttpResponse = Response<HttpBody>;
 
 struct State {
     version: String,
@@ -84,6 +93,7 @@ struct ProfileState {
     instance_id: String,
     session: RuntimeSession,
     disk: Arc<Semaphore>,
+    demo_events: DemoEvents,
 }
 
 pub struct NativeHttpServer {
@@ -114,6 +124,7 @@ impl NativeHttpServer {
             instance_id: profile.instance_id.trim().to_owned(),
             session: RuntimeSession::default(),
             disk: Arc::new(Semaphore::new(1)),
+            demo_events: DemoEvents::new(),
         };
         Self::bind_inner(port, version, Some(Arc::new(state)))
     }
@@ -146,6 +157,9 @@ impl NativeHttpServer {
     pub async fn serve(self, shutdown: impl Future<Output = ()>) -> io::Result<()> {
         let listener = tokio::net::TcpListener::from_std(self.listener)?;
         let (stop_connections, _) = watch::channel(false);
+        let publisher = self.state.profile.as_ref().map(|profile| {
+            tokio::spawn(profile.demo_events.publisher(stop_connections.subscribe()))
+        });
         let mut connections = JoinSet::new();
         let mut shutdown = Box::pin(shutdown);
         let result = loop {
@@ -174,6 +188,9 @@ impl NativeHttpServer {
         if timeout(DRAIN_LIMIT, drain).await.is_err() {
             connections.shutdown().await;
         }
+        if let Some(publisher) = publisher {
+            let _ = publisher.await;
+        }
         result
     }
 }
@@ -183,19 +200,37 @@ async fn serve_connection(
     state: Arc<State>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let service = service_fn(move |request| {
-        let state = Arc::clone(&state);
-        async move { Ok::<_, Infallible>(respond(&state, request).await) }
+    let stream_open = AtomicBool::new(false);
+    let stop_body = shutdown.clone();
+    let service = service_fn(|request| {
+        let state = &state;
+        let stream_open = &stream_open;
+        let stop = stop_body.clone();
+        async move {
+            let mut response = respond(state, request, stop).await;
+            if response
+                .headers()
+                .get(CONTENT_TYPE)
+                .is_some_and(|value| value == demo_events::CONTENT_TYPE)
+            {
+                stream_open.store(true, Ordering::Relaxed);
+            } else {
+                response
+                    .headers_mut()
+                    .insert(CONNECTION, HeaderValue::from_static("close"));
+            }
+            Ok::<_, Infallible>(response)
+        }
     });
     let mut connection = Box::pin(
         http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(CONNECTION_LIMIT)
             .max_buf_size(MAX_HEADER_BYTES)
-            .keep_alive(false)
+            .keep_alive(true)
             .serve_connection(TokioIo::new(stream), service),
     );
-    let serve = async {
+    let mut serve = Box::pin(async {
         let stopping = matches!(
             select(connection.as_mut(), Box::pin(shutdown.changed())).await,
             Either::Right(_)
@@ -204,11 +239,18 @@ async fn serve_connection(
             connection.as_mut().graceful_shutdown();
             let _ = connection.await;
         }
-    };
-    let _ = timeout(CONNECTION_LIMIT, serve).await;
+    });
+    // Only authenticated, admitted EventSource responses outlive the request deadline.
+    if timeout(CONNECTION_LIMIT, &mut serve).await.is_err() && stream_open.load(Ordering::Relaxed) {
+        serve.await;
+    }
 }
 
-async fn respond(state: &State, request: Request<Incoming>) -> HttpResponse {
+async fn respond(
+    state: &State,
+    request: Request<Incoming>,
+    shutdown: watch::Receiver<bool>,
+) -> HttpResponse {
     let origin = request.headers().get(ORIGIN).cloned();
     if let (Some(origin), Some(method)) = (
         origin
@@ -218,7 +260,7 @@ async fn respond(state: &State, request: Request<Incoming>) -> HttpResponse {
     ) {
         return preflight(origin, method, request.headers());
     }
-    let mut response = route(state, request).await;
+    let mut response = route(state, request, shutdown).await;
     if let Some(origin) = origin.filter(allowed_origin) {
         response
             .headers_mut()
@@ -315,7 +357,11 @@ impl Route {
     }
 }
 
-async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
+async fn route(
+    state: &State,
+    request: Request<Incoming>,
+    shutdown: watch::Receiver<bool>,
+) -> HttpResponse {
     let path = request.uri().path();
     let has_profile = state.profile.is_some();
     let Some(route) = Route::from_path(path, has_profile) else {
@@ -334,7 +380,7 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
             return Response::builder()
                 .status(StatusCode::TEMPORARY_REDIRECT)
                 .header(LOCATION, location)
-                .body(Full::new(Bytes::new()))
+                .body(Full::new(Bytes::new()).boxed_unsync())
                 .expect("loopback redirect");
         }
         return detail(StatusCode::NOT_FOUND, "Not Found");
@@ -350,13 +396,15 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
             return detail(StatusCode::UNAUTHORIZED, "Desktop session required");
         }
     }
-    let allowed = if matches!(route, Route::Gsi) {
-        "POST"
-    } else {
-        "GET"
+    let allowed = match route {
+        Route::Gsi | Route::Demos(DemoRoute::InspectPath) => "POST",
+        Route::Demos(DemoRoute::Remark) => "PATCH",
+        _ => "GET",
     };
     let config_update = matches!(route, Route::Config) && request.method() == Method::PUT;
-    if request.method().as_str() != allowed && !config_update {
+    let demo_rename =
+        matches!(route, Route::Demos(DemoRoute::Detail)) && request.method() == Method::PATCH;
+    if request.method().as_str() != allowed && !config_update && !demo_rename {
         let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
         response
             .headers_mut()
@@ -375,6 +423,7 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
                 state.profile.as_ref().expect("profile route"),
                 route,
                 request,
+                shutdown,
             )
             .await
         }
@@ -386,44 +435,102 @@ async fn demo_response(
     profile: &Arc<ProfileState>,
     route: DemoRoute,
     request: Request<Incoming>,
+    shutdown: watch::Receiver<bool>,
 ) -> HttpResponse {
     match route {
+        DemoRoute::Stream => {
+            let Some(body) = profile.demo_events.stream(shutdown) else {
+                return detail(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Demo library event stream limit reached",
+                );
+            };
+            Response::builder()
+                .header(CONTENT_TYPE, demo_events::CONTENT_TYPE)
+                .header(CACHE_CONTROL, "no-store, no-transform")
+                .header(CONNECTION, "keep-alive")
+                .header("x-accel-buffering", "no")
+                .body(body)
+                .expect("valid event stream response")
+        }
         DemoRoute::List(kind) => {
             let query =
                 match demo_query::parse_list(request.uri().query().unwrap_or_default(), kind) {
                     Ok(query) => query,
-                    Err(errors) => {
-                        return json_reply(
-                            StatusCode::UNPROCESSABLE_ENTITY,
-                            json!({"detail": errors}),
-                        )
-                    }
+                    Err(errors) => return validation_reply(errors),
                 };
-            profile_disk(profile, move |config| {
-                match DemoLibrary::new(config.database_path()).list(query) {
-                    Ok(value) => json_reply(StatusCode::OK, value),
-                    Err(error) => demo_read_error(&error),
-                }
+            profile_disk(profile, move |profile| {
+                demo_data(DemoLibrary::new(profile.config.database_path()).list(query))
             })
             .await
         }
-        DemoRoute::Detail | DemoRoute::PlayerStats => {
+        DemoRoute::Discovered => {
+            let page = match demo_query::parse_discovered(request.uri().query().unwrap_or_default())
+            {
+                Ok(page) => page,
+                Err(errors) => return validation_reply(errors),
+            };
+            profile_disk(profile, move |profile| {
+                demo_data(DemoLibrary::new(profile.config.database_path()).discovered(page))
+            })
+            .await
+        }
+        DemoRoute::InspectPath => {
+            let input = match model_body(request, "Demo watch request body is too large").await {
+                Ok(value) => value,
+                Err(response) => return *response,
+            };
+            let (path, depth) = match demo_body::watch_path(input) {
+                Ok(args) => args,
+                Err(errors) => return validation_reply(errors),
+            };
+            profile_disk(profile, move |_| {
+                json_reply(StatusCode::OK, demo_watch::inspect(&path, depth))
+            })
+            .await
+        }
+        DemoRoute::Detail | DemoRoute::PlayerStats | DemoRoute::Remark => {
             let id = match demo_query::parse_id(request.uri().path()) {
                 Ok(id) => id,
-                Err(errors) => {
-                    return json_reply(StatusCode::UNPROCESSABLE_ENTITY, json!({"detail": errors}))
-                }
+                Err(errors) => return validation_reply(errors),
             };
-            profile_disk(profile, move |config| {
-                let library = DemoLibrary::new(config.database_path());
-                let result = if matches!(route, DemoRoute::Detail) {
-                    library.detail(id)
+            let edit = if request.method() == Method::PATCH {
+                let input = match model_body(request, "Demo edit request body is too large").await {
+                    Ok(value) => value,
+                    Err(response) => return *response,
+                };
+                let edit = if matches!(route, DemoRoute::Remark) {
+                    demo_body::metadata(input, "remark", 2000).map(DemoEdit::Remark)
                 } else {
-                    library.player_stats(id)
+                    demo_body::metadata(input, "display_name", 512).map(DemoEdit::DisplayName)
+                };
+                match edit {
+                    Ok(edit) => Some(edit),
+                    Err(errors) => return validation_reply(errors),
+                }
+            } else {
+                None
+            };
+            profile_disk(profile, move |profile| {
+                let library = DemoLibrary::new(profile.config.database_path());
+                let changing = edit.is_some();
+                let result = match edit {
+                    Some(edit) => library.edit(id, edit),
+                    None if matches!(route, DemoRoute::PlayerStats) => library.player_stats(id),
+                    None => library.detail(id),
                 };
                 match result {
-                    Ok(Some(value)) => json_reply(StatusCode::OK, value),
+                    Ok(Some(value)) => {
+                        if changing {
+                            profile.demo_events.changed();
+                        }
+                        json_reply(StatusCode::OK, value)
+                    }
                     Ok(None) => detail(StatusCode::NOT_FOUND, &format!("Demo not found: {id}")),
+                    Err(error) if changing => {
+                        eprintln!("Native Demo library edit failed: {error}");
+                        server_error()
+                    }
                     Err(error) => demo_read_error(&error),
                 }
             })
@@ -432,19 +539,34 @@ async fn demo_response(
     }
 }
 
+fn demo_data(result: Result<Value, DemoReadError>) -> HttpResponse {
+    match result {
+        Ok(value) => json_reply(StatusCode::OK, value),
+        Err(error) => demo_read_error(&error),
+    }
+}
+
 fn demo_read_error(error: &DemoReadError) -> HttpResponse {
     eprintln!("Native Demo library read failed: {error}");
     if matches!(error, DemoReadError::InvalidFullResult) {
-        return reply(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "text/plain; charset=utf-8",
-            "Internal Server Error".to_owned(),
-        );
+        return server_error();
     }
     detail(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Demo library database is unreadable",
     )
+}
+
+fn server_error() -> HttpResponse {
+    reply(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "text/plain; charset=utf-8",
+        "Internal Server Error".to_owned(),
+    )
+}
+
+fn validation_reply(errors: Vec<Value>) -> HttpResponse {
+    json_reply(StatusCode::UNPROCESSABLE_ENTITY, json!({"detail": errors}))
 }
 
 async fn profile_route(state: &State, route: Route, request: Request<Incoming>) -> HttpResponse {
@@ -472,20 +594,19 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
         );
     }
     if request.method() == Method::PUT {
-        let input = match config_body(request).await {
+        let input = match model_body(request, "Configuration request body is too large").await {
             Ok(input) => input,
             Err(response) => return *response,
         };
-        return profile_disk(profile, move |config| match config.update(input) {
+        return profile_disk(profile, move |profile| match profile.config.update(input) {
             Ok(()) => json_reply(StatusCode::OK, json!({"status": "ok"})),
-            Err(ConfigUpdateError::Validation(errors)) => {
-                json_reply(StatusCode::UNPROCESSABLE_ENTITY, json!({"detail": errors}))
-            }
+            Err(ConfigUpdateError::Validation(errors)) => validation_reply(errors),
             Err(ConfigUpdateError::Storage(error)) => profile_io_error(&error),
         })
         .await;
     }
-    profile_disk(profile, move |config| {
+    profile_disk(profile, move |profile| {
+        let config = &profile.config;
         let result = match route {
             Route::Config => config.view(),
             Route::QuickCheck => config.quick_check(),
@@ -504,7 +625,7 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
 
 async fn profile_disk(
     profile: &Arc<ProfileState>,
-    operation: impl FnOnce(&ProfileConfig) -> HttpResponse + Send + 'static,
+    operation: impl FnOnce(&ProfileState) -> HttpResponse + Send + 'static,
 ) -> HttpResponse {
     // Keep file work bounded even if a connection times out while an I/O operation is in progress.
     let permit = Arc::clone(&profile.disk)
@@ -514,7 +635,7 @@ async fn profile_disk(
     let profile = Arc::clone(profile);
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        operation(&profile.config)
+        operation(&profile)
     })
     .await
     {
@@ -543,15 +664,14 @@ fn is_json(header: Option<&HeaderValue>) -> bool {
     })
 }
 
-async fn config_body(request: Request<Incoming>) -> Result<Value, Box<HttpResponse>> {
+async fn model_body(
+    request: Request<Incoming>,
+    too_large: &str,
+) -> Result<Value, Box<HttpResponse>> {
     let is_json = is_json(request.headers().get(CONTENT_TYPE));
-    let bytes = read_body(
-        request.into_body(),
-        "Configuration request body is too large",
-    )
-    .await?;
+    let bytes = read_body(request.into_body(), too_large).await?;
     if bytes.is_empty() {
-        return Err(Box::new(missing_config_body()));
+        return Err(Box::new(missing_model_body()));
     }
     let text = std::str::from_utf8(&bytes).map_err(|_| Box::new(invalid_body()))?;
     if !is_json {
@@ -559,13 +679,13 @@ async fn config_body(request: Request<Incoming>) -> Result<Value, Box<HttpRespon
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match serde_json::from_str::<Value>(text) {
-        Ok(Value::Null) => Err(Box::new(missing_config_body())),
+        Ok(Value::Null) => Err(Box::new(missing_model_body())),
         Ok(value) => Ok(value),
         Err(error) => Err(Box::new(invalid_json(text, &error))),
     }
 }
 
-fn missing_config_body() -> HttpResponse {
+fn missing_model_body() -> HttpResponse {
     json_reply(
         StatusCode::UNPROCESSABLE_ENTITY,
         json!({"detail": [
@@ -659,6 +779,6 @@ fn reply(status: StatusCode, content_type: &'static str, body: String) -> HttpRe
     Response::builder()
         .status(status)
         .header(CONTENT_TYPE, content_type)
-        .body(Full::new(Bytes::from(body)))
+        .body(Full::new(Bytes::from(body)).boxed_unsync())
         .expect("valid response")
 }

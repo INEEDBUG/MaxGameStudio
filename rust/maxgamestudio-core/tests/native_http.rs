@@ -60,7 +60,8 @@ impl RunningServer {
             .env("CS2_INSIGHT_SESSION_TOKEN", "synthetic-token")
             .env_remove("CS2_INSIGHT_DATA_DIR")
             .env_remove("CS2_INSIGHT_CONFIG")
-            .env_remove("CS2_INSIGHT_BUNDLE_DATA_DIR");
+            .env_remove("CS2_INSIGHT_BUNDLE_DATA_DIR")
+            .env_remove("CS2_INSIGHT_LIBRARY_SSE_DEBOUNCE_SEC");
         if let Some((data, bundle)) = profile {
             command
                 .env("CS2_INSIGHT_DATA_DIR", data)
@@ -432,20 +433,11 @@ fn demo_library_matches_release_routes_from_readonly_wal_database() {
     let profile_config = config_home.join("settings.json");
     let path = config_home.join("cs2-insight.db");
     let wal = config_home.join("cs2-insight.db-wal");
-    let fixture: Value =
-        serde_json::from_str(include_str!("fixtures/demo_library_http.json")).unwrap();
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
         .pragma_update(None, "journal_mode", "WAL")
         .unwrap();
-    for statement in fixture["schema"].as_array().unwrap() {
-        connection
-            .execute_batch(statement.as_str().unwrap())
-            .unwrap();
-    }
-    connection
-        .execute_batch(include_str!("fixtures/demo_library_seed.sql"))
-        .unwrap();
+    let fixture = seed_demo_library(&connection);
     let before = fs::read(&path).unwrap();
     let wal_before = fs::read(&wal).unwrap();
     let server = RunningServer::launch_with_config(
@@ -488,7 +480,33 @@ fn demo_library_matches_release_routes_from_readonly_wal_database() {
     let (status, committed) = profile_request(&server, "GET", "/api/demos/ids", &Value::Null, true);
     assert_eq!(status, 200);
     assert!(committed["ids"].as_array().unwrap().contains(&json!(6)));
+
+    for case in fixture["catalog_edits"].as_array().unwrap() {
+        let method = case["method"].as_str().unwrap();
+        let route = case["path"].as_str().unwrap();
+        let (status, response) = profile_request(&server, method, route, &case["body"], true);
+        assert_eq!(
+            u64::from(status),
+            case["status"].as_u64().unwrap(),
+            "{method} {route}"
+        );
+        assert_eq!(response, case["response"], "{method} {route}");
+    }
     server.stop();
+}
+
+fn seed_demo_library(connection: &rusqlite::Connection) -> Value {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/demo_library_http.json")).unwrap();
+    for statement in fixture["schema"].as_array().unwrap() {
+        connection
+            .execute_batch(statement.as_str().unwrap())
+            .unwrap();
+    }
+    connection
+        .execute_batch(include_str!("fixtures/demo_library_seed.sql"))
+        .unwrap();
+    fixture
 }
 
 #[test]
@@ -547,9 +565,270 @@ fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
     );
     assert_eq!(fs::read(&path).unwrap(), damaged);
     assert_eq!(
-        profile_request(&server, "GET", "/api/demos/stream", &Value::Null, true).0,
+        profile_request(&server, "GET", "/api/demos/scan", &Value::Null, true).0,
         404
     );
+    server.stop();
+}
+
+fn subscribe_demos(server: &RunningServer) -> Result<BufReader<TcpStream>, u16> {
+    let mut socket = TcpStream::connect_timeout(&server.addr, RESPONSE_TIMEOUT).unwrap();
+    socket.set_read_timeout(Some(RESPONSE_TIMEOUT)).unwrap();
+    let request = format!("GET /api/demos/stream?_session=synthetic-token HTTP/1.1\r\nHost: {}\r\nAccept: text/event-stream\r\nOrigin: https://tauri.localhost\r\n\r\n", server.addr);
+    socket.write_all(request.as_bytes()).unwrap();
+    let mut reader = BufReader::new(socket);
+    let mut status = String::new();
+    reader.read_line(&mut status).unwrap();
+    let code = status
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse::<u16>()
+        .unwrap();
+    if code != 200 {
+        return Err(code);
+    }
+    let mut headers = BTreeMap::new();
+    loop {
+        let mut header = String::new();
+        assert_ne!(reader.read_line(&mut header).unwrap(), 0);
+        if header == "\r\n" {
+            break;
+        }
+        let (key, value) = header.split_once(':').unwrap();
+        headers.insert(key.to_ascii_lowercase(), value.trim().to_owned());
+    }
+    assert_eq!(headers["content-type"], "text/event-stream; charset=utf-8");
+    assert_eq!(headers["cache-control"], "no-store, no-transform");
+    assert_eq!(headers["x-accel-buffering"], "no");
+    assert_eq!(headers["connection"], "keep-alive");
+    assert_eq!(
+        headers["access-control-allow-origin"],
+        "https://tauri.localhost"
+    );
+    assert_eq!(headers["transfer-encoding"], "chunked");
+    assert_eq!(stream_chunk(&mut reader).unwrap().unwrap(), ": ok\n\n");
+    Ok(reader)
+}
+
+fn stream_chunk(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<String>> {
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(None);
+    }
+    let len = usize::from_str_radix(line.trim(), 16).unwrap();
+    if len == 0 {
+        return Ok(None);
+    }
+    let mut chunk = vec![0; len + 2];
+    reader.read_exact(&mut chunk)?;
+    assert_eq!(&chunk[len..], b"\r\n");
+    chunk.truncate(len);
+    Ok(Some(String::from_utf8(chunk).unwrap()))
+}
+
+#[test]
+fn demo_catalog_commits_concurrent_edits_and_notifies_long_lived_subscribers() {
+    let scratch = tempfile::tempdir().unwrap();
+    let database = scratch.path().join("cs2-insight.db");
+    let connection = rusqlite::Connection::open(database).unwrap();
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    seed_demo_library(&connection);
+    connection
+        .execute_batch(
+            "CREATE TRIGGER block_fixture_name AFTER UPDATE OF display_name ON demo_files
+        WHEN NEW.display_name = 'blocked fixture' BEGIN UPDATE demo_files SET file_size = x'FF'
+        WHERE id = NEW.id; END;",
+        )
+        .unwrap();
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/stream", &Value::Null, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "PATCH",
+            "/api/demos/1",
+            &json!({"display_name":"not authorized"}),
+            false
+        )
+        .0,
+        401
+    );
+    let mut first = subscribe_demos(&server).unwrap();
+    let mut second = subscribe_demos(&server).unwrap();
+    let third = subscribe_demos(&server).unwrap();
+    let fourth = subscribe_demos(&server).unwrap();
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/stream", &Value::Null, true).0,
+        503
+    );
+    drop(third);
+    drop(fourth);
+    // A separate long-lived client exercises the freed slots without changing the data.
+    let deadline = Instant::now() + RESPONSE_TIMEOUT;
+    loop {
+        match subscribe_demos(&server) {
+            Ok(replacement) => {
+                drop(replacement);
+                break;
+            }
+            Err(503) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "disconnected subscribers retained all slots"
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(code) => panic!("unexpected subscription response {code}"),
+        }
+    }
+
+    let gate = std::sync::Barrier::new(2);
+    thread::scope(|scope| {
+        for (route, payload) in [
+            ("/api/demos/1", json!({"display_name":"  測試 title  "})),
+            ("/api/demos/1/remark", json!({"remark":"  保留空白  "})),
+        ] {
+            let server = &server;
+            let gate = &gate;
+            scope.spawn(move || {
+                gate.wait();
+                assert_eq!(
+                    profile_request(server, "PATCH", route, &payload, true).0,
+                    200
+                );
+            });
+        }
+    });
+    let expected = "event: library\ndata: {\"reason\": \"changed\"}\n\n";
+    assert_eq!(stream_chunk(&mut first).unwrap().unwrap(), expected);
+    let committed: (String, String, String, String) = connection
+        .query_row(
+            "SELECT display_name, remark, filename, content_md5 FROM demo_files WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        committed,
+        (
+            "測試 title".to_owned(),
+            "  保留空白  ".to_owned(),
+            "Round_50% Q'uote.dem".to_owned(),
+            "fixture-md5-one".to_owned()
+        )
+    );
+    assert_eq!(stream_chunk(&mut second).unwrap().unwrap(), expected);
+    let rejected = profile_response(
+        &server,
+        "PATCH",
+        "/api/demos/1",
+        &json!({"display_name":"blocked fixture"}),
+        true,
+    );
+    assert_eq!(rejected.status, 500);
+    assert_eq!(rejected.body, "Internal Server Error");
+    assert_eq!(
+        profile_request(
+            &server,
+            "PATCH",
+            "/api/demos/999/remark",
+            &json!({"remark":"missing"}),
+            true
+        )
+        .0,
+        404
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT display_name FROM demo_files WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "測試 title"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT file_size FROM demo_files WHERE id = 1", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        150
+    );
+
+    // The next chunk is a real 20-second heartbeat, past the regular connection limit.
+    first
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_secs(24)))
+        .unwrap();
+    assert_eq!(
+        stream_chunk(&mut first).unwrap().unwrap(),
+        ": keepalive\n\n"
+    );
+    server.stop();
+    assert!(stream_chunk(&mut first).unwrap().is_none());
+}
+
+#[test]
+fn demo_watch_inspection_counts_without_opening_candidates_or_mutating_catalog() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("检验 Demos");
+    fs::create_dir_all(root.join("sub/deep")).unwrap();
+    for file in [
+        "one.DEM",
+        "one.ZIP",
+        "ignored.dem.bz2",
+        "sub/two.dem",
+        "sub/two.ZiP",
+        "sub/deep/three.dem",
+    ] {
+        fs::write(
+            root.join(file),
+            b"fixture intentionally contains neither demo nor archive bytes",
+        )
+        .unwrap();
+    }
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    for (depth, demos, zips) in [(0, 1, 1), (1, 2, 2), (2, 3, 2)] {
+        let (status, inspected) = profile_request(
+            &server,
+            "POST",
+            "/api/demos/watch-path/inspect",
+            &json!({"path": root, "max_depth": depth}),
+            true,
+        );
+        assert_eq!(
+            (status, inspected),
+            (
+                200,
+                json!({"valid":true,"path":root,"demo_count":demos,"zip_count":zips,"max_depth":depth})
+            )
+        );
+    }
+    let missing = root.join("missing");
+    let (status, invalid) = profile_request(
+        &server,
+        "POST",
+        "/api/demos/watch-path/inspect",
+        &json!({"path": missing}),
+        true,
+    );
+    assert_eq!(
+        (status, invalid),
+        (
+            200,
+            json!({"valid":false,"path":missing,"demo_count":0,"zip_count":0,"error":"目录不存在或无法访问"})
+        )
+    );
+    assert!(!scratch.path().join("cs2-insight.db").exists());
+    assert!(!scratch.path().join("custom-config.json").exists());
     server.stop();
 }
 

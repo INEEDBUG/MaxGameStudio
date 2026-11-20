@@ -23,6 +23,15 @@ VALUES
      '2025-03-20T00:00:00Z', 'de_mirage', 18, NULL, NULL, NULL, NULL, 19.0, '2025-03-18T02:00:00Z',
      'header', 'watch', NULL, NULL, NULL);
 
+INSERT INTO demo_files (id, path, filename, status, added_at, source, content_md5) VALUES
+    (7, 'c:\fixture\ROUND-ONE.dem', 'Case duplicate.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', NULL),
+    (8, 'C:\Fixture\alternate\alpha.dem', 'ALPHA.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', NULL),
+    (9, 'C:\Fixture\shared-hash.dem', 'Hash duplicate.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', 'fixture-md5-one'),
+    (10, 'C:\Fixture\incoming\Hunt%_.dem', 'Hunt%_.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', 'pending-hash'),
+    (11, 'C:\Fixture\incoming\Hash copy.dem', 'Hash copy.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', 'pending-hash'),
+    (12, 'C:\Fixture\incoming\Blank One.dem', 'Blank One.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', ' '),
+    (13, 'C:\Fixture\incoming\Blank Two.dem', 'Blank Two.dem', 'pending', '2025-03-20T00:00:00Z', 'watch', ' ');
+
 INSERT INTO match_results (demo_path, result_json, created_at) VALUES
     ('C:\Fixture\alpha.dem', '{"players":{"Q''uote":{"clips":[{"category":"highlight","kill_count":5}]}},"auto_target_player":"Q''uote","unknown":{"emoji":"♞"}}', '2025-03-22T00:00:00Z'),
     ('C:\Fixture\error.dem', 'broken', '2025-03-23T00:00:00Z');

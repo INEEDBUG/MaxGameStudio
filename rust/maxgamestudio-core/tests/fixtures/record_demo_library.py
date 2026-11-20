@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, Field
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -62,7 +63,37 @@ CASES = [
     ("/api/demos/1/player-stats", {}),
     ("/api/demos/3/player-stats", {}),
     ("/api/demos/99/player-stats", {}),
+    ("/api/demos/discovered", {}),
+    ("/api/demos/discovered", {"limit": 2, "offset": 1}),
+    ("/api/demos/discovered", {"q": "  HUNT_  "}),
+    ("/api/demos/discovered", {"q": "' OR 1=1 --"}),
 ]
+
+CATALOG_EDITS = [
+    ("PATCH", "/api/demos/1", {"display_name": "  新名称 ' %_  ", "ignored": True}),
+    ("PATCH", "/api/demos/1/remark", {"remark": "  原样保留空白  \n"}),
+    ("GET", "/api/demos/1", None),
+    ("PATCH", "/api/demos/1", {"display_name": "  \t  "}),
+    ("PATCH", "/api/demos/1/remark", {}),
+    ("GET", "/api/demos/1", None),
+    ("PATCH", "/api/demos/5", {"display_name": "Updated damaged result"}),
+    ("PATCH", "/api/demos/999", {"display_name": "Missing"}),
+    ("PATCH", "/api/demos/999/remark", {"remark": "Missing"}),
+    ("PATCH", "/api/demos/1", {"display_name": None}),
+    ("PATCH", "/api/demos/1/remark", {"remark": 2}),
+    ("PATCH", "/api/demos/1", {"display_name": "界" * 513}),
+    ("PATCH", "/api/demos/1/remark", []),
+    ("POST", "/api/demos/watch-path/inspect", {"path": "", "max_depth": 33}),
+    ("POST", "/api/demos/watch-path/inspect", {"max_depth": None}),
+]
+
+
+class CapturedHub:
+    def __init__(self):
+        self.reasons = []
+
+    async def notify(self, reason):
+        self.reasons.append(reason)
 
 
 def record(db_source: str, routes_source: str):
@@ -72,7 +103,9 @@ def record(db_source: str, routes_source: str):
     names = {
         "_split_csv_query_param", "_demo_library_filters_from_query", "list_demos",
         "list_demos_compact_api", "list_demo_ids", "get_demo_library_item",
-        "get_demo_player_stats_library",
+        "get_demo_player_stats_library", "list_discovered_demos", "DemoDisplayNamePatch",
+        "DemoRemarkPatch", "DemoWatchPathInspectBody", "patch_demo_display_name",
+        "patch_demo_remark", "inspect_demo_watch_path",
     }
     definitions = [
         node for node in module.body
@@ -80,7 +113,7 @@ def record(db_source: str, routes_source: str):
         or isinstance(node, ast.Assign)
         and any(getattr(target, "id", None) == "_DEMO_LIBRARY_ALLOWED_STATUSES" for target in node.targets)
     ]
-    fixture = {"cases": []}
+    fixture = {"cases": [], "catalog_edits": []}
     with tempfile.TemporaryDirectory(prefix="mgs-demo-library-fixture-") as scratch:
         path = Path(scratch) / "cs2-insight.db"
         demo = scope["DemoDB"](path)
@@ -94,7 +127,8 @@ def record(db_source: str, routes_source: str):
             fixture["schema"] = [row[0] for row in schema]
             conn.executescript(SEED)
         app = FastAPI()
-        routes = {**globals(), "app": app, "DemoListFilters": dict, "demo_db": demo}
+        hub = CapturedHub()
+        routes = {**globals(), "app": app, "DemoListFilters": dict, "demo_db": demo, "demo_library_hub": hub}
         exec(compile(ast.Module(body=definitions, type_ignores=[]), "main.py", "exec"), routes)
         with TestClient(app, raise_server_exceptions=False) as client:
             for route, query in CASES:
@@ -106,6 +140,14 @@ def record(db_source: str, routes_source: str):
                 else:
                     case["text"] = response.text
                 fixture["cases"].append(case)
+            for method, path, body in CATALOG_EDITS:
+                args = {"json": body} if body is not None else {}
+                response = client.request(method, path, **args)
+                fixture["catalog_edits"].append({
+                    "method": method, "path": path, "body": body, "status": response.status_code,
+                    "response": response.json(),
+                })
+        assert hub.reasons == ["display_name", "remark", "display_name", "remark", "display_name"]
     return fixture
 
 

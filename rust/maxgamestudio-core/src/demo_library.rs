@@ -1,10 +1,10 @@
-//! Read the deployed demo library schema without initializing or rewriting its database.
+//! Read and edit metadata in the deployed Demo library schema.
 
 use crate::wire_json::json_decode_error;
 use rusqlite::{
     params_from_iter,
     types::{Value as SqlValue, ValueRef},
-    Connection, OpenFlags, OptionalExtension, Params, Row,
+    Connection, OpenFlags, OptionalExtension, Params, Row, TransactionBehavior,
 };
 use serde_json::{json, Map, Number, Value};
 use std::{
@@ -37,6 +37,20 @@ const PLAYER_STATS_COLUMNS: &str = "id, demo_id, demo_path, steam_id64, steam_id
 const STATUS_RANK: &str = "CASE lower(ifnull(d.status, '')) WHEN 'loaded' THEN 0
     WHEN 'parsing' THEN 1 WHEN 'error' THEN 2 WHEN 'done' THEN 3 ELSE 4 END ASC";
 const MATCH_DATE: &str = "julianday(NULLIF(d.match_date, ''))";
+const DISCOVERED_FILTER: &str = "FROM demo_files d WHERE d.status = 'pending'
+    AND NOT EXISTS (
+        SELECT 1 FROM demo_files ing WHERE ing.id != d.id AND ing.path COLLATE NOCASE = d.path
+        AND (ing.status != 'pending' OR ing.id < d.id)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM demo_files ing WHERE ing.id != d.id AND ing.filename COLLATE NOCASE = d.filename
+        AND (ing.status != 'pending' OR ing.id < d.id)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM demo_files ing WHERE ing.id != d.id
+        AND d.content_md5 IS NOT NULL AND trim(d.content_md5) != '' AND ing.content_md5 = d.content_md5
+        AND (ing.status != 'pending' OR ing.id < d.id)
+    )";
 
 pub(crate) enum DemoListKind {
     Full,
@@ -44,11 +58,15 @@ pub(crate) enum DemoListKind {
     Ids,
 }
 
-pub(crate) struct DemoListQuery {
-    pub kind: DemoListKind,
+pub(crate) struct DemoPage {
     pub limit: i64,
     pub offset: i64,
     pub q: Option<String>,
+}
+
+pub(crate) struct DemoListQuery {
+    pub kind: DemoListKind,
+    pub page: DemoPage,
     pub map_names: Vec<String>,
     pub statuses: Vec<String>,
     pub min_kills: Option<i64>,
@@ -65,6 +83,11 @@ pub(crate) struct DemoListQuery {
     pub date_to: Option<String>,
     pub sort_key: String,
     pub sort_asc: bool,
+}
+
+pub(crate) enum DemoEdit {
+    DisplayName(String),
+    Remark(String),
 }
 
 #[derive(Debug)]
@@ -106,7 +129,8 @@ impl DemoLibrary {
 
     pub(crate) fn list(&self, query: DemoListQuery) -> DemoResult<Value> {
         read_library(&self.path, |conn| {
-            let mut response = json!({"limit": query.limit, "offset": query.offset, "q": query.q});
+            let DemoPage { limit, offset, q } = &query.page;
+            let mut response = json!({"limit": limit, "offset": offset, "q": q});
             let mut filter = DemoFilter::from_query(&query);
             let order = order_by(&query);
             match query.kind {
@@ -117,9 +141,7 @@ impl DemoLibrary {
                                 "SELECT DISTINCT d.id FROM demo_files d {} {order} LIMIT ? OFFSET ?",
                                 filter.from_tail
                             ))?;
-                            filter
-                                .values
-                                .extend([query.limit.into(), query.offset.into()]);
+                            filter.values.extend([(*limit).into(), (*offset).into()]);
                             let ids = stmt.query_map(params_from_iter(&filter.values), |row| {
                                 row.get::<_, i64>(0)
                             })?;
@@ -142,25 +164,77 @@ impl DemoLibrary {
     }
 
     pub(crate) fn detail(&self, id: i64) -> DemoResult<Option<Value>> {
-        read_library(&self.path, |conn| {
-            let Some(conn) = conn else {
-                return Ok(None);
-            };
-            let mut stmt = conn.prepare(&format!(
-                "SELECT DISTINCT {DEMO_COLUMNS}, {RESULT_COLUMNS} FROM demo_files d
-                 {RESULT_JOIN} WHERE d.id = ?"
-            ))?;
-            let mut rows = stmt.query([id])?;
-            let mut item = None;
-            // The deployed batch detail handler retains the last matching joined result.
-            while let Some(row) = rows.next()? {
-                item = Some(full_row(row, true)?);
-            }
-            if let Some(row) = &mut item {
-                attach_players(conn, std::slice::from_mut(row))?;
-            }
-            Ok(item.map(Value::Object))
+        read_library(&self.path, |conn| match conn {
+            Some(conn) => detail_row(conn, id),
+            None => Ok(None),
         })
+    }
+
+    pub(crate) fn edit(&self, id: i64, edit: DemoEdit) -> DemoResult<Option<Value>> {
+        let Some(mut connection) = open_library(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?
+        else {
+            return Ok(None);
+        };
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !schema_ready(&transaction)? {
+            return Ok(None);
+        }
+        let (sql, value) = match &edit {
+            DemoEdit::DisplayName(value) => (
+                "UPDATE demo_files SET display_name = ? WHERE id = ?",
+                value.trim(),
+            ),
+            DemoEdit::Remark(value) => (
+                "UPDATE demo_files SET remark = ? WHERE id = ?",
+                value.as_str(),
+            ),
+        };
+        if transaction.execute(
+            sql,
+            rusqlite::params![(!value.is_empty()).then_some(value), id],
+        )? == 0
+        {
+            return Ok(None);
+        }
+        let response = match edit {
+            DemoEdit::DisplayName(_) => detail_row(&transaction, id)?,
+            DemoEdit::Remark(_) => Some(json!({"status": "ok", "demo_id": id})),
+        };
+        if response.is_some() {
+            transaction.commit()?;
+        }
+        Ok(response)
+    }
+
+    pub(crate) fn discovered(&self, page: DemoPage) -> DemoResult<Value> {
+        let DemoPage { limit, offset, q } = page;
+        let (total, items) = read_library(&self.path, |conn| {
+            let Some(conn) = conn else {
+                return Ok((0i64, Vec::new()));
+            };
+            let mut sql = DISCOVERED_FILTER.to_owned();
+            let mut values = Vec::new();
+            if let Some(query) = &q {
+                sql.push_str(" AND d.filename LIKE ?");
+                values.push(SqlValue::Text(format!("%{query}%")));
+            }
+            let total = conn.query_row(
+                &format!("SELECT COUNT(*) {sql}"),
+                params_from_iter(&values),
+                |row| row.get::<_, i64>(0),
+            )?;
+            values.extend([limit.into(), offset.into()]);
+            let items = select_objects(
+                conn,
+                &format!(
+                    "SELECT d.id, d.path, d.filename, d.file_size, d.source, d.added_at
+                    {sql} ORDER BY d.id DESC LIMIT ? OFFSET ?"
+                ),
+                params_from_iter(&values),
+            )?;
+            Ok((total, items))
+        })?;
+        Ok(json!({"items": items, "limit": limit, "offset": offset, "total": total, "q": q}))
     }
 
     pub(crate) fn player_stats(&self, id: i64) -> DemoResult<Option<Value>> {
@@ -195,26 +269,50 @@ fn read_library<T>(
     path: &Path,
     operation: impl FnOnce(Option<&Connection>) -> DemoResult<T>,
 ) -> DemoResult<T> {
+    let Some(mut connection) = open_library(path, OpenFlags::SQLITE_OPEN_READ_ONLY)? else {
+        return operation(None);
+    };
+    let transaction = connection.transaction()?;
+    let result = operation(schema_ready(&transaction)?.then_some(&*transaction))?;
+    transaction.commit()?;
+    Ok(result)
+}
+
+fn open_library(path: &Path, flags: OpenFlags) -> DemoResult<Option<Connection>> {
     match fs::metadata(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return operation(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(DemoReadError::File(error)),
         Ok(_) => {}
     }
-    let mut connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
+    let connection = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     connection.busy_timeout(Duration::from_secs(5))?;
-    let transaction = connection.transaction()?;
-    let table_count: i64 = transaction.query_row(SCHEMA_TABLES, [], |row| row.get(0))?;
-    let library = match table_count {
-        0 => None, // A shared DB can already contain training tables on first launch.
-        4 => Some(&*transaction),
-        _ => return Err(DemoReadError::IncompleteSchema),
-    };
-    let result = operation(library)?;
-    transaction.commit()?;
-    Ok(result)
+    Ok(Some(connection))
+}
+
+fn schema_ready(connection: &Connection) -> DemoResult<bool> {
+    let count: i64 = connection.query_row(SCHEMA_TABLES, [], |row| row.get(0))?;
+    match count {
+        0 => Ok(false), // A shared DB can already contain training tables on first launch.
+        4 => Ok(true),
+        _ => Err(DemoReadError::IncompleteSchema),
+    }
+}
+
+fn detail_row(conn: &Connection, id: i64) -> DemoResult<Option<Value>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT {DEMO_COLUMNS}, {RESULT_COLUMNS} FROM demo_files d
+         {RESULT_JOIN} WHERE d.id = ?"
+    ))?;
+    let mut rows = stmt.query([id])?;
+    let mut item = None;
+    // The deployed batch detail handler retains the last matching joined result.
+    while let Some(row) = rows.next()? {
+        item = Some(full_row(row, true)?);
+    }
+    if let Some(row) = &mut item {
+        attach_players(conn, std::slice::from_mut(row))?;
+    }
+    Ok(item.map(Value::Object))
 }
 
 struct DemoFilter {
@@ -226,7 +324,7 @@ impl DemoFilter {
     fn from_query(query: &DemoListQuery) -> Self {
         let mut clauses = vec!["d.status != 'pending'".to_owned()];
         let mut values = Vec::new();
-        if let Some(q) = &query.q {
+        if let Some(q) = &query.page.q {
             clauses.push(
                 "(instr(lower(d.filename), lower(?)) > 0 OR
                            instr(lower(ifnull(d.display_name, '')), lower(?)) > 0)"
@@ -407,7 +505,7 @@ fn list_rows(
     ))?;
     filter
         .values
-        .extend([query.limit.into(), query.offset.into()]);
+        .extend([query.page.limit.into(), query.page.offset.into()]);
     let mut rows = stmt.query(params_from_iter(&filter.values))?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {

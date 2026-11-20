@@ -2398,6 +2398,617 @@
       "response": {
         "detail": "Demo not found: 99"
       }
+    },
+    {
+      "path": "/api/demos/discovered",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 13,
+            "path": "C:\\Fixture\\incoming\\Blank Two.dem",
+            "filename": "Blank Two.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          },
+          {
+            "id": 12,
+            "path": "C:\\Fixture\\incoming\\Blank One.dem",
+            "filename": "Blank One.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          },
+          {
+            "id": 10,
+            "path": "C:\\Fixture\\incoming\\Hunt%_.dem",
+            "filename": "Hunt%_.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          },
+          {
+            "id": 6,
+            "path": "C:\\Fixture\\pending.dem",
+            "filename": "Pending.dem",
+            "file_size": 400,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 4,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/discovered?limit=2&offset=1",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 12,
+            "path": "C:\\Fixture\\incoming\\Blank One.dem",
+            "filename": "Blank One.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          },
+          {
+            "id": 10,
+            "path": "C:\\Fixture\\incoming\\Hunt%_.dem",
+            "filename": "Hunt%_.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          }
+        ],
+        "limit": 2,
+        "offset": 1,
+        "total": 4,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/discovered?q=++HUNT_++",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 10,
+            "path": "C:\\Fixture\\incoming\\Hunt%_.dem",
+            "filename": "Hunt%_.dem",
+            "file_size": null,
+            "source": "watch",
+            "added_at": "2025-03-20T00:00:00Z"
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": "HUNT_"
+      }
+    },
+    {
+      "path": "/api/demos/discovered?q=%27+OR+1%3D1+--",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 200,
+        "offset": 0,
+        "total": 0,
+        "q": "' OR 1=1 --"
+      }
+    }
+  ],
+  "catalog_edits": [
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1",
+      "body": {
+        "display_name": "  \u65b0\u540d\u79f0 ' %_  ",
+        "ignored": true
+      },
+      "status": 200,
+      "response": {
+        "id": 1,
+        "path": "C:\\Fixture\\round-one.dem",
+        "filename": "Round_50% Q'uote.dem",
+        "display_name": "\u65b0\u540d\u79f0 ' %_",
+        "file_size": 150,
+        "status": "loaded",
+        "added_at": "2025-03-21T10:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_\u8352\u6f20",
+        "total_rounds": 20,
+        "team_a_score": 13,
+        "team_b_score": 7,
+        "team_a_name": "\u7532",
+        "team_b_name": "\u4e59",
+        "duration_mins": 24.5,
+        "match_date": "2025-03-18T23:59:59Z",
+        "match_date_source": "match",
+        "source": "manual",
+        "remark": "\u4fdd\u7559",
+        "content_md5": "fixture-md5-one",
+        "origin_zip": "C:\\Fixture\\archive.zip",
+        "result_created_at": null,
+        "result": null,
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote%_\u73a9\u5bb6",
+            "player_name": "Q'uote%_\u73a9\u5bb6",
+            "steam_id64": "76561198000000123",
+            "steamid64": "76561198000000123",
+            "steam_id": "STEAM_1:1:40",
+            "account_id": "39734400",
+            "user_id": "12",
+            "team_number": 2,
+            "team": 2,
+            "team_name": "\u7532",
+            "kills": 17,
+            "deaths": 5,
+            "assists": 8,
+            "kd": 3.4
+          },
+          {
+            "name": "No Steam",
+            "player_name": "No Steam",
+            "steam_id64": null,
+            "steamid64": null,
+            "steam_id": null,
+            "account_id": null,
+            "user_id": "13",
+            "team_number": 3,
+            "team": 3,
+            "team_name": "\u4e59",
+            "kills": 3,
+            "deaths": 5,
+            "assists": 2,
+            "kd": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1/remark",
+      "body": {
+        "remark": "  \u539f\u6837\u4fdd\u7559\u7a7a\u767d  \n"
+      },
+      "status": 200,
+      "response": {
+        "status": "ok",
+        "demo_id": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/demos/1",
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": 1,
+        "path": "C:\\Fixture\\round-one.dem",
+        "filename": "Round_50% Q'uote.dem",
+        "display_name": "\u65b0\u540d\u79f0 ' %_",
+        "file_size": 150,
+        "status": "loaded",
+        "added_at": "2025-03-21T10:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_\u8352\u6f20",
+        "total_rounds": 20,
+        "team_a_score": 13,
+        "team_b_score": 7,
+        "team_a_name": "\u7532",
+        "team_b_name": "\u4e59",
+        "duration_mins": 24.5,
+        "match_date": "2025-03-18T23:59:59Z",
+        "match_date_source": "match",
+        "source": "manual",
+        "remark": "  \u539f\u6837\u4fdd\u7559\u7a7a\u767d  \n",
+        "content_md5": "fixture-md5-one",
+        "origin_zip": "C:\\Fixture\\archive.zip",
+        "result_created_at": null,
+        "result": null,
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote%_\u73a9\u5bb6",
+            "player_name": "Q'uote%_\u73a9\u5bb6",
+            "steam_id64": "76561198000000123",
+            "steamid64": "76561198000000123",
+            "steam_id": "STEAM_1:1:40",
+            "account_id": "39734400",
+            "user_id": "12",
+            "team_number": 2,
+            "team": 2,
+            "team_name": "\u7532",
+            "kills": 17,
+            "deaths": 5,
+            "assists": 8,
+            "kd": 3.4
+          },
+          {
+            "name": "No Steam",
+            "player_name": "No Steam",
+            "steam_id64": null,
+            "steamid64": null,
+            "steam_id": null,
+            "account_id": null,
+            "user_id": "13",
+            "team_number": 3,
+            "team": 3,
+            "team_name": "\u4e59",
+            "kills": 3,
+            "deaths": 5,
+            "assists": 2,
+            "kd": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1",
+      "body": {
+        "display_name": "  \t  "
+      },
+      "status": 200,
+      "response": {
+        "id": 1,
+        "path": "C:\\Fixture\\round-one.dem",
+        "filename": "Round_50% Q'uote.dem",
+        "display_name": null,
+        "file_size": 150,
+        "status": "loaded",
+        "added_at": "2025-03-21T10:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_\u8352\u6f20",
+        "total_rounds": 20,
+        "team_a_score": 13,
+        "team_b_score": 7,
+        "team_a_name": "\u7532",
+        "team_b_name": "\u4e59",
+        "duration_mins": 24.5,
+        "match_date": "2025-03-18T23:59:59Z",
+        "match_date_source": "match",
+        "source": "manual",
+        "remark": "  \u539f\u6837\u4fdd\u7559\u7a7a\u767d  \n",
+        "content_md5": "fixture-md5-one",
+        "origin_zip": "C:\\Fixture\\archive.zip",
+        "result_created_at": null,
+        "result": null,
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote%_\u73a9\u5bb6",
+            "player_name": "Q'uote%_\u73a9\u5bb6",
+            "steam_id64": "76561198000000123",
+            "steamid64": "76561198000000123",
+            "steam_id": "STEAM_1:1:40",
+            "account_id": "39734400",
+            "user_id": "12",
+            "team_number": 2,
+            "team": 2,
+            "team_name": "\u7532",
+            "kills": 17,
+            "deaths": 5,
+            "assists": 8,
+            "kd": 3.4
+          },
+          {
+            "name": "No Steam",
+            "player_name": "No Steam",
+            "steam_id64": null,
+            "steamid64": null,
+            "steam_id": null,
+            "account_id": null,
+            "user_id": "13",
+            "team_number": 3,
+            "team": 3,
+            "team_name": "\u4e59",
+            "kills": 3,
+            "deaths": 5,
+            "assists": 2,
+            "kd": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1/remark",
+      "body": {},
+      "status": 200,
+      "response": {
+        "status": "ok",
+        "demo_id": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/demos/1",
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": 1,
+        "path": "C:\\Fixture\\round-one.dem",
+        "filename": "Round_50% Q'uote.dem",
+        "display_name": null,
+        "file_size": 150,
+        "status": "loaded",
+        "added_at": "2025-03-21T10:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_\u8352\u6f20",
+        "total_rounds": 20,
+        "team_a_score": 13,
+        "team_b_score": 7,
+        "team_a_name": "\u7532",
+        "team_b_name": "\u4e59",
+        "duration_mins": 24.5,
+        "match_date": "2025-03-18T23:59:59Z",
+        "match_date_source": "match",
+        "source": "manual",
+        "remark": null,
+        "content_md5": "fixture-md5-one",
+        "origin_zip": "C:\\Fixture\\archive.zip",
+        "result_created_at": null,
+        "result": null,
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote%_\u73a9\u5bb6",
+            "player_name": "Q'uote%_\u73a9\u5bb6",
+            "steam_id64": "76561198000000123",
+            "steamid64": "76561198000000123",
+            "steam_id": "STEAM_1:1:40",
+            "account_id": "39734400",
+            "user_id": "12",
+            "team_number": 2,
+            "team": 2,
+            "team_name": "\u7532",
+            "kills": 17,
+            "deaths": 5,
+            "assists": 8,
+            "kd": 3.4
+          },
+          {
+            "name": "No Steam",
+            "player_name": "No Steam",
+            "steam_id64": null,
+            "steamid64": null,
+            "steam_id": null,
+            "account_id": null,
+            "user_id": "13",
+            "team_number": 3,
+            "team": 3,
+            "team_name": "\u4e59",
+            "kills": 3,
+            "deaths": 5,
+            "assists": 2,
+            "kd": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/5",
+      "body": {
+        "display_name": "Updated damaged result"
+      },
+      "status": 200,
+      "response": {
+        "id": 5,
+        "path": "C:\\Fixture\\error.dem",
+        "filename": "Error.dem",
+        "display_name": "Updated damaged result",
+        "file_size": 10,
+        "status": "error",
+        "added_at": "2025-03-30T00:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": null,
+        "total_rounds": null,
+        "team_a_score": null,
+        "team_b_score": null,
+        "team_a_name": null,
+        "team_b_name": null,
+        "duration_mins": null,
+        "match_date": "",
+        "match_date_source": null,
+        "source": "manual",
+        "remark": null,
+        "content_md5": null,
+        "origin_zip": null,
+        "result_created_at": "2025-03-23T00:00:00Z",
+        "result": null,
+        "result_error": "\u635f\u574f\u7684\u89e3\u6790\u7ed3\u679c\uff1aExpecting value: line 1 column 1 (char 0)",
+        "players": []
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/999",
+      "body": {
+        "display_name": "Missing"
+      },
+      "status": 404,
+      "response": {
+        "detail": "Demo not found: 999"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/999/remark",
+      "body": {
+        "remark": "Missing"
+      },
+      "status": 404,
+      "response": {
+        "detail": "Demo not found: 999"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1",
+      "body": {
+        "display_name": null
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": [
+              "body",
+              "display_name"
+            ],
+            "msg": "Input should be a valid string",
+            "input": null
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1/remark",
+      "body": {
+        "remark": 2
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": [
+              "body",
+              "remark"
+            ],
+            "msg": "Input should be a valid string",
+            "input": 2
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1",
+      "body": {
+        "display_name": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c"
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_long",
+            "loc": [
+              "body",
+              "display_name"
+            ],
+            "msg": "String should have at most 512 characters",
+            "input": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c",
+            "ctx": {
+              "max_length": 512
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/demos/1/remark",
+      "body": [],
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "model_attributes_type",
+            "loc": [
+              "body"
+            ],
+            "msg": "Input should be a valid dictionary or object to extract fields from",
+            "input": []
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/demos/watch-path/inspect",
+      "body": {
+        "path": "",
+        "max_depth": 33
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "path"
+            ],
+            "msg": "String should have at least 1 character",
+            "input": "",
+            "ctx": {
+              "min_length": 1
+            }
+          },
+          {
+            "type": "less_than_equal",
+            "loc": [
+              "body",
+              "max_depth"
+            ],
+            "msg": "Input should be less than or equal to 32",
+            "input": 33,
+            "ctx": {
+              "le": 32
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/demos/watch-path/inspect",
+      "body": {
+        "max_depth": null
+      },
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": [
+              "body",
+              "path"
+            ],
+            "msg": "Field required",
+            "input": {
+              "max_depth": null
+            }
+          },
+          {
+            "type": "int_type",
+            "loc": [
+              "body",
+              "max_depth"
+            ],
+            "msg": "Input should be a valid integer",
+            "input": null
+          }
+        ]
+      }
     }
   ],
   "schema": [
