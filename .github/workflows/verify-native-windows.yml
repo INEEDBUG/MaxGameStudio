@@ -1,0 +1,174 @@
+name: Verify native installers on Windows
+
+on:
+  workflow_call:
+    inputs:
+      main_version:
+        required: true
+        type: string
+    secrets:
+      main_signing_key:
+        required: false
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CARGO_INCREMENTAL: '0'
+      MAIN_VERSION: ${{ inputs.main_version }}
+      LEAGUE_VERSION: 1.0.0-beta.9
+      LEAGUE_PIN: 14557723706ccc0e0a9d62c470141d4cb7190fcd
+      FIXTURE_PYTHON_VERSION: '3.12.10'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.9.0'
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify the exact released baselines
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+              $env:MAIN_VERSION -cnotmatch '^\d+\.\d+\.\d+-beta\.\d+$') {
+            throw 'Expected the exact checkout and a versioned prerelease input.'
+          }
+          $inputs = [ordered]@{
+            'main-stable' = @{ Version='3.1.4'; Hash='583201413a2b31d94f3009766a22dfa6cda65ddb6eba3847d3895eefdf863c1e' }
+            'league-beta' = @{ Version='1.0.0-beta.5'; Hash='d34f181569e03f8079e48d9a080706eadd6943205a08f3669d5f1f802ec1c3d4' }
+          }
+          $state = @{}
+          $base = Join-Path $env:RUNNER_TEMP 'mgs-native-baselines'
+          foreach ($kind in $inputs.Keys) {
+            $metadata = node packaging/windows/release-baseline.mjs $kind | ConvertFrom-Json
+            if ($metadata.version -cne $inputs[$kind].Version -or $metadata.sha256 -cne $inputs[$kind].Hash) {
+              throw "The $kind baseline does not match the shipped file catalog."
+            }
+            gh release download $metadata.tag --repo $env:GITHUB_REPOSITORY --pattern $metadata.name --dir $base
+            $file = Get-Item -LiteralPath (Join-Path $base $metadata.name)
+            if ($file.Length -ne $metadata.size -or (Get-FileHash -LiteralPath $file.FullName).Hash -ine $metadata.sha256) {
+              throw "The downloaded $kind installer does not match the published bytes."
+            }
+            $state[$kind] = @{ path=$file.FullName; version=$metadata.version; hash=$metadata.sha256 }
+          }
+          $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-baselines.json') -Encoding utf8
+
+      - name: Build the native Main installer
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.main_signing_key }}
+          MGS_MAIN_NATIVE_PACKAGE: '1'
+          MGS_MAIN_NATIVE_CATALOG_SHA256: c33c1af740dcb75dc97f630c21bd709a426c65ea0f23029ed9ddfef7ad8896fd
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:MGS_MAIN_NATIVE_CATALOG = (Resolve-Path -LiteralPath 'packaging/windows/native-legacy/main-3.1.4-repair.json').Path
+          Push-Location frontend
+          try {
+            pnpm.cmd install --frozen-lockfile
+            pnpm.cmd run desktop:build:ver -- $env:MAIN_VERSION
+          } finally { Pop-Location }
+          $out = Join-Path $env:RUNNER_TEMP 'mgs-native-candidates'
+          New-Item -ItemType Directory -Path $out
+          $name = "MaxGameStudio_$($env:MAIN_VERSION)_x64-setup.exe"
+          $setup = Join-Path 'frontend/src-tauri/target/release/bundle/nsis' $name
+          Copy-Item -LiteralPath $setup -Destination $out
+          if (Test-Path -LiteralPath "$setup.sig") { Copy-Item -LiteralPath "$setup.sig" -Destination $out }
+
+      - name: Build the native League installer
+        shell: pwsh
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $source = Join-Path $env:RUNNER_TEMP 'akari-source'
+          git init --quiet $source
+          git -c core.longpaths=true -C $source fetch --quiet --depth 1 https://github.com/LeagueAkari/LeagueAkari.git $env:LEAGUE_PIN
+          git -c core.longpaths=true -C $source checkout --quiet --detach FETCH_HEAD
+          Push-Location $source
+          try { node .yarn/releases/yarn-4.9.1.cjs install --immutable } finally { Pop-Location }
+          $dist = Join-Path $env:RUNNER_TEMP 'league-renderer'
+          $renderer = @{ SourceDir=$source; Standalone=$true; Build=$true; NativeRendererOnly=$true; StandaloneVersion=$env:LEAGUE_VERSION; OutputDir=$dist }
+          ./packaging/windows/stage-league-runtime.ps1 @renderer
+          $env:TAURI_CONFIG = @{
+            version=$env:LEAGUE_VERSION; build=@{frontendDist=$dist}; bundle=@{icon=@((Join-Path $dist 'league.ico'))}
+          } | ConvertTo-Json -Depth 5 -Compress
+          cargo build --release --locked --manifest-path rust/league-desktop/Cargo.toml --target x86_64-pc-windows-msvc
+          $cargoRelease = 'rust/league-desktop/target/x86_64-pc-windows-msvc/release'
+          $payload = Join-Path $env:RUNNER_TEMP 'league-native-payload'
+          New-Item -ItemType Directory -Path $payload
+          Copy-Item -LiteralPath (Join-Path $cargoRelease 'maxgamestudio-league-desktop.exe') -Destination (Join-Path $payload 'MaxGameStudioLeagueToolbox.exe')
+          $loader = Join-Path $cargoRelease 'WebView2Loader.dll'
+          if (Test-Path -LiteralPath $loader) { Copy-Item -LiteralPath $loader -Destination $payload }
+          $bootstrapper = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrapper -TimeoutSec 60
+          $catalog = 'packaging/windows/native-legacy'
+          $options = @{
+            SourceDir=$source; UnpackedDir=$payload; Version=$env:LEAGUE_VERSION; Native=$true
+            InstallerOutputDir=(Join-Path $env:RUNNER_TEMP 'mgs-native-candidates')
+            WebView2Bootstrapper=$bootstrapper
+            LegacyInventory=@((Join-Path $catalog 'trusted-1.0.0-beta.5.json'), (Join-Path $catalog 'trusted-1.0.0-beta.8.json'))
+            LegacyInventorySHA256=@(
+              '85c33b257b4bcb4faa77ea8bbe947cd69deadbffdda0618711e0cc5177d50bc9',
+              '358d78e5417cadeff0153539e2f99cbe8b0be5a6123c0b58e1182005334aac7b'
+            )
+          }
+          ./packaging/windows/build-league-installer.ps1 @options
+
+      - name: Verify personal and machine upgrades and measure both products
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $baseline = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-baselines.json') -Raw | ConvertFrom-Json
+          $main = $baseline.'main-stable'
+          $league = $baseline.'league-beta'
+          $out = Join-Path $env:RUNNER_TEMP 'mgs-native-candidates'
+          $pair = @{
+            Installer=(Join-Path $out "MaxGameStudio_$($env:MAIN_VERSION)_x64-setup.exe")
+            LeagueInstaller=(Join-Path $out "MaxGameStudioLeague_$($env:LEAGUE_VERSION)_x64-setup.exe")
+            BaselineInstaller=$main.path; BaselineVersion=$main.version; BaselineSha256=$main.hash
+            LeagueBaselineInstaller=$league.path; LeagueBaselineVersion=$league.version; LeagueBaselineSha256=$league.hash
+            ExpectedVersion=$env:MAIN_VERSION; NativePayloads=$true
+            FixturePythonExe=(Get-Command python.exe).Source; FixturePythonVersion=$env:FIXTURE_PYTHON_VERSION
+          }
+          $pair.CandidateSha256 = (Get-FileHash -LiteralPath $pair.Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $pair.LeagueCandidateSha256 = (Get-FileHash -LiteralPath $pair.LeagueInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+          ./packaging/windows/tests/verify-packaged-upgrade.ps1 @pair
+          ./packaging/windows/tests/verify-all-users-install.ps1 @pair
+          foreach ($path in $pair.Installer, $pair.LeagueInstaller) {
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expected = if ($path -eq $pair.Installer) { $pair.CandidateSha256 } else { $pair.LeagueCandidateSha256 }
+            if ($hash -cne $expected) { throw 'A verified installer changed during the run.' }
+            "$hash *$(Split-Path -Leaf $path)" | Set-Content -LiteralPath "$path.sha256" -Encoding ascii
+          }
+          $env:GITHUB_SHA | Set-Content -LiteralPath (Join-Path $out 'source-commit.txt') -Encoding ascii
+
+      - name: Keep the verified internal smoke inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-smoke-${{ github.sha }}
+          path: ${{ runner.temp }}/mgs-native-candidates/*
+          if-no-files-found: error
+          retention-days: 7

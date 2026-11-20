@@ -7,6 +7,10 @@ on:
         description: "Private release-candidate version"
         required: true
         default: "3.1.1-rc.1"
+      native_smoke:
+        description: "Build and verify the two native installers in an isolated Windows run"
+        type: boolean
+        default: false
   push:
     branches:
       - "main"
@@ -15,14 +19,26 @@ on:
       - "V*"
 
 concurrency:
-  group: release-windows
+  group: ${{ inputs.native_smoke && 'verify-native-windows' || 'release-windows' }}
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
+  native-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke && github.repository == 'INEEDBUG/MaxGameStudio'
+    uses: ./.github/workflows/verify-native-windows.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      main_version: ${{ inputs.version }}
+    secrets:
+      main_signing_key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
   release:
+    if: ${{ !inputs.native_smoke }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

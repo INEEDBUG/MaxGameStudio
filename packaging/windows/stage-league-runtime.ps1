@@ -13,6 +13,8 @@
 
   The default operation does not install dependencies or run a package manager.
   Use -Build only when the source directory already has its locked dependencies.
+  -NativeRendererOnly stages the standalone interface for Tauri using those
+  dependencies and produces only the three HTML entry points and their assets.
   The staged directory is generated under frontend/.runtime-cache and is
   ignored by Git. The resource staging script copies it into the Tauri bundle
   only after the ordinary resources have been rebuilt.
@@ -25,6 +27,7 @@ param(
   [string]$StandaloneVersion = "1.0.0-beta.1",
   [string]$YarnScript = "",
   [switch]$Standalone,
+  [switch]$NativeRendererOnly,
   [switch]$FetchPinnedSource,
   [switch]$Build
 )
@@ -45,23 +48,29 @@ if (-not $OutputDir) {
   if ($Standalone) { throw "Standalone build requires a new unpacked OutputDir." }
   $OutputDir = Join-Path $repoRoot "frontend\.runtime-cache\league-runtime"
 }
+if ($NativeRendererOnly -and (-not $Standalone -or -not $Build -or $RuntimeDir -or $InstallerOutputDir)) {
+  throw 'NativeRendererOnly requires -Standalone -Build with a pinned source and a fresh renderer OutputDir.'
+}
 if ($Standalone) {
-  if (-not $Build -or $RuntimeDir -or -not $InstallerOutputDir) {
+  if (-not $Build -or $RuntimeDir -or (-not $NativeRendererOnly -and -not $InstallerOutputDir)) {
     throw "Standalone requires -Build, a pinned source checkout, and -InstallerOutputDir."
   }
   if ($StandaloneVersion -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$') {
     throw "Invalid standalone League version."
   }
   $OutputDir = [IO.Path]::GetFullPath($OutputDir)
-  $InstallerOutputDir = [IO.Path]::GetFullPath($InstallerOutputDir)
-  $installer = Join-Path $InstallerOutputDir "MaxGameStudioLeague_${StandaloneVersion}_x64-setup.exe"
-  if ((Test-Path -LiteralPath $OutputDir) -or (Test-Path -LiteralPath $installer)) {
-    throw "Standalone build output already exists. Supply fresh paths."
+  if (Test-Path -LiteralPath $OutputDir) {
+    throw "Standalone build output already exists. Supply a fresh path."
   }
-  if ($InstallerOutputDir -eq $OutputDir -or $InstallerOutputDir.StartsWith(
-    $OutputDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase
-  )) {
-    throw "Choose separate installer and unpacked output locations."
+  if (-not $NativeRendererOnly) {
+    $InstallerOutputDir = [IO.Path]::GetFullPath($InstallerOutputDir)
+    $installer = Join-Path $InstallerOutputDir "MaxGameStudioLeague_${StandaloneVersion}_x64-setup.exe"
+    if (Test-Path -LiteralPath $installer) { throw "Standalone installer output already exists." }
+    if ($InstallerOutputDir -eq $OutputDir -or $InstallerOutputDir.StartsWith(
+      $OutputDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase
+    )) {
+      throw "Choose separate installer and unpacked output locations."
+    }
   }
 }
 
@@ -502,6 +511,7 @@ function Restore-UnpackedNativeHeaders([string]$SourceRoot, [string]$OutputRoot)
 
 $tempSource = $null
 $tempBuildSource = $null
+$nativeDependencyLink = $null
 try {
   if ($FetchPinnedSource) {
     $tempSource = Join-Path $buildTempRoot ("maxgamestudio-league-" + [Guid]::NewGuid().ToString("n"))
@@ -548,29 +558,43 @@ try {
     if (-not $Build) { throw "A source tree is not runnable. Pass -Build with preinstalled locked dependencies." }
     # Never patch a user checkout in place. Build from an isolated copy; this
     # also makes the generated unpacked runtime independent of the worktree.
-    $tempBuildSource = Join-Path $buildTempRoot ("maxgamestudio-league-build-" + [Guid]::NewGuid().ToString("n"))
+    $tempBuildSource = Join-Path $buildTempRoot ("mgs-league-build-" + [Guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Path $tempBuildSource -Force | Out-Null
-    Get-ChildItem -LiteralPath $source -Force | Where-Object {
-      $_.Name -notin @('.git', 'node_modules', 'out', 'dist', 'coverage')
-    } | ForEach-Object {
-      Copy-Item -LiteralPath $_.FullName -Destination $tempBuildSource -Recurse -Force
-    }
     $sourceNodeModules = Join-Path $source "node_modules"
     if (-not (Test-Path -LiteralPath $sourceNodeModules)) {
       throw "-Build requires preinstalled dependencies in SourceDir; refusing implicit install."
     }
     $tempBuildNodeModules = Join-Path $tempBuildSource "node_modules"
-    $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
-    if (-not $robocopy) { throw "-Build requires the Windows robocopy.exe system tool." }
-    & $robocopy.Source $sourceNodeModules $tempBuildNodeModules /E /XJ /MT:16 /R:0 /W:0 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
-    if ($LASTEXITCODE -gt 7) {
-      throw "Failed to copy locked dependencies into the isolated build directory (robocopy exit $LASTEXITCODE)."
+    if ($NativeRendererOnly) {
+      # Read tracked bytes from the pinned commit, even if the local checkout has long paths.
+      $archive = Join-Path $tempBuildSource 'source.tar'
+      $rendererInputs = @('build', 'native', 'resources', 'scripts', 'src', 'LICENSE', 'package.json',
+        'electron-builder.yml', 'electron.vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', 'tsconfig.web.json')
+      Invoke-Git (@('archive', '--format=tar', "--output=$archive", $PinnedCommit, '--') + $rendererInputs) $source | Out-Null
+      $tar = (Get-Command tar.exe -ErrorAction Stop).Source
+      & $tar -xf $archive -C $tempBuildSource
+      if ($LASTEXITCODE -ne 0) { throw 'Cannot expand the pinned League renderer sources.' }
+      Remove-Item -LiteralPath $archive -Force
+      New-Item -ItemType Junction -Path $tempBuildNodeModules -Target $sourceNodeModules | Out-Null
+      $nativeDependencyLink = $tempBuildNodeModules
+    } else {
+      Get-ChildItem -LiteralPath $source -Force | Where-Object {
+        $_.Name -notin @('.git', 'node_modules', 'out', 'dist', 'coverage')
+      } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $tempBuildSource -Recurse -Force
+      }
+      $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
+      if (-not $robocopy) { throw "-Build requires the Windows robocopy.exe system tool." }
+      & $robocopy.Source $sourceNodeModules $tempBuildNodeModules /E /XJ /MT:16 /R:0 /W:0 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+      if ($LASTEXITCODE -gt 7) {
+        throw "Failed to copy locked dependencies into the isolated build directory (robocopy exit $LASTEXITCODE)."
+      }
+      $workspacePackage = Join-Path $source "native\win32-x64"
+      if (-not (Test-Path -LiteralPath $workspacePackage)) {
+        throw "Pinned source is missing native\win32-x64."
+      }
+      Copy-Item -LiteralPath $workspacePackage -Destination (Join-Path $tempBuildNodeModules "league-akari-native-win32") -Recurse -Force
     }
-    $workspacePackage = Join-Path $source "native\win32-x64"
-    if (-not (Test-Path -LiteralPath $workspacePackage)) {
-      throw "Pinned source is missing native\win32-x64."
-    }
-    Copy-Item -LiteralPath $workspacePackage -Destination (Join-Path $tempBuildNodeModules "league-akari-native-win32") -Recurse -Force
     $source = $tempBuildSource
     $hostPackagePath = Join-Path $repoRoot "frontend\package.json"
     if (-not (Test-Path -LiteralPath $hostPackagePath -PathType Leaf)) {
@@ -599,7 +623,9 @@ try {
     if ([string]$patchedRuntimePackage.version -ne $hostVersion) {
       throw "Failed to synchronize runtime package version with host version $hostVersion."
     }
-    if ($YarnScript) {
+    if ($NativeRendererOnly) {
+      $node = (Get-Command node.exe -ErrorAction Stop).Source
+    } elseif ($YarnScript) {
       $yarnExecutor = (Get-Command node.exe -ErrorAction Stop).Source
       $yarnArgs = @((Resolve-Path -LiteralPath $YarnScript).Path)
     } else {
@@ -1018,6 +1044,12 @@ try {
     try {
       if ($Standalone) {
         & (Join-Path $repoRoot 'packaging\windows\league-standalone\stage.ps1') -SourceRoot $source
+        if ($NativeRendererOnly) {
+          $rendererBuilder = Join-Path $repoRoot 'packaging\windows\league-standalone\native-renderer\build.mjs'
+          & $node $rendererBuilder $source $OutputDir
+          if ($LASTEXITCODE -ne 0) { throw 'Native League renderer build failed.' }
+          return
+        }
         & $yarnExecutor @yarnArgs build
         if ($LASTEXITCODE -ne 0) { throw "Standalone League source build failed ($LASTEXITCODE)." }
         & $yarnExecutor @yarnArgs electron-builder --win --x64 --dir --config electron-builder.yml
@@ -1164,7 +1196,20 @@ $manifest = [ordered]@{
   if ($tempSource -and (Test-Path -LiteralPath $tempSource)) {
     Remove-Item -LiteralPath $tempSource -Recurse -Force -ErrorAction SilentlyContinue
   }
+  if ($nativeDependencyLink -and (Test-Path -LiteralPath $nativeDependencyLink)) {
+    # Delete the junction itself before traversing our staged source tree.
+    $link = Get-Item -LiteralPath $nativeDependencyLink -Force
+    if ($link.LinkType -ne 'Junction') { throw 'The staged dependency junction changed unexpectedly.' }
+    [IO.Directory]::Delete($nativeDependencyLink)
+  }
   if ($tempBuildSource -and (Test-Path -LiteralPath $tempBuildSource)) {
-    Remove-Item -LiteralPath $tempBuildSource -Recurse -Force -ErrorAction SilentlyContinue
+    $tempRoot = (Resolve-Path -LiteralPath $buildTempRoot).Path.TrimEnd('\') + '\'
+    $tempBuild = Get-Item -LiteralPath $tempBuildSource -Force
+    if (!$tempBuild.FullName.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $tempBuild.Name -cnotmatch '^mgs-league-build-[a-f0-9]{32}$' -or
+        ($tempBuild.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw 'Cannot verify the temporary League build folder for cleanup.'
+    }
+    Remove-Item -LiteralPath $tempBuild.FullName -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
