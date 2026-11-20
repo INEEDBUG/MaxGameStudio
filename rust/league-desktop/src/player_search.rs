@@ -1,12 +1,26 @@
 //! Same-shard Riot ID and PUUID lookup inside the verified League client.
-//! This is a child module of `lcu`, so its three fixed reads use the same trust boundary.
+//! This is a child module of `lcu`, so its fixed reads use the same trust boundary.
 
 use super::{
     append_chunk, decode_body, request_error, response_has_body, LcuError, LcuTarget, LcuTransport,
 };
 use reqwest::{RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::fmt;
+use serde_json::Value;
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
+
+#[path = "player_history.rs"]
+mod player_history;
+
+use player_history::{MatchHistoryResponse, RecentAramHistory, HISTORY_PAGE_SIZE};
+
+const HISTORY_BODY_LIMIT: usize = 1024 * 1024;
+const HISTORY_READ_TIMEOUT: Duration = Duration::from_millis(1200);
+// Reserve time for the final signed-in account check in the desktop's lookup window.
+const OPTIONAL_LOOKUP_DEADLINE: Duration = Duration::from_secs(3);
 
 const TENCENT_PLATFORMS: &[&str] = &[
     "HN1", "HN10", "TJ100", "TJ101", "NJ100", "GZ100", "CQ100", "BGP2", "PBE", "PREPBE",
@@ -30,6 +44,8 @@ pub(crate) struct PlayerSearchResult {
     sgp_server_id: String,
     privacy: String,
     summoner_level: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recent_aram: Option<RecentAramHistory>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +103,8 @@ struct SummonerResponse {
     profile_icon_id: u32,
     privacy: String,
     summoner_level: u32,
+    #[serde(default)]
+    account_id: Value,
 }
 
 #[derive(PartialEq, Eq)]
@@ -149,8 +167,11 @@ fn shard_from_chat(
     if Puuid::parse(&chat.puuid).as_ref() != Some(own_puuid) {
         return Err(PlayerSearchError::SessionChanged);
     }
+    shard_from_platform(&chat.platform_id)
+}
 
-    let platform = chat.platform_id.trim().to_ascii_uppercase();
+fn shard_from_platform(platform_id: &str) -> Result<PlayerSearchShard, PlayerSearchError> {
+    let platform = platform_id.trim().to_ascii_uppercase();
     let tencent = platform.strip_prefix("TENCENT_").or_else(|| {
         // Bare PBE is Riot's test environment. Tencent PBE needs the Tencent prefix.
         (platform != "PBE").then_some(platform.as_str())
@@ -218,7 +239,12 @@ fn project_summoner(
         sgp_server_id: shard.sgp_server_id.clone(),
         privacy: summoner.privacy,
         summoner_level: summoner.summoner_level,
+        recent_aram: None,
     })
+}
+
+fn may_request_history(own: &Puuid, target: &Puuid, privacy: &str) -> bool {
+    own == target || privacy == "PUBLIC"
 }
 
 enum PlayerRead<'a> {
@@ -228,6 +254,10 @@ enum PlayerRead<'a> {
         tag_line: &'a str,
     },
     Summoner(&'a Puuid),
+    RecentMatches {
+        player: &'a Puuid,
+        timeout: Duration,
+    },
 }
 
 impl LcuTransport {
@@ -253,6 +283,8 @@ impl LcuTransport {
         input: &str,
     ) -> Result<Option<PlayerSearchResult>, PlayerSearchError> {
         let query = LookupQuery::parse(input)?;
+        let own = Puuid::parse(own_puuid).ok_or(PlayerSearchError::NotSignedIn)?;
+        let history_deadline = Instant::now() + OPTIONAL_LOOKUP_DEADLINE;
         let shard = self.read_player_search_shard(target, own_puuid).await?;
         require_requested_shard(&shard, requested_shard)?;
         let puuid = match query {
@@ -275,14 +307,37 @@ impl LcuTransport {
                     .transpose()?
             }
         };
-        let result = if let Some(puuid) = puuid {
-            self.read_player_endpoint(target, PlayerRead::Summoner(&puuid))
-                .await?
-                .map(|summoner| project_summoner(summoner, &puuid, &shard))
-                .transpose()?
-        } else {
-            None
-        };
+        let mut result = None;
+        if let Some(puuid) = puuid {
+            let summoner: Option<SummonerResponse> = self
+                .read_player_endpoint(target, PlayerRead::Summoner(&puuid))
+                .await?;
+            if let Some(summoner) = summoner {
+                let account = summoner.account_id.as_u64().filter(|&id| id > 0);
+                let mut verified = project_summoner(summoner, &puuid, &shard)?;
+                let timeout = history_deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(HISTORY_READ_TIMEOUT);
+                let mut history = RecentAramHistory::Unavailable;
+                if !timeout.is_zero() && may_request_history(&own, &puuid, &verified.privacy) {
+                    let reply: Result<Option<MatchHistoryResponse>, _> = self
+                        .read_player_endpoint(
+                            target,
+                            PlayerRead::RecentMatches {
+                                player: &puuid,
+                                timeout,
+                            },
+                        )
+                        .await;
+                    if let Ok(Some(reply)) = reply {
+                        history = reply.project(&puuid, &shard, account);
+                    }
+                }
+                verified.recent_aram = Some(history);
+                result = Some(verified);
+            }
+        }
+        // Revalidate the signed-in account and its shard after the optional history read.
         if self.read_player_search_shard(target, own_puuid).await? != shard {
             return Err(PlayerSearchError::SessionChanged);
         }
@@ -306,11 +361,25 @@ impl LcuTransport {
             PlayerRead::Summoner(puuid) => {
                 url.set_path(&format!("/lol-summoner/v2/summoners/puuid/{}", puuid.0));
             }
+            PlayerRead::RecentMatches { player, .. } => {
+                url.set_path(&format!(
+                    "/lol-match-history/v1/products/lol/{}/matches",
+                    player.0
+                ));
+                url.query_pairs_mut()
+                    .append_pair("begIndex", "0")
+                    .append_pair("endIndex", &(HISTORY_PAGE_SIZE - 1).to_string());
+            }
         }
-        self.client
+        let request = self
+            .client
             .get(url)
             .header(reqwest::header::ACCEPT, "application/json")
-            .basic_auth("riot", Some(target.token))
+            .basic_auth("riot", Some(target.token));
+        match endpoint {
+            PlayerRead::RecentMatches { timeout, .. } => request.timeout(timeout),
+            _ => request,
+        }
     }
 
     async fn read_player_endpoint<T: DeserializeOwned>(
@@ -321,6 +390,7 @@ impl LcuTransport {
         let limit = match endpoint {
             PlayerRead::Alias { .. } => 4 * 1024,
             PlayerRead::ChatSelf | PlayerRead::Summoner(_) => 16 * 1024,
+            PlayerRead::RecentMatches { .. } => HISTORY_BODY_LIMIT,
         };
         let mut response = self
             .player_request(target, endpoint)

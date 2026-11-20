@@ -149,3 +149,31 @@ fn only_the_requested_players_summary_is_forwarded() {
     .unwrap();
     assert_eq!(Puuid::parse(&alias.puuid).unwrap().0, TARGET_PUUID);
 }
+
+#[test]
+fn history_reads_use_the_verified_player_and_a_fixed_page() {
+    let transport = LcuTransport::new().unwrap();
+    let target = LcuTarget::new(31111, "fixture-only").unwrap();
+    let player = Puuid::parse(TARGET_PUUID).unwrap();
+    let timeout = Duration::from_secs(1);
+    let request = transport
+        .player_request(
+            &target,
+            PlayerRead::RecentMatches {
+                player: &player,
+                timeout,
+            },
+        )
+        .build()
+        .unwrap();
+    assert_eq!(request.method(), reqwest::Method::GET);
+    assert_eq!(request.url().as_str(), format!("https://127.0.0.1:31111/lol-match-history/v1/products/lol/{TARGET_PUUID}/matches?begIndex=0&endIndex=19"));
+    assert_eq!(request.timeout(), Some(&timeout));
+    assert!(request.headers()[reqwest::header::AUTHORIZATION].is_sensitive());
+    let own = Puuid::parse(OWN_PUUID).unwrap();
+    for privacy in ["PRIVATE", "UNKNOWN", ""] {
+        assert!(!may_request_history(&own, &player, privacy));
+        assert!(may_request_history(&own, &own, privacy));
+    }
+    assert!(may_request_history(&own, &player, "PUBLIC"));
+}
