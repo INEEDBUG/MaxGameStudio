@@ -103,8 +103,11 @@ jobs:
           packaging/windows/league-standalone/league-profile.test.mjs
 
       - name: Verify installation registration checks
-        shell: powershell
-        run: ./packaging/windows/league-standalone/test-destination-guard.ps1
+        shell: pwsh
+        run: |
+          # Run as a script file so expected child rejections do not become the step's exit code.
+          & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./packaging/windows/league-standalone/test-destination-guard.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'League registration checks failed.' }
 
       - name: Restore League package and Electron download caches
         uses: actions/cache@v4
