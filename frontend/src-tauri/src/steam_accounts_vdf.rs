@@ -1,7 +1,10 @@
-use std::{collections::HashSet, ops::Range};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 const BAD_VDF: &str = "steam_invalid_accounts";
-const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
+pub(crate) const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
 
 pub(super) fn account_id(steam_id: &str) -> Option<u32> {
     if steam_id.len() != 17 || !steam_id.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -140,6 +143,94 @@ fn scalar_field(fields: &[Field], name: &str) -> Result<Option<Scalar>, &'static
     }
 }
 
+fn parse_fields(source: &str) -> Result<Vec<Field>, &'static str> {
+    let cursor = if source.starts_with('\u{feff}') { 3 } else { 0 };
+    Parser { source, cursor }.fields(0)
+}
+
+/// Read-only account metadata allows older rows without AccountName.
+pub(crate) struct LocalLoginUser {
+    pub(crate) account_name: String,
+    pub(crate) persona_name: String,
+    pub(crate) most_recent: bool,
+    pub(crate) remember_password: bool,
+    pub(crate) login_timestamp: i64,
+}
+
+pub(crate) fn local_login_users(source: &str) -> HashMap<u32, LocalLoginUser> {
+    let Ok(root) = parse_fields(source) else {
+        return HashMap::new();
+    };
+    let Ok(Some(Value::Object { fields: users, .. })) = field(&root, "users") else {
+        return HashMap::new();
+    };
+    users
+        .iter()
+        .filter_map(|entry| {
+            let id = account_id(&entry.name)?;
+            let Value::Object { fields, .. } = &entry.value else {
+                return None;
+            };
+            let get = |name: &str| {
+                fields
+                    .iter()
+                    .rev()
+                    .find_map(|field| match &field.value {
+                        Value::Text(value) if field.name == name => Some(value.text.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            };
+            Some((
+                id,
+                LocalLoginUser {
+                    account_name: get("AccountName").to_owned(),
+                    persona_name: get("PersonaName").to_owned(),
+                    most_recent: get("MostRecent") == "1",
+                    remember_password: get("RememberPassword") == "1",
+                    login_timestamp: get("Timestamp").trim().parse().unwrap_or_default(),
+                },
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn flat_settings(source: &str) -> HashMap<String, String> {
+    fn quoted_pair(source: &str) -> Option<(String, String, &str)> {
+        if !source.starts_with('"') {
+            return None;
+        }
+        let mut parser = Parser { source, cursor: 0 };
+        let key = parser.scalar().ok()?.text;
+        let after_key = &source[parser.cursor..];
+        let value = after_key.trim_start();
+        if key.is_empty() || after_key.len() == value.len() || !value.starts_with('"') {
+            return None;
+        }
+        parser.cursor = source.len() - value.len();
+        let value = parser.scalar().ok()?.text;
+        Some((key, value, &source[parser.cursor..]))
+    }
+
+    // CS2 config import can still use quoted pairs when the rest of a file is incomplete.
+    let mut output = HashMap::new();
+    let mut remaining = source.strip_prefix('\u{feff}').unwrap_or(source);
+    loop {
+        let row = remaining.trim_start();
+        let rest = if let Some((key, value, rest)) = quoted_pair(row) {
+            output.insert(key, value);
+            rest
+        } else {
+            row
+        };
+        let Some((_, next)) = rest.split_once(['\r', '\n']) else {
+            break;
+        };
+        remaining = next;
+    }
+    output
+}
+
 pub(super) struct Account {
     pub(super) steam_id: String,
     pub(super) account_name: String,
@@ -159,8 +250,7 @@ pub(super) struct LoginUsers {
 
 impl LoginUsers {
     pub(super) fn parse(source: &str) -> Result<Self, &'static str> {
-        let cursor = if source.starts_with('\u{feff}') { 3 } else { 0 };
-        let fields = Parser { source, cursor }.fields(0)?;
+        let fields = parse_fields(source)?;
         let Some(Value::Object { fields: users, .. }) = field(&fields, "users")? else {
             return Err(BAD_VDF);
         };
@@ -323,5 +413,13 @@ mod tests {
         ] {
             assert_eq!(LoginUsers::parse(input).err(), Some(BAD_VDF));
         }
+    }
+
+    #[test]
+    fn reads_cfg_pairs_around_an_incomplete_object() {
+        let source = "\"sensitivity\" \"0.2\"\n}\n\"sensitivity\" \"0.35\"\n\"m_yaw\"\n\"0.022\"\n";
+        let values = flat_settings(source);
+        assert_eq!(values.get("sensitivity").map(String::as_str), Some("0.35"));
+        assert_eq!(values.get("m_yaw").map(String::as_str), Some("0.022"));
     }
 }

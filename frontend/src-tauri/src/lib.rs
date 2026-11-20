@@ -18,6 +18,7 @@ use tauri::{
     AppHandle, Emitter, Manager, RunEvent, State, WebviewWindowBuilder, WindowEvent,
 };
 
+mod cs2_local_settings;
 mod desktop_storage;
 mod valorant_crosshair;
 mod steam_accounts;
@@ -560,10 +561,13 @@ pub fn run() {
             quit_app,
             valorant_crosshair::encode_valorant_crosshair,
             valorant_crosshair::decode_valorant_crosshair,
+            valorant_crosshair::load_valorant_crosshair,
+            valorant_crosshair::save_valorant_crosshair,
             training::save_sensitivity_recommendation,
             training::list_sensitivity_history,
             training::save_input_analysis,
             training::list_input_history,
+            cs2_local_settings::get_local_cs2_settings,
             steam_accounts::get_steam_accounts,
             steam_accounts::switch_steam_account
         ])

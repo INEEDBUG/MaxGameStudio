@@ -18,6 +18,9 @@ export async function fetchSensitivityHistory(limit = 20) {
 }
 
 export async function fetchLocalCs2Settings() {
+  if (window.__TAURI_INTERNALS__) {
+    return invoke("get_local_cs2_settings");
+  }
   const { data } = await API.get("/training/cs2-settings");
   return data;
 }

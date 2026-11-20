@@ -74,7 +74,9 @@ export async function openValorantDeviceManager() {
 }
 
 export async function fetchValorantCrosshair() {
-  const { data } = await API.get(VALORANT_LAB_API_CONTRACT.crosshair.path);
+  const data = window.__TAURI_INTERNALS__
+    ? await invoke("load_valorant_crosshair")
+    : (await API.get(VALORANT_LAB_API_CONTRACT.crosshair.path)).data;
   return normalizeCrosshairResponse(data);
 }
 
@@ -109,6 +111,9 @@ export function decodeValorantCrosshair(code) {
 }
 
 export async function saveValorantCrosshair(profiles) {
-  const { data } = await API.put(VALORANT_LAB_API_CONTRACT.saveCrosshair.path, { profiles: normalizeCrosshairProfiles(profiles) });
+  const payload = { profiles: normalizeCrosshairProfiles(profiles) };
+  const data = window.__TAURI_INTERNALS__
+    ? await invoke("save_valorant_crosshair", payload)
+    : (await API.put(VALORANT_LAB_API_CONTRACT.saveCrosshair.path, payload)).data;
   return normalizeCrosshairResponse(data);
 }

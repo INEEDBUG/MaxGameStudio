@@ -1,8 +1,24 @@
 use serde_json::Value;
 
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 #[path = "steam_accounts_vdf.rs"]
-mod vdf;
+pub(crate) mod vdf;
+
+pub(crate) fn display_steam_path(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+}
+
+pub(crate) fn settings_registry() -> (Option<std::path::PathBuf>, Option<std::ffi::OsString>) {
+    #[cfg(windows)]
+    return windows::settings_registry();
+
+    #[cfg(not(windows))]
+    (None, None)
+}
 
 #[tauri::command]
 pub(crate) async fn get_steam_accounts() -> Result<Value, String> {
@@ -146,6 +162,20 @@ mod windows {
             return Err("steam_registry_read_failed");
         }
         Ok(Some(OsString::from_wide(&units)))
+    }
+
+    pub(super) fn settings_registry() -> (Option<PathBuf>, Option<OsString>) {
+        let read = |name| {
+            reg_string(HKEY_CURRENT_USER, STEAM_KEY, name, 0)
+                .ok()
+                .flatten()
+        };
+        (
+            read("SteamPath")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from),
+            read("AutoLoginUser"),
+        )
     }
 
     fn reg_dword(key: &str, name: &str) -> Option<u32> {
@@ -359,11 +389,7 @@ mod windows {
         }
 
         fn display_root(&self) -> String {
-            let path = self.root().to_string_lossy();
-            if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
-                return format!(r"\\{unc}");
-            }
-            path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+            super::display_steam_path(self.root())
         }
     }
 

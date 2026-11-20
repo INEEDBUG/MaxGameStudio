@@ -5,6 +5,7 @@ import {
   createInputAnalysis,
   createSensitivityRecommendation,
   fetchInputHistory,
+  fetchLocalCs2Settings,
   fetchSensitivityHistory,
 } from "./trainingApi";
 
@@ -25,7 +26,8 @@ it("uses the native commands for desktop analysis and the existing history shape
     .mockResolvedValueOnce(analysis)
     .mockResolvedValueOnce({ items: [analysis] })
     .mockResolvedValueOnce(analysis)
-    .mockResolvedValueOnce({ items: [analysis] });
+    .mockResolvedValueOnce({ items: [analysis] })
+    .mockResolvedValueOnce({ found: false, accounts: [] });
 
   const sensitivity = { dpi: 800 };
   const keyboard = { keyboard_name: "键盘" };
@@ -33,11 +35,13 @@ it("uses the native commands for desktop analysis and the existing history shape
   await expect(fetchSensitivityHistory(12)).resolves.toEqual({ items: [analysis] });
   await expect(createInputAnalysis(keyboard)).resolves.toEqual(analysis);
   await expect(fetchInputHistory()).resolves.toEqual({ items: [analysis] });
+  await expect(fetchLocalCs2Settings()).resolves.toEqual({ found: false, accounts: [] });
   expect(invoke.mock.calls).toEqual([
     ["save_sensitivity_recommendation", { request: sensitivity }],
     ["list_sensitivity_history", { limit: 12 }],
     ["save_input_analysis", { request: keyboard }],
     ["list_input_history", { limit: 20 }],
+    ["get_local_cs2_settings"],
   ]);
   expect(post).not.toHaveBeenCalled();
   expect(get).not.toHaveBeenCalled();
@@ -62,6 +66,7 @@ it("keeps the training HTTP routes in browser builds", async () => {
   await expect(fetchSensitivityHistory(12)).resolves.toEqual(data);
   await expect(createInputAnalysis(request)).resolves.toEqual(data);
   await expect(fetchInputHistory()).resolves.toEqual(data);
+  await expect(fetchLocalCs2Settings()).resolves.toEqual(data);
   expect(post.mock.calls).toEqual([
     ["/training/sensitivity/recommend", request],
     ["/training/input/analyze", request],
@@ -69,6 +74,7 @@ it("keeps the training HTTP routes in browser builds", async () => {
   expect(get.mock.calls).toEqual([
     ["/training/sensitivity/history", { params: { limit: 12 } }],
     ["/training/input/history", { params: { limit: 20 } }],
+    ["/training/cs2-settings"],
   ]);
   expect(invoke).not.toHaveBeenCalled();
 });

@@ -102,4 +102,23 @@ describe("Valorant Lab crosshair API contract", () => {
     await expect(decodeValorantCrosshair("1;P;c;5")).rejects.toEqual(error);
     expect(post).not.toHaveBeenCalled();
   });
+
+  it("loads and saves the desktop profile through the native store", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    const code = "0;P;c;7";
+    const get = vi.spyOn(API, "get").mockRejectedValue(new Error("Unexpected HTTP call"));
+    const put = vi.spyOn(API, "put").mockRejectedValue(new Error("Unexpected HTTP call"));
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ code, profiles: PROFILES })
+      .mockResolvedValueOnce({ code, profiles: PROFILES, saved: true });
+
+    await expect(fetchValorantCrosshair()).resolves.toMatchObject({ code });
+    await expect(saveValorantCrosshair(PROFILES)).resolves.toMatchObject({ code, saved: true });
+    expect(invoke.mock.calls).toEqual([
+      ["load_valorant_crosshair"],
+      ["save_valorant_crosshair", { profiles: normalizeCrosshairProfiles(PROFILES) }],
+    ]);
+    expect(get).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+  });
 });
