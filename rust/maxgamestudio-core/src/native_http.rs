@@ -3,6 +3,7 @@
 mod demo_body;
 mod demo_events;
 mod demo_query;
+mod demo_radar;
 mod demo_watch;
 mod replay_body;
 
@@ -13,7 +14,8 @@ use crate::{
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
     replay_cache::{
-        cache_summary, load_packet, ReplayCacheError, ReplayRepair, REQUIRED_PARSER_VERSION,
+        cache_summary, clear_cache, load_packet, ReplayCacheError, ReplayRepair,
+        REQUIRED_PARSER_VERSION,
     },
     runtime_session::RuntimeSession,
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
@@ -428,8 +430,14 @@ async fn route(
     let config_update = matches!(route, Route::Config) && request.method() == Method::PUT;
     let demo_rename =
         matches!(route, Route::Demos(DemoRoute::Detail)) && request.method() == Method::PATCH;
-    if request.method().as_str() != allowed && !config_update && !demo_rename {
+    let cache_clear = matches!(route, Route::ReplayCache) && request.method() == Method::DELETE;
+    if request.method().as_str() != allowed && !config_update && !demo_rename && !cache_clear {
         let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+        let allowed = if matches!(route, Route::ReplayCache) {
+            "GET, DELETE"
+        } else {
+            allowed
+        };
         response
             .headers_mut()
             .insert(ALLOW, HeaderValue::from_static(allowed));
@@ -563,6 +571,7 @@ async fn demo_response(
     shutdown: watch::Receiver<bool>,
 ) -> HttpResponse {
     match route {
+        DemoRoute::RadarMap | DemoRoute::UtilityMask => demo_radar::image(route, request.uri()),
         DemoRoute::Stream => {
             let Some(body) = profile.demo_events.stream(shutdown) else {
                 return detail(
@@ -727,6 +736,18 @@ async fn profile_route(state: &State, route: Route, request: Request<Incoming>) 
             Ok(()) => json_reply(StatusCode::OK, json!({"status": "ok"})),
             Err(ConfigUpdateError::Validation(errors)) => validation_reply(errors),
             Err(ConfigUpdateError::Storage(error)) => profile_io_error(&error),
+        })
+        .await;
+    }
+    if matches!(route, Route::ReplayCache) && request.method() == Method::DELETE {
+        let Ok(_permit) = profile.replay_repair.try_acquire() else {
+            return detail(StatusCode::CONFLICT, "回放缓存正在重建，请稍后再清理");
+        };
+        return profile_disk(profile, |profile| {
+            match clear_cache(profile.config.data_dir()) {
+                Ok(value) => json_reply(StatusCode::OK, value),
+                Err(error) => profile_io_error(&error),
+            }
         })
         .await;
     }

@@ -879,6 +879,59 @@ fn replay_header(bytes: &[u8]) -> (Value, usize) {
 }
 
 #[test]
+fn replay_cache_clear_requires_the_session_and_preserves_unrelated_files() {
+    let scratch = tempfile::tempdir().unwrap();
+    let data = scratch.path();
+    let key = "0123456789012345678901234567890123456789";
+    let managed = [
+        (format!("cache/demo-replay/matches/{key}.parquet"), 3),
+        (format!("replay-match/{key}.meta.json"), 5),
+        (format!("cache/demo-replay/rounds/{key}.json.gz"), 7),
+        (format!("replay-effects-cache/{key}.pkl"), 11),
+    ];
+    let keep = [
+        "replay-match/source.dem",
+        "replay-match/unrelated.json",
+        "replay-match/subdirectory/1234.parquet",
+        "cs2-insight.db",
+    ];
+    for relative in keep {
+        let path = data.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"keep original").unwrap();
+    }
+    for (relative, size) in &managed {
+        let path = data.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, vec![0u8; *size]).unwrap();
+    }
+    let server = RunningServer::launch("3.2.0-fixture", Some((data, data)));
+    let route = "/api/demo/replay/cache";
+    assert_eq!(
+        profile_request(&server, "DELETE", route, &Value::Null, false).0,
+        401
+    );
+    assert!(managed.iter().all(|(path, _)| data.join(path).is_file()));
+    let (status, cleared) = profile_request(&server, "DELETE", route, &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(cleared["removed_files"], 4);
+    assert_eq!(cleared["removed_bytes"], 26);
+    assert!(managed.iter().all(|(path, _)| !data.join(path).exists()));
+    for path in keep {
+        assert_eq!(fs::read(data.join(path)).unwrap(), b"keep original");
+    }
+    assert_eq!(
+        cleared["cache"],
+        profile_request(&server, "GET", route, &Value::Null, true).1
+    );
+    assert_eq!(
+        profile_request(&server, "DELETE", route, &Value::Null, true).1["removed_files"],
+        0
+    );
+    server.stop();
+}
+
+#[test]
 fn replay_reads_exact_round_from_primary_or_legacy_cache_without_writes() {
     let scratch = tempfile::tempdir().unwrap();
     let fixture = ReplayFixture::new(scratch.path());

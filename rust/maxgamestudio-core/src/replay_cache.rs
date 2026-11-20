@@ -19,6 +19,15 @@ pub(crate) const REQUIRED_PARSER_VERSION: &str = "0.41.4+cs2insight7";
 const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
 const CURRENT_CACHE: &str = "cache/demo-replay/matches";
 const LEGACY_CACHE: &str = "replay-match";
+const NAMESPACES: [(&str, &str, &str); 3] = [
+    ("matches", CURRENT_CACHE, LEGACY_CACHE),
+    ("frames", "cache/demo-replay/rounds", "replay-frames"),
+    (
+        "effects",
+        "cache/demo-replay/effects",
+        "replay-effects-cache",
+    ),
+];
 
 #[derive(Clone, Copy, Default)]
 struct CacheUsage {
@@ -38,28 +47,17 @@ impl CacheUsage {
 }
 
 pub(crate) fn cache_summary(data: &Path) -> io::Result<Value> {
-    let namespaces = [
-        ("matches", CURRENT_CACHE, LEGACY_CACHE),
-        ("frames", "cache/demo-replay/rounds", "replay-frames"),
-        (
-            "effects",
-            "cache/demo-replay/effects",
-            "replay-effects-cache",
-        ),
-    ];
     let mut details = serde_json::Map::new();
     let mut total = CacheUsage::default();
     let mut total_legacy = CacheUsage::default();
-    for (namespace, current, legacy) in namespaces {
+    for (namespace, current, legacy) in NAMESPACES {
         let current = data.join(current);
         let legacy = data.join(legacy);
         let old_usage = directory_usage(&legacy)?;
         let aliases = fs::canonicalize(&current)
             .ok()
             .zip(fs::canonicalize(&legacy).ok())
-            .is_some_and(|(current, legacy)| {
-                path_text(&current).eq_ignore_ascii_case(&path_text(&legacy))
-            });
+            .is_some_and(|(current, legacy)| same_path(&current, &legacy));
         let usage = if aliases {
             old_usage
         } else {
@@ -82,15 +80,96 @@ pub(crate) fn cache_summary(data: &Path) -> io::Result<Value> {
     }))
 }
 
+pub(crate) fn clear_cache(data: &Path) -> io::Result<Value> {
+    let mut removed = CacheUsage::default();
+    match fs::canonicalize(data) {
+        Ok(root) => {
+            for (namespace, current, legacy) in NAMESPACES {
+                for relative in [current, legacy] {
+                    let expected = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+                    let folder = match fs::canonicalize(&expected) {
+                        Ok(path) if same_path(&path, &expected) => path,
+                        Ok(_) => continue,
+                        Err(error) if absent_directory(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    let entries = match fs::read_dir(folder) {
+                        Ok(entries) => entries,
+                        Err(error) if absent_directory(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    for entry in entries {
+                        let entry = entry?;
+                        if !entry
+                            .file_name()
+                            .to_str()
+                            .is_some_and(|name| managed_file(namespace, name))
+                        {
+                            continue;
+                        }
+                        match entry.metadata() {
+                            Ok(info) if info.is_file() => match fs::remove_file(entry.path()) {
+                                Ok(()) => removed.add(CacheUsage {
+                                    files: 1,
+                                    bytes: info.len(),
+                                }),
+                                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                                Err(error) => eprintln!(
+                                    "Native replay cache file could not be removed: {}",
+                                    error.kind()
+                                ),
+                            },
+                            Ok(_) => {}
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
+        }
+        Err(error) if absent_directory(&error) => {}
+        Err(error) => return Err(error),
+    }
+    Ok(json!({
+        "removed_files": removed.files,
+        "removed_bytes": removed.bytes,
+        "cache": cache_summary(data)?,
+    }))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    if cfg!(windows) {
+        left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+    } else {
+        left == right
+    }
+}
+
+fn managed_file(namespace: &str, name: &str) -> bool {
+    let Some((key, extension)) = name.split_once('.') else {
+        return false;
+    };
+    key.len() == 40
+        && key.bytes().all(|c| c.is_ascii_hexdigit())
+        && matches!(
+            (namespace, extension),
+            ("matches", "parquet" | "meta.json")
+                | ("frames", "json.gz")
+                | ("effects", "pkl" | "meta.json")
+        )
+}
+
+fn absent_directory(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
+}
+
 fn directory_usage(path: &Path) -> io::Result<CacheUsage> {
     let files = match fs::read_dir(path) {
         Ok(files) => files,
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-            ) =>
-        {
+        Err(error) if absent_directory(&error) => {
             return Ok(CacheUsage::default());
         }
         Err(error) => return Err(error),

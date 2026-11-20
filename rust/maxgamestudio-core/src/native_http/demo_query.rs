@@ -15,6 +15,8 @@ pub(super) enum DemoRoute {
     Discovered,
     Stream,
     InspectPath,
+    RadarMap,
+    UtilityMask,
     Detail,
     PlayerStats,
     Remark,
@@ -31,6 +33,17 @@ impl DemoRoute {
             "/api/demos/stream" => Some(Self::Stream),
             "/api/demos/watch-path/inspect" => Some(Self::InspectPath),
             _ => {
+                for (prefix, route) in [
+                    ("/api/demo/radar-map/", Self::RadarMap),
+                    ("/api/demo/utility-mask/", Self::UtilityMask),
+                ] {
+                    if path
+                        .strip_prefix(prefix)
+                        .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+                    {
+                        return Some(route);
+                    }
+                }
                 let rest = path.strip_prefix("/api/demos/")?;
                 if matches!(
                     rest,
