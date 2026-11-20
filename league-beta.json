@@ -1,8 +1,1 @@
-{
-  "product": "maxgamestudio-league",
-  "channel": "beta",
-  "version": "1.0.0-beta.2",
-  "tag": "league-v1.0.0-beta.2",
-  "url": "https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.2/MaxGameStudioLeague_1.0.0-beta.2_x64-setup.exe",
-  "sha256": "2ea19d6cb69bf8dfd763af5f2c324a0c526a97562c7ac837ad527720c3641aea"
-}
+{"version":"1.0.0-beta.5","url":"https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.5/MaxGameStudioLeague_1.0.0-beta.5_x64-setup.exe","channel":"beta","product":"maxgamestudio-league","sha256":"d34f181569e03f8079e48d9a080706eadd6943205a08f3669d5f1f802ec1c3d4","tag":"league-v1.0.0-beta.5"}
