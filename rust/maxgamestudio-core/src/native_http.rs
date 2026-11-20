@@ -1,12 +1,17 @@
 //! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
+mod demo_query;
+
 use crate::{
+    demo_library::{DemoLibrary, DemoReadError},
     gsi_ready::GsiReady,
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
     runtime_session::RuntimeSession,
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
+    wire_json::json_decode_error,
 };
+use demo_query::DemoRoute;
 use futures_util::future::{select, Either};
 use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::{
@@ -284,6 +289,7 @@ enum Route {
     DataDirInfo,
     BackupStatus,
     RuntimeState,
+    Demos(DemoRoute),
 }
 
 impl Route {
@@ -298,6 +304,7 @@ impl Route {
             "/api/config/data-dir-info" if has_profile => Some(Self::DataDirInfo),
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
+            _ if has_profile => DemoRoute::from_path(path).map(Self::Demos),
             _ => None,
         }
     }
@@ -363,8 +370,81 @@ async fn route(state: &State, request: Request<Incoming>) -> HttpResponse {
         ),
         Route::GsiStatus => json_reply(StatusCode::OK, json!(state.gsi.status())),
         Route::Gsi => notify_gsi(state, request).await,
+        Route::Demos(route) => {
+            demo_response(
+                state.profile.as_ref().expect("profile route"),
+                route,
+                request,
+            )
+            .await
+        }
         _ => profile_route(state, route, request).await,
     }
+}
+
+async fn demo_response(
+    profile: &Arc<ProfileState>,
+    route: DemoRoute,
+    request: Request<Incoming>,
+) -> HttpResponse {
+    match route {
+        DemoRoute::List(kind) => {
+            let query =
+                match demo_query::parse_list(request.uri().query().unwrap_or_default(), kind) {
+                    Ok(query) => query,
+                    Err(errors) => {
+                        return json_reply(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            json!({"detail": errors}),
+                        )
+                    }
+                };
+            profile_disk(profile, move |config| {
+                match DemoLibrary::new(config.database_path()).list(query) {
+                    Ok(value) => json_reply(StatusCode::OK, value),
+                    Err(error) => demo_read_error(&error),
+                }
+            })
+            .await
+        }
+        DemoRoute::Detail | DemoRoute::PlayerStats => {
+            let id = match demo_query::parse_id(request.uri().path()) {
+                Ok(id) => id,
+                Err(errors) => {
+                    return json_reply(StatusCode::UNPROCESSABLE_ENTITY, json!({"detail": errors}))
+                }
+            };
+            profile_disk(profile, move |config| {
+                let library = DemoLibrary::new(config.database_path());
+                let result = if matches!(route, DemoRoute::Detail) {
+                    library.detail(id)
+                } else {
+                    library.player_stats(id)
+                };
+                match result {
+                    Ok(Some(value)) => json_reply(StatusCode::OK, value),
+                    Ok(None) => detail(StatusCode::NOT_FOUND, &format!("Demo not found: {id}")),
+                    Err(error) => demo_read_error(&error),
+                }
+            })
+            .await
+        }
+    }
+}
+
+fn demo_read_error(error: &DemoReadError) -> HttpResponse {
+    eprintln!("Native Demo library read failed: {error}");
+    if matches!(error, DemoReadError::InvalidFullResult) {
+        return reply(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "text/plain; charset=utf-8",
+            "Internal Server Error".to_owned(),
+        );
+    }
+    detail(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Demo library database is unreadable",
+    )
 }
 
 async fn profile_route(state: &State, route: Route, request: Request<Incoming>) -> HttpResponse {
@@ -557,31 +637,7 @@ fn invalid_dictionary(input: Value) -> HttpResponse {
 }
 
 fn invalid_json(text: &str, error: &serde_json::Error) -> HttpResponse {
-    let offset = if error.is_eof() {
-        text.chars().count()
-    } else {
-        let before_line: usize = text
-            .split_inclusive('\n')
-            .take(error.line().saturating_sub(1))
-            .map(str::len)
-            .sum();
-        let byte_offset = (before_line + error.column().saturating_sub(1)).min(text.len());
-        text.char_indices()
-            .take_while(|(index, _)| *index < byte_offset)
-            .count()
-    };
-    let message = error.to_string();
-    let description = if message.starts_with("trailing characters") {
-        "Extra data"
-    } else if message.starts_with("key must be a string") {
-        "Expecting property name enclosed in double quotes"
-    } else if message.starts_with("expected :") || message.starts_with("expected `:`") {
-        "Expecting ':' delimiter"
-    } else if message.starts_with("expected `,` or") {
-        "Expecting ',' delimiter"
-    } else {
-        "Expecting value"
-    };
+    let (offset, description) = json_decode_error(text, error);
     json_reply(
         StatusCode::UNPROCESSABLE_ENTITY,
         json!({"detail": [{

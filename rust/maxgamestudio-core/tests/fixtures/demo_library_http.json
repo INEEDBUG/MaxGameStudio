@@ -1,0 +1,2420 @@
+{
+  "cases": [
+    {
+      "path": "/api/demos/compact",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": []
+          },
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "path": "C:\\Fixture\\error.dem",
+            "filename": "Error.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "error",
+            "added_at": "2025-03-30T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": null,
+            "total_rounds": null,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": null,
+            "match_date": "",
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": "2025-03-23T00:00:00Z",
+            "analyzed_targets": [],
+            "players": []
+          },
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 1,
+            "primary_target": "Q'uote",
+            "four_k_count": 0,
+            "five_k_count": 1,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "analyzed_targets": [
+              "Q'uote",
+              "\u73a9\u5bb6"
+            ],
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?limit=1&offset=1",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": []
+          }
+        ],
+        "limit": 1,
+        "offset": 1,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?limit=3&offset=200&q=++",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 3,
+        "offset": 200,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?q=++50%25+Q%27uote++",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": "50% Q'uote"
+      }
+    },
+    {
+      "path": "/api/demos/compact?q=%E5%8C%97%E5%8C%BA&map_names=%2C+de_%E8%8D%92%E6%BC%A0+%2C%2Cde_mirage+&map_name=de_dust2",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": "\u5317\u533a"
+      }
+    },
+    {
+      "path": "/api/demos/compact?q=%25_&player_query=q%27uote%25_%E7%8E%A9%E5%AE%B6",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 200,
+        "offset": 0,
+        "total": 0,
+        "q": "%_"
+      }
+    },
+    {
+      "path": "/api/demos/compact?q=%27+OR+1%3D1+--",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 200,
+        "offset": 0,
+        "total": 0,
+        "q": "' OR 1=1 --"
+      }
+    },
+    {
+      "path": "/api/demos/compact?statuses=pending%2Cother&status=done",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 1,
+            "primary_target": "Q'uote",
+            "four_k_count": 0,
+            "five_k_count": 1,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "analyzed_targets": [
+              "Q'uote",
+              "\u73a9\u5bb6"
+            ],
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?statuses=parsing%2Cloaded%2Cerror&map_name=de_mirage",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?min_kills=17&max_deaths=5&min_assists=7&min_kd=3.25",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?min_kills=17&max_deaths=5&min_assists=7&steam_query=1%3A40&player_query=q%27UOTE",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?min_kills=17&max_deaths=5&steam_query=7656119800&player_query=No+Steam",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 200,
+        "offset": 0,
+        "total": 0,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?steam_query=7777",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 1,
+            "primary_target": "Q'uote",
+            "four_k_count": 0,
+            "five_k_count": 1,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "analyzed_targets": [
+              "Q'uote",
+              "\u73a9\u5bb6"
+            ],
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?rounds_min=15&rounds_max=21&duration_min=22.0&duration_max=25",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 2,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?date_from=2025-03-18&date_to=2025-03-18",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 2,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?date_from=2025-03-18&date_to=2025-03-18T23%3A59%3A58Z",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?date_to=2025-02-30",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 200,
+        "offset": 0,
+        "total": 0,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?sort_key=match_time&sort_dir=asc",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 4,
+            "path": "C:\\Fixture\\multi.dem",
+            "filename": "Multiple.dem",
+            "display_name": null,
+            "file_size": 150,
+            "status": "parsing",
+            "added_at": "2025-03-18T23:59:59Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 16,
+            "team_a_score": 13,
+            "team_b_score": 3,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 22.0,
+            "match_date": "2025-03-18T01:00:00Z",
+            "match_date_source": "header",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Same A",
+                "player_name": "Same A",
+                "steam_id64": null,
+                "steamid64": "fixture:four-a",
+                "steam_id": "fixture:four-a",
+                "account_id": "8888",
+                "user_id": "2",
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              },
+              {
+                "name": "Same B",
+                "player_name": "Same B",
+                "steam_id64": null,
+                "steamid64": "fixture:four-b",
+                "steam_id": "fixture:four-b",
+                "account_id": "9999",
+                "user_id": "3",
+                "team_number": 3,
+                "team": 3,
+                "team_name": null,
+                "kills": 17,
+                "deaths": 7,
+                "assists": 4,
+                "kd": 2.429
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 1,
+            "primary_target": "Q'uote",
+            "four_k_count": 0,
+            "five_k_count": 1,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "analyzed_targets": [
+              "Q'uote",
+              "\u73a9\u5bb6"
+            ],
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": []
+          },
+          {
+            "id": 5,
+            "path": "C:\\Fixture\\error.dem",
+            "filename": "Error.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "error",
+            "added_at": "2025-03-30T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": null,
+            "total_rounds": null,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": null,
+            "match_date": "",
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": "2025-03-23T00:00:00Z",
+            "analyzed_targets": [],
+            "players": []
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?sort_key=duration&sort_dir=desc&limit=2",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 1,
+            "primary_target": "Q'uote",
+            "four_k_count": 0,
+            "five_k_count": 1,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "analyzed_targets": [
+              "Q'uote",
+              "\u73a9\u5bb6"
+            ],
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          }
+        ],
+        "limit": 2,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?sort_key=size&sort_dir=asc&limit=2",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": []
+          },
+          {
+            "id": 5,
+            "path": "C:\\Fixture\\error.dem",
+            "filename": "Error.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "error",
+            "added_at": "2025-03-30T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": null,
+            "total_rounds": null,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": null,
+            "match_date": "",
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": "2025-03-23T00:00:00Z",
+            "analyzed_targets": [],
+            "players": []
+          }
+        ],
+        "limit": 2,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?sort_key=date&sort_dir=desc&limit=1",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 5,
+            "path": "C:\\Fixture\\error.dem",
+            "filename": "Error.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "error",
+            "added_at": "2025-03-30T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": null,
+            "total_rounds": null,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": null,
+            "match_date": "",
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": true,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": "2025-03-23T00:00:00Z",
+            "analyzed_targets": [],
+            "players": []
+          }
+        ],
+        "limit": 1,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?sort_key=id%3BDROP+TABLE+demo_files&sort_dir=asc&limit=1",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "has_result": false,
+            "clip_count": 0,
+            "primary_target": null,
+            "four_k_count": 0,
+            "five_k_count": 0,
+            "result_created_at": null,
+            "analyzed_targets": [],
+            "players": []
+          }
+        ],
+        "limit": 1,
+        "offset": 0,
+        "total": 5,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/compact?limit=2&limit=1.0&offset=+1+&q=+NoDate+",
+      "status": 200,
+      "response": {
+        "items": [],
+        "limit": 1,
+        "offset": 1,
+        "total": 1,
+        "q": "NoDate"
+      }
+    },
+    {
+      "path": "/api/demos/compact?limit=0&offset=-1&min_kills=five&min_kd=abc&sort_dir=DESC",
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than_equal",
+            "loc": [
+              "query",
+              "limit"
+            ],
+            "msg": "Input should be greater than or equal to 1",
+            "input": "0",
+            "ctx": {
+              "ge": 1
+            }
+          },
+          {
+            "type": "greater_than_equal",
+            "loc": [
+              "query",
+              "offset"
+            ],
+            "msg": "Input should be greater than or equal to 0",
+            "input": "-1",
+            "ctx": {
+              "ge": 0
+            }
+          },
+          {
+            "type": "int_parsing",
+            "loc": [
+              "query",
+              "min_kills"
+            ],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "five"
+          },
+          {
+            "type": "float_parsing",
+            "loc": [
+              "query",
+              "min_kd"
+            ],
+            "msg": "Input should be a valid number, unable to parse string as a number",
+            "input": "abc"
+          },
+          {
+            "type": "string_pattern_mismatch",
+            "loc": [
+              "query",
+              "sort_dir"
+            ],
+            "msg": "String should match pattern '^(asc|desc)$'",
+            "input": "DESC",
+            "ctx": {
+              "pattern": "^(asc|desc)$"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/compact?limit=1001&rounds_max=-10&sort_key=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "less_than_equal",
+            "loc": [
+              "query",
+              "limit"
+            ],
+            "msg": "Input should be less than or equal to 1000",
+            "input": "1001",
+            "ctx": {
+              "le": 1000
+            }
+          },
+          {
+            "type": "greater_than_equal",
+            "loc": [
+              "query",
+              "rounds_max"
+            ],
+            "msg": "Input should be greater than or equal to 0",
+            "input": "-10",
+            "ctx": {
+              "ge": 0
+            }
+          },
+          {
+            "type": "string_too_long",
+            "loc": [
+              "query",
+              "sort_key"
+            ],
+            "msg": "String should have at most 32 characters",
+            "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "ctx": {
+              "max_length": 32
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/compact?steam_query=%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C%E7%95%8C",
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_long",
+            "loc": [
+              "query",
+              "steam_query"
+            ],
+            "msg": "String should have at most 64 characters",
+            "input": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c",
+            "ctx": {
+              "max_length": 64
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/ids",
+      "status": 200,
+      "response": {
+        "ids": [
+          3,
+          1,
+          4,
+          5,
+          2
+        ],
+        "limit": 1000,
+        "offset": 0,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/ids?min_kills=17&sort_key=date&sort_dir=asc&limit=2&offset=1",
+      "status": 200,
+      "response": {
+        "ids": [
+          4,
+          2
+        ],
+        "limit": 2,
+        "offset": 1,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos/ids?steam_query=7777&q=++alpha++",
+      "status": 200,
+      "response": {
+        "ids": [
+          2
+        ],
+        "limit": 1000,
+        "offset": 0,
+        "q": "alpha"
+      }
+    },
+    {
+      "path": "/api/demos?statuses=loaded%2Cdone",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "path": "C:\\Fixture\\round-one.dem",
+            "filename": "Round_50% Q'uote.dem",
+            "display_name": "\u5317\u533a Archive",
+            "file_size": 150,
+            "status": "loaded",
+            "added_at": "2025-03-21T10:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_\u8352\u6f20",
+            "total_rounds": 20,
+            "team_a_score": 13,
+            "team_b_score": 7,
+            "team_a_name": "\u7532",
+            "team_b_name": "\u4e59",
+            "duration_mins": 24.5,
+            "match_date": "2025-03-18T23:59:59Z",
+            "match_date_source": "match",
+            "source": "manual",
+            "remark": "\u4fdd\u7559",
+            "content_md5": "fixture-md5-one",
+            "origin_zip": "C:\\Fixture\\archive.zip",
+            "result_created_at": null,
+            "result": null,
+            "players": [
+              {
+                "name": "Q'uote%_\u73a9\u5bb6",
+                "player_name": "Q'uote%_\u73a9\u5bb6",
+                "steam_id64": "76561198000000123",
+                "steamid64": "76561198000000123",
+                "steam_id": "STEAM_1:1:40",
+                "account_id": "39734400",
+                "user_id": "12",
+                "team_number": 2,
+                "team": 2,
+                "team_name": "\u7532",
+                "kills": 17,
+                "deaths": 5,
+                "assists": 8,
+                "kd": 3.4
+              },
+              {
+                "name": "No Steam",
+                "player_name": "No Steam",
+                "steam_id64": null,
+                "steamid64": null,
+                "steam_id": null,
+                "account_id": null,
+                "user_id": "13",
+                "team_number": 3,
+                "team": 3,
+                "team_name": "\u4e59",
+                "kills": 3,
+                "deaths": 5,
+                "assists": 2,
+                "kd": 0.6
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "path": "C:\\Fixture\\no-date.dem",
+            "filename": "NoDate.dem",
+            "display_name": null,
+            "file_size": 10,
+            "status": "loaded",
+            "added_at": "2025-03-19T00:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_dust2",
+            "total_rounds": 9,
+            "team_a_score": null,
+            "team_b_score": null,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 9.5,
+            "match_date": null,
+            "match_date_source": null,
+            "source": "manual",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "result_created_at": null,
+            "result": null,
+            "players": []
+          },
+          {
+            "id": 2,
+            "path": "C:\\Fixture\\alpha.dem",
+            "filename": "Alpha.dem",
+            "display_name": null,
+            "file_size": 200,
+            "status": "done",
+            "added_at": "2025-03-20T20:00:00Z",
+            "parsed_at": null,
+            "error_msg": null,
+            "map_name": "de_mirage",
+            "total_rounds": 22,
+            "team_a_score": 9,
+            "team_b_score": 13,
+            "team_a_name": null,
+            "team_b_name": null,
+            "duration_mins": 37.5,
+            "match_date": "2025-03-19T00:00:00Z",
+            "match_date_source": "match",
+            "source": "watch",
+            "remark": null,
+            "content_md5": null,
+            "origin_zip": null,
+            "result_created_at": "2025-03-22T00:00:00Z",
+            "result": {
+              "players": {
+                "Q'uote": {
+                  "clips": [
+                    {
+                      "category": "highlight",
+                      "kill_count": 5
+                    }
+                  ]
+                }
+              },
+              "auto_target_player": "Q'uote",
+              "unknown": {
+                "emoji": "\u265e"
+              }
+            },
+            "players": [
+              {
+                "name": "Q'uote",
+                "player_name": "Q'uote",
+                "steam_id64": null,
+                "steamid64": "fixture:two",
+                "steam_id": "fixture:two",
+                "account_id": "7777",
+                "user_id": null,
+                "team_number": 2,
+                "team": 2,
+                "team_name": null,
+                "kills": 20,
+                "deaths": 13,
+                "assists": 4,
+                "kd": 1.538
+              }
+            ]
+          }
+        ],
+        "limit": 200,
+        "offset": 0,
+        "total": 3,
+        "q": null
+      }
+    },
+    {
+      "path": "/api/demos",
+      "status": 500,
+      "text": "Internal Server Error"
+    },
+    {
+      "path": "/api/demos/2",
+      "status": 200,
+      "response": {
+        "id": 2,
+        "path": "C:\\Fixture\\alpha.dem",
+        "filename": "Alpha.dem",
+        "display_name": null,
+        "file_size": 200,
+        "status": "done",
+        "added_at": "2025-03-20T20:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_mirage",
+        "total_rounds": 22,
+        "team_a_score": 9,
+        "team_b_score": 13,
+        "team_a_name": null,
+        "team_b_name": null,
+        "duration_mins": 37.5,
+        "match_date": "2025-03-19T00:00:00Z",
+        "match_date_source": "match",
+        "source": "watch",
+        "remark": null,
+        "content_md5": null,
+        "origin_zip": null,
+        "result_created_at": "2025-03-22T00:00:00Z",
+        "result": {
+          "players": {
+            "Q'uote": {
+              "clips": [
+                {
+                  "category": "highlight",
+                  "kill_count": 5
+                }
+              ]
+            }
+          },
+          "auto_target_player": "Q'uote",
+          "unknown": {
+            "emoji": "\u265e"
+          }
+        },
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote",
+            "player_name": "Q'uote",
+            "steam_id64": null,
+            "steamid64": "fixture:two",
+            "steam_id": "fixture:two",
+            "account_id": "7777",
+            "user_id": null,
+            "team_number": 2,
+            "team": 2,
+            "team_name": null,
+            "kills": 20,
+            "deaths": 13,
+            "assists": 4,
+            "kd": 1.538
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/5",
+      "status": 200,
+      "response": {
+        "id": 5,
+        "path": "C:\\Fixture\\error.dem",
+        "filename": "Error.dem",
+        "display_name": null,
+        "file_size": 10,
+        "status": "error",
+        "added_at": "2025-03-30T00:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": null,
+        "total_rounds": null,
+        "team_a_score": null,
+        "team_b_score": null,
+        "team_a_name": null,
+        "team_b_name": null,
+        "duration_mins": null,
+        "match_date": "",
+        "match_date_source": null,
+        "source": "manual",
+        "remark": null,
+        "content_md5": null,
+        "origin_zip": null,
+        "result_created_at": "2025-03-23T00:00:00Z",
+        "result": null,
+        "result_error": "\u635f\u574f\u7684\u89e3\u6790\u7ed3\u679c\uff1aExpecting value: line 1 column 1 (char 0)",
+        "players": []
+      }
+    },
+    {
+      "path": "/api/demos/6",
+      "status": 200,
+      "response": {
+        "id": 6,
+        "path": "C:\\Fixture\\pending.dem",
+        "filename": "Pending.dem",
+        "display_name": "Staging",
+        "file_size": 400,
+        "status": "pending",
+        "added_at": "2025-03-20T00:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_mirage",
+        "total_rounds": 18,
+        "team_a_score": null,
+        "team_b_score": null,
+        "team_a_name": null,
+        "team_b_name": null,
+        "duration_mins": 19.0,
+        "match_date": "2025-03-18T02:00:00Z",
+        "match_date_source": "header",
+        "source": "watch",
+        "remark": null,
+        "content_md5": null,
+        "origin_zip": null,
+        "result_created_at": null,
+        "result": null,
+        "result_error": null,
+        "players": []
+      }
+    },
+    {
+      "path": "/api/demos/999",
+      "status": 404,
+      "response": {
+        "detail": "Demo not found: 999"
+      }
+    },
+    {
+      "path": "/api/demos/%32",
+      "status": 200,
+      "response": {
+        "id": 2,
+        "path": "C:\\Fixture\\alpha.dem",
+        "filename": "Alpha.dem",
+        "display_name": null,
+        "file_size": 200,
+        "status": "done",
+        "added_at": "2025-03-20T20:00:00Z",
+        "parsed_at": null,
+        "error_msg": null,
+        "map_name": "de_mirage",
+        "total_rounds": 22,
+        "team_a_score": 9,
+        "team_b_score": 13,
+        "team_a_name": null,
+        "team_b_name": null,
+        "duration_mins": 37.5,
+        "match_date": "2025-03-19T00:00:00Z",
+        "match_date_source": "match",
+        "source": "watch",
+        "remark": null,
+        "content_md5": null,
+        "origin_zip": null,
+        "result_created_at": "2025-03-22T00:00:00Z",
+        "result": {
+          "players": {
+            "Q'uote": {
+              "clips": [
+                {
+                  "category": "highlight",
+                  "kill_count": 5
+                }
+              ]
+            }
+          },
+          "auto_target_player": "Q'uote",
+          "unknown": {
+            "emoji": "\u265e"
+          }
+        },
+        "result_error": null,
+        "players": [
+          {
+            "name": "Q'uote",
+            "player_name": "Q'uote",
+            "steam_id64": null,
+            "steamid64": "fixture:two",
+            "steam_id": "fixture:two",
+            "account_id": "7777",
+            "user_id": null,
+            "team_number": 2,
+            "team": 2,
+            "team_name": null,
+            "kills": 20,
+            "deaths": 13,
+            "assists": 4,
+            "kd": 1.538
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/unknown-fixture",
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": [
+              "path",
+              "demo_id"
+            ],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "unknown-fixture"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/1/player-stats",
+      "status": 200,
+      "response": {
+        "demo_id": 1,
+        "players": [
+          {
+            "id": 1,
+            "demo_id": 1,
+            "demo_path": "C:\\Fixture\\round-one.dem",
+            "steam_id64": "76561198000000123",
+            "steam_id": "STEAM_1:1:40",
+            "account_id": "39734400",
+            "user_id": "12",
+            "player_name": "Q'uote%_\u73a9\u5bb6",
+            "normalized_name": "q'uote%_\u73a9\u5bb6",
+            "team_name": "\u7532",
+            "team_number": 2,
+            "kills": 17,
+            "deaths": 5,
+            "assists": 8,
+            "kd": 3.4,
+            "indexed_at": "2025-03-21T00:00:00Z"
+          },
+          {
+            "id": 2,
+            "demo_id": 1,
+            "demo_path": "C:\\Fixture\\round-one.dem",
+            "steam_id64": null,
+            "steam_id": null,
+            "account_id": null,
+            "user_id": "13",
+            "player_name": "No Steam",
+            "normalized_name": "no steam",
+            "team_name": "\u4e59",
+            "team_number": 3,
+            "kills": 3,
+            "deaths": 5,
+            "assists": 2,
+            "kd": 0.6,
+            "indexed_at": "2025-03-21T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/demos/3/player-stats",
+      "status": 200,
+      "response": {
+        "demo_id": 3,
+        "players": []
+      }
+    },
+    {
+      "path": "/api/demos/99/player-stats",
+      "status": 404,
+      "response": {
+        "detail": "Demo not found: 99"
+      }
+    }
+  ],
+  "schema": [
+    "CREATE TABLE demo_files (\n                    id        INTEGER PRIMARY KEY AUTOINCREMENT,\n                    path      TEXT UNIQUE NOT NULL,\n                    filename  TEXT NOT NULL,\n                    file_size INTEGER,\n                    map_name TEXT,\n                    total_rounds INTEGER,\n                    team_a_score INTEGER,\n                    team_b_score INTEGER,\n                    team_a_name TEXT,\n                    team_b_name TEXT,\n                    duration_mins REAL,\n                    match_date TEXT,\n                    match_date_source TEXT,\n                    status    TEXT NOT NULL DEFAULT 'pending',\n                    added_at  TEXT NOT NULL,\n                    parsed_at TEXT,\n                    error_msg TEXT,\n                    display_name TEXT,\n                    source TEXT,\n                    watch_root TEXT,\n                    remark TEXT\n                , content_md5 TEXT, origin_zip TEXT)",
+    "CREATE TABLE match_results (\n                    id           INTEGER PRIMARY KEY AUTOINCREMENT,\n                    demo_path    TEXT NOT NULL,\n                    result_json  TEXT NOT NULL,\n                    created_at   TEXT NOT NULL\n                )",
+    "CREATE TABLE demo_result_summaries (\n                    demo_path TEXT PRIMARY KEY NOT NULL,\n                    clip_count INTEGER NOT NULL DEFAULT 0,\n                    primary_target TEXT,\n                    analyzed_targets_json TEXT NOT NULL DEFAULT '[]',\n                    four_k_count INTEGER NOT NULL DEFAULT 0,\n                    five_k_count INTEGER NOT NULL DEFAULT 0,\n                    result_created_at TEXT NOT NULL,\n                    summary_version INTEGER NOT NULL\n                )",
+    "CREATE TABLE demo_player_stats (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    demo_id INTEGER NOT NULL,\n                    demo_path TEXT NOT NULL,\n                    steam_id64 TEXT,\n                    steam_id TEXT,\n                    account_id TEXT,\n                    user_id TEXT,\n                    player_name TEXT NOT NULL,\n                    normalized_name TEXT,\n                    team_name TEXT,\n                    team_number INTEGER,\n                    kills INTEGER DEFAULT 0,\n                    deaths INTEGER DEFAULT 0,\n                    assists INTEGER DEFAULT 0,\n                    kd REAL DEFAULT 0,\n                    indexed_at TEXT NOT NULL\n                )",
+    "CREATE INDEX idx_match_results_demo_path ON match_results(demo_path)",
+    "CREATE INDEX idx_demo_files_content_md5 ON demo_files(content_md5)",
+    "CREATE INDEX idx_demo_files_status_id ON demo_files(status, id)",
+    "CREATE INDEX idx_demo_files_path_nocase ON demo_files(path COLLATE NOCASE)",
+    "CREATE INDEX idx_demo_files_filename_nocase ON demo_files(filename COLLATE NOCASE)",
+    "CREATE INDEX idx_demo_player_stats_demo_id ON demo_player_stats(demo_id)",
+    "CREATE INDEX idx_demo_player_stats_demo_path ON demo_player_stats(demo_path)",
+    "CREATE INDEX idx_demo_player_stats_player_name ON demo_player_stats(normalized_name)",
+    "CREATE INDEX idx_demo_player_stats_steam_id64 ON demo_player_stats(steam_id64)",
+    "CREATE INDEX idx_demo_player_stats_kills ON demo_player_stats(kills)",
+    "CREATE INDEX idx_demo_player_stats_kd ON demo_player_stats(kd)"
+  ]
+}

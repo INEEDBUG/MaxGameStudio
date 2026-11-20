@@ -1,3 +1,4 @@
+use crate::wire_json::integer_from_text;
 use serde_json::{json, Map, Number, Value};
 use std::sync::LazyLock;
 
@@ -315,29 +316,9 @@ fn integer(input: &Value) -> Result<Value, Invalid> {
                 "Unable to parse input string as an integer, exceeded maximum size",
             )),
         },
-        Value::String(text) => {
-            let text = text.trim();
-            let numeric = text.trim_start_matches(['-', '+']);
-            if numeric.split('_').any(|part| part.is_empty()) {
-                return Err(INTEGER_PARSING);
-            }
-            let replaced = text.replace('_', "");
-            let whole = match replaced.split_once('.') {
-                Some((whole, decimal))
-                    if !decimal.is_empty() && decimal.bytes().all(|byte| byte == b'0') =>
-                {
-                    whole
-                }
-                Some(_) => return Err(INTEGER_PARSING),
-                None => &replaced,
-            };
-            whole
-                .parse::<i64>()
-                .map(Number::from)
-                .or_else(|_| whole.parse::<u64>().map(Number::from))
-                .map(Value::Number)
-                .map_err(|_| INTEGER_PARSING)
-        }
+        Value::String(text) => integer_from_text(text)
+            .map(Value::Number)
+            .ok_or(INTEGER_PARSING),
         _ => Err(("int_type", "Input should be a valid integer")),
     }
 }

@@ -68,6 +68,10 @@ impl ProfileConfig {
         &self.data_dir
     }
 
+    pub(crate) fn database_path(&self) -> PathBuf {
+        self.path.with_file_name("cs2-insight.db")
+    }
+
     pub(crate) fn view(&self) -> io::Result<Value> {
         let mut data = self.read(true)?;
         mask(&mut data["llm"]["api_key"], 0, 4, "****");

@@ -46,6 +46,14 @@ impl RunningServer {
     }
 
     fn launch(version: &str, profile: Option<(&Path, &Path)>) -> Self {
+        Self::launch_with_config(version, profile, None)
+    }
+
+    fn launch_with_config(
+        version: &str,
+        profile: Option<(&Path, &Path)>,
+        config_path: Option<&Path>,
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_maxgamestudio-native-http"));
         command
             .args(["--port", "0", "--app-version", version])
@@ -56,7 +64,12 @@ impl RunningServer {
         if let Some((data, bundle)) = profile {
             command
                 .env("CS2_INSIGHT_DATA_DIR", data)
-                .env("CS2_INSIGHT_CONFIG", data.join("custom-config.json"))
+                .env(
+                    "CS2_INSIGHT_CONFIG",
+                    config_path
+                        .map(Path::to_owned)
+                        .unwrap_or_else(|| data.join("custom-config.json")),
+                )
                 .env("CS2_INSIGHT_BUNDLE_DATA_DIR", bundle)
                 .env("CS2_INSIGHT_INSTANCE_ID", " fixture-process ");
         }
@@ -111,6 +124,20 @@ fn profile_request(
     input: &Value,
     auth: bool,
 ) -> (u16, Value) {
+    let response = profile_response(server, method, path, input, auth);
+    (
+        response.status,
+        serde_json::from_str(&response.body).unwrap(),
+    )
+}
+
+fn profile_response(
+    server: &RunningServer,
+    method: &str,
+    path: &str,
+    input: &Value,
+    auth: bool,
+) -> Response {
     let body = if input.is_null() {
         String::new()
     } else {
@@ -125,11 +152,7 @@ fn profile_request(
         "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth}\r\n{body}",
         server.addr, body.len()
     );
-    let response = send_request(server.addr, &request);
-    (
-        response.status,
-        serde_json::from_str(&response.body).unwrap(),
-    )
+    send_request(server.addr, &request)
 }
 
 fn recorded_profile(mut value: Value) -> Value {
@@ -398,6 +421,136 @@ fn config_startup_uses_bundle_data_and_reports_owned_identity_and_recovery() {
     assert_eq!(found, json!({"ok": true, "ffmpeg_path": executable}));
     server.stop();
     assert!(profile.join("recovery-required.json").is_file());
+}
+
+#[test]
+fn demo_library_matches_release_routes_from_readonly_wal_database() {
+    let scratch = tempfile::tempdir().unwrap();
+    let data = scratch.path().join("data");
+    let config_home = scratch.path().join("配置 # 50%");
+    fs::create_dir(&config_home).unwrap();
+    let profile_config = config_home.join("settings.json");
+    let path = config_home.join("cs2-insight.db");
+    let wal = config_home.join("cs2-insight.db-wal");
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/demo_library_http.json")).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    for statement in fixture["schema"].as_array().unwrap() {
+        connection
+            .execute_batch(statement.as_str().unwrap())
+            .unwrap();
+    }
+    connection
+        .execute_batch(include_str!("fixtures/demo_library_seed.sql"))
+        .unwrap();
+    let before = fs::read(&path).unwrap();
+    let wal_before = fs::read(&wal).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&profile_config),
+    );
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/compact", &Value::Null, false).0,
+        401
+    );
+    for case in fixture["cases"].as_array().unwrap() {
+        let route = case["path"].as_str().unwrap();
+        let response = profile_response(&server, "GET", route, &Value::Null, true);
+        assert_eq!(
+            u64::from(response.status),
+            case["status"].as_u64().unwrap(),
+            "{route}"
+        );
+        if let Some(expected) = case.get("response") {
+            let value: Value = serde_json::from_str(&response.body).unwrap();
+            assert_eq!(&value, expected, "{route}");
+        } else {
+            assert_eq!(response.body, case["text"].as_str().unwrap(), "{route}");
+        }
+    }
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::read(&wal).unwrap(), wal_before);
+    assert!(!data.exists());
+    assert!(!profile_config.exists());
+
+    let writer = connection.unchecked_transaction().unwrap();
+    writer
+        .execute("UPDATE demo_files SET status = 'loaded' WHERE id = 6", [])
+        .unwrap();
+    let (status, locked) = profile_request(&server, "GET", "/api/demos/ids", &Value::Null, true);
+    assert_eq!(status, 200);
+    assert!(!locked["ids"].as_array().unwrap().contains(&json!(6)));
+    writer.commit().unwrap();
+    let (status, committed) = profile_request(&server, "GET", "/api/demos/ids", &Value::Null, true);
+    assert_eq!(status, 200);
+    assert!(committed["ids"].as_array().unwrap().contains(&json!(6)));
+    server.stop();
+}
+
+#[test]
+fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
+    let scratch = tempfile::tempdir().unwrap();
+    let path = scratch.path().join("cs2-insight.db");
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    let (status, empty) = profile_request(&server, "GET", "/api/demos/compact", &Value::Null, true);
+    assert_eq!(
+        (status, empty),
+        (
+            200,
+            json!({"items":[], "limit":200, "offset":0, "total":0, "q":null})
+        )
+    );
+    assert!(!path.exists());
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/123", &Value::Null, true),
+        (404, json!({"detail":"Demo not found: 123"}))
+    );
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "CREATE TABLE sensitivity_sessions (id INTEGER PRIMARY KEY)",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let training_only = fs::read(&path).unwrap();
+    let (status, only_training) =
+        profile_request(&server, "GET", "/api/demos/ids", &Value::Null, true);
+    assert_eq!(
+        (status, only_training),
+        (200, json!({"ids":[], "limit":1000, "offset":0, "q":null}))
+    );
+    assert_eq!(fs::read(&path).unwrap(), training_only);
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("CREATE TABLE demo_files (id INTEGER PRIMARY KEY)", [])
+        .unwrap();
+    drop(connection);
+    let incomplete = fs::read(&path).unwrap();
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/compact", &Value::Null, true),
+        (500, json!({"detail":"Demo library database is unreadable"}))
+    );
+    assert_eq!(fs::read(&path).unwrap(), incomplete);
+
+    let damaged = b"fixture damaged sqlite database";
+    fs::write(&path, damaged).unwrap();
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/compact", &Value::Null, true),
+        (500, json!({"detail":"Demo library database is unreadable"}))
+    );
+    assert_eq!(fs::read(&path).unwrap(), damaged);
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/stream", &Value::Null, true).0,
+        404
+    );
+    server.stop();
 }
 
 impl Drop for RunningServer {
