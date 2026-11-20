@@ -54,7 +54,7 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(
         result(&probe)["result"],
         json!({
-            "actions": ["probe", "inspect_header"], "upstream_tag": "v0.41.4"
+            "actions": ["probe", "inspect_header", "write_replay_parquet"], "upstream_tag": "v0.41.4"
         })
     );
 
@@ -74,6 +74,59 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(header["demo_file_stamp"], "PBDEMS2");
     assert_eq!(header["game_directory"], "csgo");
     assert_eq!(fs::read(sample).unwrap(), data);
+}
+
+#[test]
+fn replay_writer_preserves_final_and_existing_staged_files() {
+    let scratch = tempfile::tempdir().unwrap();
+    let source = scratch.path().join("sample.dem");
+    let final_path = scratch.path().join("sample.parquet");
+    let staged_path = scratch.path().join("sample.parquet.partial");
+    fs::write(&source, fixture_header()).unwrap();
+    fs::write(&final_path, b"retained cache").unwrap();
+    fs::write(&staged_path, b"other worker output").unwrap();
+    let call_output = |path: &std::path::Path| {
+        request(json!({
+            "protocol": 1, "action": "write_replay_parquet", "path": source,
+            "output_path": path, "tick_rate": 64.0, "fps": 32.0,
+            "rounds": [{"round_number":1,"start_tick":10,"end_tick":20}]
+        }))
+    };
+
+    let final_write = call_output(&final_path);
+    assert_eq!(final_write.status.code(), Some(2));
+    assert_eq!(
+        result(&final_write)["error"]["detail"],
+        "expected an absolute .parquet.partial output path"
+    );
+    let collision = call_output(&staged_path);
+    assert_eq!(collision.status.code(), Some(6));
+    assert_eq!(
+        result(&collision)["error"]["detail"],
+        "staged replay output already exists"
+    );
+    assert_eq!(fs::read(final_path).unwrap(), b"retained cache");
+    assert_eq!(fs::read(staged_path).unwrap(), b"other worker output");
+}
+
+#[test]
+fn replay_writer_errors_leave_no_cache_artifact() {
+    let scratch = tempfile::tempdir().unwrap();
+    let source = scratch.path().join("invalid.dem");
+    let output_path = scratch.path().join("sample.parquet.partial");
+    fs::write(&source, b"PBDEMS2").unwrap();
+    let invalid = request(json!({
+        "protocol": 1, "action": "write_replay_parquet", "path": source,
+        "output_path": output_path, "tick_rate": 64.0, "fps": 32.0,
+        "rounds": [{"round_number":1,"start_tick":10,"end_tick":20}]
+    }));
+    assert_eq!(invalid.status.code(), Some(5));
+    assert_eq!(
+        result(&invalid)["error"],
+        json!({"code":"replay_parse_failed","stage":"parse_replay","detail":"invalid Source 2 demo framing"})
+    );
+    assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 1);
+    assert_eq!(fs::read(source).unwrap(), b"PBDEMS2");
 }
 
 #[test]

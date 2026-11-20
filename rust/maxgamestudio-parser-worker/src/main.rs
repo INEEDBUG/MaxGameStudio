@@ -1,5 +1,7 @@
 //! One request per process. Stdout contains the protocol reply and stderr records failures.
 
+mod replay;
+
 use parser::first_pass::{
     parser::HEADER_ENDS_AT_BYTE,
     parser_settings::{FirstPassParser, ParserInputs},
@@ -33,8 +35,10 @@ struct Request {
 enum Action {
     Probe,
     InspectHeader { path: PathBuf },
+    WriteReplayParquet(replay::WriteReplayRequest),
 }
 
+#[derive(Debug)]
 struct Failure {
     code: &'static str,
     stage: &'static str,
@@ -67,6 +71,24 @@ impl Failure {
             stage: "parse_header",
             detail,
             exit: 4,
+        }
+    }
+
+    fn replay_parse(detail: &'static str) -> Self {
+        Self {
+            code: "replay_parse_failed",
+            stage: "parse_replay",
+            detail,
+            exit: 5,
+        }
+    }
+
+    fn replay_write(detail: &'static str) -> Self {
+        Self {
+            code: "replay_write_failed",
+            stage: "write_replay",
+            detail,
+            exit: 6,
         }
     }
 
@@ -126,10 +148,12 @@ fn run(input: impl Read) -> Result<Value, Failure> {
         return Err(Failure::request("unsupported parser worker protocol"));
     }
     match request.action {
-        Action::Probe => {
-            Ok(json!({"actions": ["probe", "inspect_header"], "upstream_tag": "v0.41.4"}))
-        }
+        Action::Probe => Ok(json!({
+            "actions": ["probe", "inspect_header", "write_replay_parquet"],
+            "upstream_tag": "v0.41.4"
+        })),
         Action::InspectHeader { path } => inspect_header(&path),
+        Action::WriteReplayParquet(request) => replay::write(request),
     }
 }
 
@@ -150,25 +174,7 @@ fn inspect_header(path: &Path) -> Result<Value, Failure> {
         return Err(Failure::header("unrecognized demo format"));
     }
     let huffman = Vec::new(); // Header framing uses varints and protobuf fields.
-    let inputs = ParserInputs {
-        real_name_to_og_name: Default::default(),
-        wanted_players: Vec::new(),
-        wanted_player_props: Vec::new(),
-        wanted_other_props: Vec::new(),
-        wanted_prop_states: Default::default(),
-        wanted_ticks: Vec::new(),
-        wanted_events: Vec::new(),
-        parse_ents: false,
-        parse_projectiles: false,
-        parse_grenades: false,
-        parse_infernos: false,
-        only_header: true,
-        only_convars: false,
-        huffman_lookup_table: &huffman,
-        order_by_steamid: false,
-        list_props: false,
-        fallback_bytes: None,
-    };
+    let inputs = parser_inputs(&huffman);
     let header = FirstPassParser::new(&inputs)
         .parse_header_only(&prefix)
         .map_err(|error| {
@@ -182,4 +188,26 @@ fn inspect_header(path: &Path) -> Result<Value, Failure> {
         })?;
     let header: BTreeMap<_, _> = header.into_iter().collect();
     Ok(json!({"header": header}))
+}
+
+fn parser_inputs(huffman: &Vec<(u8, u8)>) -> ParserInputs<'_> {
+    ParserInputs {
+        real_name_to_og_name: Default::default(),
+        wanted_players: Vec::new(),
+        wanted_player_props: Vec::new(),
+        wanted_other_props: Vec::new(),
+        wanted_prop_states: Default::default(),
+        wanted_ticks: Vec::new(),
+        wanted_events: Vec::new(),
+        parse_ents: false,
+        parse_projectiles: false,
+        parse_grenades: false,
+        parse_infernos: false,
+        only_header: true,
+        only_convars: false,
+        huffman_lookup_table: huffman,
+        order_by_steamid: false,
+        list_props: false,
+        fallback_bytes: None,
+    }
 }
