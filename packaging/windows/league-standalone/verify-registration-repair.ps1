@@ -164,7 +164,8 @@ foreach ($scenario in @('MissingLocation', 'NonLeadingQuote')) {
   }
   Invoke-FixtureInstaller $Installer "/S /currentuser /D=$old" 2
   Invoke-FixtureInstaller $Installer "/S /currentuser /D=$child" 2
-  $actualLocation = Get-ItemPropertyValue -LiteralPath $product -Name InstallLocation -ErrorAction SilentlyContinue
+  # The key must survive a rejected attempt, but InstallLocation may be absent.
+  $actualLocation = (Get-ItemProperty -LiteralPath $product).InstallLocation
   if ($actualLocation -cne $expectedLocation -or
       (Get-ItemPropertyValue -LiteralPath $arp -Name UninstallString) -cne $badUninstall -or
       (Get-ItemPropertyValue -LiteralPath $arp -Name DisplayVersion) -cne $baselineVersion -or
