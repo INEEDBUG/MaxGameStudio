@@ -8,6 +8,8 @@ $catalog = Join-Path $scratch 'prior.json'
 $manifest = Join-Path $scratch 'candidate.json'
 $exe = 'cs2-insight-agent-desktop.exe'
 $uninstaller = 'uninstall.exe'
+$worker = 'maxgamestudio-parser-worker.exe'
+$notice = 'maxgamestudio-parser-worker.LICENSE.txt'
 $null = New-Item -ItemType Directory -Path $stage, (Join-Path $program 'python'), (Join-Path $program 'data') -Force
 function Put([string]$Root, [string]$Relative, [string]$Content) {
   [IO.File]::WriteAllText((Join-Path $Root $Relative), $Content)
@@ -64,6 +66,54 @@ try {
   if ((Digest $program $exe) -ne $new[$exe]) { throw 'Fresh native install was not created.' }
   Write-Host 'MAIN_NATIVE_PAYLOAD_VERIFIED'
 
+  $program = Join-Path $scratch 'Parser Overlay'
+  $null = New-Item -ItemType Directory -Path (Join-Path $program 'data') -Force
+  Put $program $exe 'old runtime'
+  Put $program $uninstaller 'old uninstaller'
+  Put $program 'data/personal.txt' 'local settings'
+  Put $stage $worker 'staged worker'
+  Put $stage $notice 'staged notice'
+  $new[$worker] = Digest $stage $worker
+  $new | ConvertTo-Json | Set-Content -LiteralPath $manifest
+  Run Install 2
+  $new[$notice] = Digest $stage $notice
+  $new | ConvertTo-Json | Set-Content -LiteralPath $manifest
+  Put $program $worker 'unowned collision'
+  Run Install 2
+  if ((Digest $program $exe) -ne $old[$exe] -or
+      [IO.File]::ReadAllText((Join-Path $program $worker)) -ne 'unowned collision') {
+    throw 'Parser preflight changed the prior program or an unverified same-name file.'
+  }
+  [IO.File]::Delete((Join-Path $program $worker))
+  Run Install 0
+  Run Install 0
+  foreach ($name in $worker, $notice) {
+    if ((Digest $program $name) -ne $new[$name]) { throw 'The verified parser payload was not installed.' }
+  }
+  Run Uninstall 0
+  if ((Test-Path -LiteralPath (Join-Path $program $worker)) -or (Test-Path -LiteralPath (Join-Path $program $notice)) -or
+      [IO.File]::ReadAllText((Join-Path $program 'data/personal.txt')) -ne 'local settings') {
+    throw 'Parser uninstall did not remove the verified pair while preserving local data.'
+  }
+  Put $program $exe 'old runtime'
+  Put $program $uninstaller 'old uninstaller'
+  Put $program $worker 'previously catalogued worker'
+  Put $program $notice 'previously catalogued notice'
+  $old[$worker] = Digest $program $worker
+  $old[$notice] = Digest $program $notice
+  $old | ConvertTo-Json | Set-Content -LiteralPath $catalog
+  $new.Remove($worker)
+  $new.Remove($notice)
+  $new | ConvertTo-Json | Set-Content -LiteralPath $manifest
+  Put $program $notice 'locally edited notice'
+  Run Install 0
+  if ((Test-Path -LiteralPath (Join-Path $program $worker)) -or
+      [IO.File]::ReadAllText((Join-Path $program $notice)) -ne 'locally edited notice' -or
+      [IO.File]::ReadAllText((Join-Path $program 'data/personal.txt')) -ne 'local settings') {
+    throw 'Parser retirement did not preserve modified or user-owned files.'
+  }
+  Write-Host 'MAIN_NATIVE_PARSER_OWNERSHIP_VERIFIED'
+
   if ($env:MGS_TEST_MAKENSIS) {
     $binary = Join-Path $scratch $exe
     Add-Type -OutputAssembly $binary -OutputType ConsoleApplication -TypeDefinition @'
@@ -110,6 +160,9 @@ SectionEnd
       MGS_MAIN_NATIVE_CATALOG = $testCatalog
       MGS_MAIN_NATIVE_CATALOG_SHA256 = (Get-FileHash -LiteralPath $testCatalog).Hash
       MGS_MAIN_NATIVE_GNU = '0'
+      MGS_MAIN_NATIVE_PARSER = '0'
+      MGS_MAIN_NATIVE_PARSER_EXE = $binary
+      MGS_MAIN_NATIVE_PARSER_NOTICE = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../demoparser-lean/LICENSE.upstream.txt')).Path
     }
     $before = @{}
     try {
@@ -119,7 +172,30 @@ SectionEnd
       }
       & $env:MGS_TEST_MAKENSIS /V2 $fixture
       if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Native NSIS fixture did not compile.' }
+      $smoke = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+      if ($smoke.PSObject.Properties[$worker] -or $smoke.PSObject.Properties[$notice]) {
+        throw 'The package without a parser includes parser inventory entries.'
+      }
       Write-Host 'MAIN_NATIVE_NSIS_COMPILE_VERIFIED'
+      [IO.File]::Delete($output)
+
+      $env:MGS_MAIN_NATIVE_PARSER = '1'
+      $env:MGS_MAIN_NATIVE_PARSER_NOTICE = Join-Path $stage $notice
+      & $env:MGS_TEST_MAKENSIS /V2 $fixture
+      if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $output)) {
+        throw 'Native NSIS accepted a notice that did not match the pinned upstream source.'
+      }
+      $env:MGS_MAIN_NATIVE_PARSER_NOTICE = $buildEnvironment.MGS_MAIN_NATIVE_PARSER_NOTICE
+      & $env:MGS_TEST_MAKENSIS /V2 $fixture
+      if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $output -PathType Leaf)) {
+        throw 'Native NSIS fixture with a parser did not compile.'
+      }
+      $compiled = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+      if ($compiled.PSObject.Properties[$worker].Value -ne (Get-FileHash -LiteralPath $binary).Hash -or
+          $compiled.PSObject.Properties[$notice].Value -ne (Get-FileHash -LiteralPath $env:MGS_MAIN_NATIVE_PARSER_NOTICE).Hash) {
+        throw 'The parser worker or pinned notice is missing from the compiled inventory.'
+      }
+      Write-Host 'MAIN_NATIVE_PARSER_NSIS_COMPILE_VERIFIED'
     } finally {
       foreach ($name in $before.Keys) { [Environment]::SetEnvironmentVariable($name, $before[$name]) }
     }

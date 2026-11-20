@@ -7,6 +7,8 @@ param(
   [string]$CatalogSHA256,
   [string]$Version,
   [string]$UninstallerImage,
+  [string]$ParserExe,
+  [string]$ParserNotice,
   [switch]$Gnu
 )
 
@@ -18,6 +20,9 @@ $assets = @('data/basic.ini', 'data/cs2-insight.config.example.json',
   'data/lite_cut_effect_contract.json', 'data/lite_cut_visual_acceptance.json',
   'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk')
 $sidecars = @('WebView2Loader.dll', 'libunwind.dll')
+$worker = 'maxgamestudio-parser-worker.exe'
+$notice = 'maxgamestudio-parser-worker.LICENSE.txt'
+$nativeFiles = @($exe, $worker, $notice) + $assets + $sidecars
 
 function Get-Hash([string]$Path) {
   (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -29,7 +34,7 @@ function Read-Inventory([string]$Path, [string[]]$Allowed) {
   foreach ($entry in $contents.PSObject.Properties) {
     $relative = $entry.Name
     $known = $relative -cin $Allowed -or (!$Allowed -and
-      ($relative -cin @($exe, $uninstaller, '.gitkeep') + $assets + $sidecars -or
+      ($relative -cin $nativeFiles + @($uninstaller, '.gitkeep') -or
         $relative -cmatch '^(python|backend|league-runtime)/'))
     if (!$known -or $relative -match '[\\:*?"<>|]' -or
         @($relative.Split('/') | Where-Object { !$_ -or $_ -in '.', '..' -or $_.EndsWith(' ') -or $_.EndsWith('.') }).Count -or
@@ -39,6 +44,9 @@ function Read-Inventory([string]$Path, [string[]]$Allowed) {
     $files[$relative] = $entry.Value
   }
   if (!$files.ContainsKey($exe)) { throw 'Program inventory lacks its executable.' }
+  if ($files.ContainsKey($worker) -ne $files.ContainsKey($notice)) {
+    throw 'Program inventory must contain the parser worker and MIT notice together.'
+  }
   return $files
 }
 
@@ -74,7 +82,7 @@ function Get-ProgramObject([string]$Root, [string]$Relative) {
 }
 
 function Assert-ProgramClosed([string]$Root) {
-  $filter = "Name='cs2-insight-agent-desktop.exe' OR Name='MaxGameStudioLeague.exe' OR Name='python.exe' OR Name='pythonw.exe'"
+  $filter = "Name='$exe' OR Name='MaxGameStudioLeague.exe' OR Name='python.exe' OR Name='pythonw.exe' OR Name='$worker'"
   foreach ($process in Get-CimInstance -ClassName Win32_Process -Filter $filter) {
     if ($process.ExecutablePath -and $process.ExecutablePath.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) {
       throw 'A program from this directory is still running.'
@@ -177,6 +185,20 @@ try {
     if ($Gnu) {
       foreach ($relative in $sidecars) { $expected[$relative] = Get-Hash (Join-Path ([IO.Path]::GetDirectoryName($Program)) $relative) }
     }
+    if ([bool]$ParserExe -ne [bool]$ParserNotice) { throw 'Provide both the parser worker and its MIT notice.' }
+    if ($ParserExe) {
+      $workerInput = Get-OrdinaryItem $ParserExe
+      if (!$workerInput -or $workerInput.PSIsContainer -or !$workerInput.Length -or
+          ($workerInput.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Expected an ordinary, nonempty parser worker file.'
+      }
+      $noticeHash = Get-Hash $ParserNotice
+      if ($noticeHash -ne (Get-Hash (Join-Path $Stage 'packaging/demoparser-lean/LICENSE.upstream.txt'))) {
+        throw 'Parser MIT notice does not match the pinned upstream notice.'
+      }
+      $expected[$worker] = Get-Hash $workerInput.FullName
+      $expected[$notice] = $noticeHash
+    }
     [IO.File]::WriteAllText($Manifest, ($expected | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
     exit 0
   }
@@ -184,7 +206,7 @@ try {
   $root = Get-ProgramDirectory $Program
   Assert-ProgramClosed $root
   if ($Phase -eq 'Uninstall') {
-    $expected = Read-Inventory $Manifest (@($exe) + $assets + $sidecars)
+    $expected = Read-Inventory $Manifest $nativeFiles
     if ($UninstallerImage) { $expected[$uninstaller] = Get-Hash $UninstallerImage }
     Remove-VerifiedFiles $root $expected @{}
     exit 0
@@ -199,7 +221,7 @@ try {
     exit 0
   }
   $stageRoot = Get-ProgramDirectory $Stage
-  $expected = Read-Inventory $Manifest (@($exe) + $assets + $sidecars)
+  $expected = Read-Inventory $Manifest $nativeFiles
   $stagedUninstaller = Get-ProgramObject $stageRoot $uninstaller
   if (!$stagedUninstaller -or $stagedUninstaller.PSIsContainer -or !$stagedUninstaller.Length) {
     throw 'Generated native uninstaller is missing.'

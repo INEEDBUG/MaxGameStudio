@@ -7,10 +7,15 @@
 !else
   !define MGS_NATIVE_GNU_FLAG ""
 !endif
+!if "$%MGS_MAIN_NATIVE_PARSER%" == "1"
+  !define MGS_NATIVE_PARSER_FLAGS '-ParserExe "$%MGS_MAIN_NATIVE_PARSER_EXE%" -ParserNotice "$%MGS_MAIN_NATIVE_PARSER_NOTICE%"'
+!else
+  !define MGS_NATIVE_PARSER_FLAGS ""
+!endif
 
 ; Hash the exact Tauri build inputs at compilation, after the bundler has
 ; prepared the candidate binaries. Never trust an installed inventory.
-!execute '"$%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${MGS_NATIVE_PAYLOAD_SCRIPT}" -Phase Build -Program "${MAINBINARYSRCPATH}" -Stage "${MGS_NATIVE_ASSETS}" -Manifest "${MGS_NATIVE_MANIFEST}" -Catalog "$%MGS_MAIN_NATIVE_CATALOG%" -CatalogSHA256 "$%MGS_MAIN_NATIVE_CATALOG_SHA256%" -Version "${VERSION}" ${MGS_NATIVE_GNU_FLAG}' = 0
+!execute '"$%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${MGS_NATIVE_PAYLOAD_SCRIPT}" -Phase Build -Program "${MAINBINARYSRCPATH}" -Stage "${MGS_NATIVE_ASSETS}" -Manifest "${MGS_NATIVE_MANIFEST}" -Catalog "$%MGS_MAIN_NATIVE_CATALOG%" -CatalogSHA256 "$%MGS_MAIN_NATIVE_CATALOG_SHA256%" -Version "${VERSION}" ${MGS_NATIVE_GNU_FLAG} ${MGS_NATIVE_PARSER_FLAGS}' = 0
 
 Function un.MGS_FindWindowsPowerShell
   StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
@@ -39,6 +44,10 @@ FunctionEnd
   !if "$%MGS_MAIN_NATIVE_GNU%" == "1"
     File "$%MGS_MAIN_NATIVE_LOADER%"
     File "$%MGS_MAIN_NATIVE_UNWIND%"
+  !endif
+  !if "$%MGS_MAIN_NATIVE_PARSER%" == "1"
+    File "/oname=maxgamestudio-parser-worker.exe" "$%MGS_MAIN_NATIVE_PARSER_EXE%"
+    File "/oname=maxgamestudio-parser-worker.LICENSE.txt" "$%MGS_MAIN_NATIVE_PARSER_NOTICE%"
   !endif
   WriteUninstaller "$PLUGINSDIR\main-native-files\uninstall.exe"
   SetOutPath "$PLUGINSDIR\main-native-files\data"

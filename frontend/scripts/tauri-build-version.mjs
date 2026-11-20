@@ -101,6 +101,20 @@ if (nativeRuntime) {
       !/^[a-f0-9]{64}$/i.test(buildEnv.MGS_MAIN_NATIVE_CATALOG_SHA256 ?? "")) {
     throw new Error("Set MGS_MAIN_NATIVE_CATALOG and its independently verified MGS_MAIN_NATIVE_CATALOG_SHA256");
   }
+  const parserExe = buildEnv.MGS_MAIN_NATIVE_PARSER_EXE?.trim();
+  const parserNotice = buildEnv.MGS_MAIN_NATIVE_PARSER_NOTICE?.trim();
+  if (Boolean(parserExe) !== Boolean(parserNotice)) {
+    throw new Error("Provide both MGS_MAIN_NATIVE_PARSER_EXE and MGS_MAIN_NATIVE_PARSER_NOTICE");
+  }
+  buildEnv.MGS_MAIN_NATIVE_PARSER = parserExe ? "1" : "0";
+  if (parserExe) {
+    buildEnv.MGS_MAIN_NATIVE_PARSER_EXE = realpathSync(parserExe);
+    buildEnv.MGS_MAIN_NATIVE_PARSER_NOTICE = realpathSync(parserNotice);
+    assertPeX64(buildEnv.MGS_MAIN_NATIVE_PARSER_EXE);
+    if (!statSync(buildEnv.MGS_MAIN_NATIVE_PARSER_NOTICE).isFile()) {
+      throw new Error("The parser MIT notice must be a file");
+    }
+  }
   const work = mkdtempSync(join(realpathSync(tmpdir()), "mgs-native-main-"));
   process.once("exit", () => {
     if (existsSync(work) && realpathSync(work) === work) rmSync(work, { recursive: true, force: true });
