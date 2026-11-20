@@ -1,7 +1,8 @@
-import { copyFile, readdir, realpath, stat } from 'node:fs/promises'
+import { copyFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { resgDisplayProgram } from '../../league-resg/resg-display.ts'
 
 const IPC_MODULE = 'virtual:mgs-league-native-ipc'
 const IPC_SOURCE = fileURLToPath(new URL('./tauri-ipc.ts', import.meta.url))
@@ -336,6 +337,7 @@ async function buildRenderer(args) {
     join(sourceRoot, 'src/renderer-shared/assets/ico/league.ico'),
     join(outDir, 'league.ico')
   )
+  await writeFile(join(outDir, 'resg-display.js'), resgDisplayProgram(), 'utf8')
   console.log(`Native League renderer built at ${outDir}`)
 }
 

@@ -10,7 +10,7 @@ const code = require('node:module').stripTypeScriptTypes(
   { mode: 'strip' }
 )
 const resgDisplayScript = new Function(
-  code.replace('export function', 'function') + '\nreturn resgDisplayScript'
+  code.replaceAll('export function', 'function') + '\nreturn resgDisplayScript'
 )()
 function fixture() {
   const dom = new JSDOM(

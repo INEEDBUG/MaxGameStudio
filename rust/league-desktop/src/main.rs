@@ -16,6 +16,9 @@ mod client_runtime;
 mod lcu;
 
 #[cfg(windows)]
+mod resg_window;
+
+#[cfg(windows)]
 fn main() {
     if let Err(error) = desktop::run() {
         rfd::MessageDialog::new()

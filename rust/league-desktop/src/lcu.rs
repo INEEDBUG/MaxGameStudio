@@ -1,9 +1,11 @@
 //! Narrow HTTPS reads from an already verified local League client.
 
+use maxgamestudio_league_core::resg::select_resg_champion;
 use reqwest::{redirect::Policy, Client, RequestBuilder, StatusCode};
 use rustls::pki_types::{pem::PemObject, CertificateDer};
 use rustls::{client::Resumption, crypto::ring, ClientConfig, RootCertStore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{fmt, num::NonZeroU16, sync::Arc, time::Duration};
 
 // Byte-for-byte match to the CA bundled by League Akari and Riot's League Director.
@@ -108,12 +110,45 @@ pub(crate) struct GameflowSession {
     pub(crate) game_data: Option<GameflowGameData>,
 }
 
+impl GameflowSession {
+    pub(crate) fn is_hextech_aram(&self) -> bool {
+        self.game_mode() == Some("KIWI")
+    }
+
+    fn game_mode(&self) -> Option<&str> {
+        self.game_data
+            .as_ref()?
+            .queue
+            .as_ref()?
+            .game_mode
+            .as_deref()
+    }
+
+    pub(crate) fn resg_champion(&self, selection: &Value, puuid: Option<&str>) -> Option<u32> {
+        let game = self.game_data.as_ref()?;
+        let private_sample = json!({"gameData": {
+            "queue": {"gameMode": self.game_mode()},
+            "playerChampionSelections": game.player_champion_selections,
+            "teamOne": game.team_one,
+            "teamTwo": game.team_two,
+        }});
+        select_resg_champion(Some(&self.phase), &private_sample, selection, puuid)
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GameflowGameData {
     pub(crate) game_id: Option<u64>,
     pub(crate) is_custom_game: Option<bool>,
     pub(crate) queue: Option<GameflowQueue>,
+    // Keep rosters inside the native sampler. The renderer only needs the local chart target.
+    #[serde(default, skip_serializing)]
+    player_champion_selections: Value,
+    #[serde(default, skip_serializing)]
+    team_one: Value,
+    #[serde(default, skip_serializing)]
+    team_two: Value,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -130,6 +165,7 @@ enum ReadEndpoint {
     Phase,
     CurrentSummoner,
     GameflowSession,
+    ChampSelect,
 }
 
 impl ReadEndpoint {
@@ -138,6 +174,7 @@ impl ReadEndpoint {
             Self::Phase => "/lol-gameflow/v1/gameflow-phase",
             Self::CurrentSummoner => "/lol-summoner/v1/current-summoner",
             Self::GameflowSession => "/lol-gameflow/v1/session",
+            Self::ChampSelect => "/lol-champ-select/v1/session",
         }
     }
 
@@ -145,7 +182,7 @@ impl ReadEndpoint {
         match self {
             Self::Phase => 1024,
             Self::CurrentSummoner => 16 * 1024,
-            Self::GameflowSession => 256 * 1024,
+            Self::GameflowSession | Self::ChampSelect => 256 * 1024,
         }
     }
 }
@@ -203,6 +240,16 @@ impl LcuTransport {
         target: &LcuTarget<'_>,
     ) -> Result<Option<GameflowSession>, LcuError> {
         self.read(target, ReadEndpoint::GameflowSession).await
+    }
+
+    pub(crate) async fn read_champ_select(
+        &self,
+        target: &LcuTarget<'_>,
+    ) -> Result<Value, LcuError> {
+        Ok(self
+            .read(target, ReadEndpoint::ChampSelect)
+            .await?
+            .unwrap_or(Value::Null))
     }
 
     fn request(&self, target: &LcuTarget<'_>, read: ReadEndpoint) -> RequestBuilder {
@@ -297,6 +344,7 @@ mod tests {
                 "/lol-summoner/v1/current-summoner",
             ),
             (ReadEndpoint::GameflowSession, "/lol-gameflow/v1/session"),
+            (ReadEndpoint::ChampSelect, "/lol-champ-select/v1/session"),
         ] {
             let request = transport.request(&target, read).build().unwrap();
             assert_eq!(request.method(), reqwest::Method::GET);
@@ -329,6 +377,7 @@ mod tests {
                     Err(error) => panic!("Synthetic listener did not accept a connection: {error}"),
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream.set_read_timeout(Some(CONNECT_TIMEOUT)).unwrap();
             stream.set_write_timeout(Some(CONNECT_TIMEOUT)).unwrap();
             let mut first_record = [0; 5];
@@ -433,5 +482,45 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn resg_uses_the_local_champion_without_exposing_the_roster() {
+        let mut source = serde_json::json!({
+            "phase": "ChampSelect",
+            "gameData": {
+                "gameId": 19,
+                "queue": { "gameMode": "KIWI" },
+                "teamOne": [{ "puuid": "other-fixture", "championId": 21 }],
+                "playerChampionSelections": [{ "puuid": "self-fixture", "championId": 22 }]
+            }
+        });
+        let select = serde_json::json!({
+            "localPlayerCellId": 4,
+            "myTeam": [{ "cellId": 4, "championId": 23 }],
+            "actions": [[{ "actorCellId": 4, "type": "pick", "championId": 24 }]]
+        });
+        let session: GameflowSession = serde_json::from_value(source.clone()).unwrap();
+        assert_eq!(session.resg_champion(&select, None), Some(23));
+        let renderer = serde_json::to_value(session).unwrap();
+        assert!(renderer["gameData"].get("teamOne").is_none());
+        assert!(renderer["gameData"]
+            .get("playerChampionSelections")
+            .is_none());
+
+        source["phase"] = serde_json::json!("InProgress");
+        let session: GameflowSession = serde_json::from_value(source.clone()).unwrap();
+        assert_eq!(
+            session.resg_champion(&select, Some("self-fixture")),
+            Some(22)
+        );
+        assert_eq!(
+            session.resg_champion(&select, Some("missing-fixture")),
+            None
+        );
+
+        source["gameData"]["queue"]["gameMode"] = serde_json::json!("ARAM");
+        let session: GameflowSession = serde_json::from_value(source).unwrap();
+        assert_eq!(session.resg_champion(&select, Some("self-fixture")), None);
     }
 }

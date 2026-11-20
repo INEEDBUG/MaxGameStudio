@@ -116,11 +116,9 @@ fn restores_renderer_and_companion_preferences_from_existing_keys() {
         .unwrap()
         .unwrap();
     assert_eq!(opgg["enabled"], false);
-    let resg = resg_snapshot(&db).unwrap();
+    let resg = resg_preferences(&db).unwrap();
     assert_eq!(resg["enabled"], true);
     assert_eq!(resg["autoShow"], false);
-    assert_eq!(resg["status"], "waiting");
-    assert_eq!(resg["available"], false);
     assert_eq!(
         initial_state(&db, "self-update-main", "settings")
             .unwrap()

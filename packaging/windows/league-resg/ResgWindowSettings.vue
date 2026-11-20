@@ -14,6 +14,23 @@
       />
     </SettingsRow>
     <SettingsRow
+      v-if="!switchesOnly"
+      :label="t('settings.multiWindow.resgWindow.display.label')"
+      :label-width="400"
+    >
+      <NButtonGroup size="small">
+        <NButton :type="snapshot.displayMode === 'all' ? 'primary' : 'default'" :disabled="busy" @click="call('setDisplayMode', 'all')">
+          {{ t('settings.multiWindow.resgWindow.display.all') }}
+        </NButton>
+        <NButton :type="snapshot.displayMode === 'compact' ? 'primary' : 'default'" :disabled="busy" @click="call('setDisplayMode', 'compact')">
+          {{ t('settings.multiWindow.resgWindow.display.compact') }}
+        </NButton>
+      </NButtonGroup>
+    </SettingsRow>
+    <div v-if="!switchesOnly && snapshot.displayFallback" role="status" class="text-right text-xs text-neutral-500">
+      {{ t('settings.multiWindow.resgWindow.display.fallback') }}
+    </div>
+    <SettingsRow
       :label="t('settings.multiWindow.resgWindow.autoShow.label')"
       :label-description="t('settings.multiWindow.resgWindow.autoShow.description')"
       :label-width="400"
@@ -99,13 +116,15 @@ import SettingsSection from '@renderer-shared/components/SettingsSection.vue'
 import { useInstance } from '@renderer-shared/shards'
 import { AkariIpcRenderer } from '@renderer-shared/shards/ipc'
 import { useTranslation } from 'i18next-vue'
-import { NButton, NFlex, NSwitch, NTag, useMessage } from 'naive-ui'
+import { NButton, NButtonGroup, NFlex, NSwitch, NTag, useMessage } from 'naive-ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 type ResgSnapshot = {
   enabled: boolean
   autoShow: boolean
   alwaysOnTop: boolean
+  displayMode: 'all' | 'compact'
+  displayFallback: boolean
   visible: boolean
   available: boolean
   championId: number
@@ -124,6 +143,8 @@ const snapshot = reactive<ResgSnapshot>({
   enabled: false,
   autoShow: true,
   alwaysOnTop: false,
+  displayMode: 'all',
+  displayFallback: false,
   visible: false,
   available: false,
   championId: 0,

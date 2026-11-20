@@ -63,6 +63,11 @@ $enResg = @'
       alwaysOnTop:
         label: Keep on top
         description: Keep the RESG window above other windows.
+      display:
+        label: Display
+        all: All data
+        compact: Popular picks
+        fallback: Popular picks are unavailable. Showing all data.
       status:
         label: Status
         description: RESG is limited to Hextech ARAM.
@@ -89,6 +94,11 @@ $zhResg = @'
       alwaysOnTop:
         label: 始终置顶
         description: 让 RESG 窗口保持在其他窗口上方。
+      display:
+        label: 显示内容
+        all: 全部数据
+        compact: 常用精选
+        fallback: 暂无常用精选，已显示全部数据。
       status:
         label: 状态
         description: RESG 仅支持海克斯大乱斗。

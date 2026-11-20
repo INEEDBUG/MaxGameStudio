@@ -9,11 +9,11 @@ export function resgDisplayScript(
   english: boolean,
   dark: boolean
 ) {
-  return String.raw`(async () => {
-    const mode = ${JSON.stringify(mode)};
-    const championId = ${JSON.stringify(championId)};
-    const english = ${english};
-    const dark = ${dark};
+  return `${resgDisplayProgram()}(${JSON.stringify(mode)}, ${JSON.stringify(championId)}, ${english}, ${dark})`
+}
+
+export function resgDisplayProgram() {
+  return String.raw`(async (mode, championId, english, dark) => {
     const rootId = 'mgs-resg-compact';
     const styleId = 'mgs-resg-compact-style';
     const reset = () => {
@@ -137,8 +137,8 @@ export function resgDisplayScript(
       addGroups(english ? 'Popular equipment builds' : '热门装备组合', english
         ? 'Ranked by adoption rate within each build stage.' : '按各出装阶段的采用率排序。', itemGroups, 'equipment');
       panel.append(element('footer', english
-        ? 'Source: RESG · Switch to All data above for the original page, combinations and descriptions.'
-        : '数据来源：RESG · 顶部切回“全部数据”可查看原始页面、完整组合与详细说明。'));
+        ? 'Source: RESG. Select All data to see the original page, combinations and descriptions.'
+        : '数据来源：RESG。切换到“全部数据”可查看完整组合与详细说明。'));
       const style = element('style');
       style.id = styleId;
       style.textContent = '#app{display:none!important}html,body{margin:0!important;background:' + (dark ? '#111111' : '#f5f7fb') + '!important}' +
@@ -167,5 +167,5 @@ export function resgDisplayScript(
         await flush();
       }
     }
-  })()`
+  })`
 }

@@ -1,6 +1,7 @@
 use crate::{
     client_runtime::{client_from_view, monitor, ClientRuntime, CLIENT},
     profile::DesktopProfile,
+    resg_window::{self, ResgAction, ResgWindow},
 };
 use maxgamestudio_league_core::{
     profile_database::PROFILE_DB_VERSION,
@@ -367,15 +368,10 @@ async fn league_call(
             }
             (
                 RESG_NAMESPACE,
-                method @ ("getSnapshot" | "setEnabled" | "setAutoShow" | "setAlwaysOnTop"
-                | "setDisplayMode"),
+                method @ ("setEnabled" | "setAutoShow" | "setAlwaysOnTop" | "setDisplayMode"),
             ) if window.label() == "main" => {
                 let db = profile.database.lock().map_err(|_| "数据库连接中断。")?;
                 let key = match method {
-                    "getSnapshot" => {
-                        return bootstrap::resg_snapshot(&db)
-                            .map_err(|error| error.to_string().into())
-                    }
                     "setEnabled" => "enabled",
                     "setAutoShow" => "autoShow",
                     "setAlwaysOnTop" => "alwaysOnTop",
@@ -387,10 +383,26 @@ async fn league_call(
                     .expect("known RESG preference")
                     .write(&db, value)
                     .map_err(|error| error.to_string())?;
-                let snapshot = bootstrap::resg_snapshot(&db).map_err(|error| error.to_string())?;
-                // Submit the event before the next database-backed RESG change can overtake it.
-                emit(&window, RESG_NAMESPACE, "changed", json!([snapshot]))?;
-                Ok(snapshot)
+                let controller = app.state::<ResgWindow>();
+                controller.replace_preferences(
+                    bootstrap::resg_preferences(&db).map_err(io::Error::other)?,
+                )?;
+                drop(db);
+                if key == "enabled" {
+                    client.refresh_soon();
+                }
+                Ok(controller.reconcile(app, ResgAction::Synchronize)?)
+            }
+            (RESG_NAMESPACE, method @ ("getSnapshot" | "show" | "close" | "retry"))
+                if window.label() == "main" =>
+            {
+                let action = match method {
+                    "show" => ResgAction::Show,
+                    "close" => ResgAction::Close,
+                    "retry" => ResgAction::Retry,
+                    _ => ResgAction::Synchronize,
+                };
+                Ok(app.state::<ResgWindow>().reconcile(app, action)?)
             }
             (SYNC_NAMESPACE, "subscribeAndGetInitialState") => {
                 match (
@@ -593,19 +605,24 @@ pub(crate) fn run() -> tauri::Result<()> {
             let profile = DesktopProfile::prepare(app)
                 .map_err(|error| io::Error::other(format!("工具箱数据无法准备。{error}")))?;
             let webview_directory = profile.webview_directory()?;
-            let auto_connect = {
+            let (auto_connect, resg_preferences) = {
                 let db = profile
                     .database
                     .lock()
                     .map_err(|_| io::Error::other("数据库连接中断。"))?;
-                ShellPreference::ClientAutoConnect
+                let auto_connect = ShellPreference::ClientAutoConnect
                     .read(&db, profile.system_locale)
                     .map_err(io::Error::other)?
                     .as_bool()
-                    .unwrap_or(true)
+                    .unwrap_or(true);
+                (
+                    auto_connect,
+                    bootstrap::resg_preferences(&db).map_err(io::Error::other)?,
+                )
             };
             app.manage(profile);
             app.manage(ClientRuntime::new(auto_connect)?);
+            app.manage(ResgWindow::new(resg_preferences));
             app.manage(SettingsRevision::default());
             app.manage(updater::LeagueUpdater::default());
             let show = MenuItem::with_id(app, "show", "显示工具箱", true, None::<&str>)?;
@@ -648,6 +665,15 @@ pub(crate) fn run() -> tauri::Result<()> {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == resg_window::LABEL && matches!(event, WindowEvent::Destroyed) {
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(controller) = app.try_state::<ResgWindow>() {
+                        let _ = controller.reconcile(&app, ResgAction::Synchronize);
+                    }
+                });
+                return;
+            }
             if !LOCAL_WINDOWS.contains(&window.label()) {
                 return;
             }

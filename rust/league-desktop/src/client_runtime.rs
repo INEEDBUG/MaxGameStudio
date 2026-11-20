@@ -4,6 +4,7 @@ use crate::{
     client_discovery::{discover_clients, ClientInstance, LocalClient},
     desktop::emit,
     lcu::{LcuError, LcuTransport},
+    resg_window::{ResgAction, ResgWindow},
 };
 pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
 use serde_json::{json, Value};
@@ -24,6 +25,14 @@ struct ActiveClient {
     phase: String,
     session: Value,
     summoner: Value,
+    resg: Option<ResgTarget>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResgTarget {
+    pub(crate) instance: ClientInstance,
+    pub(crate) game_id: Option<u64>,
+    pub(crate) champion_id: u32,
 }
 
 fn client_identity(instance: ClientInstance) -> Value {
@@ -112,6 +121,14 @@ impl ClientRuntime {
             .map(|fields| (state.revision, fields)))
     }
 
+    pub(crate) fn resg_target(&self) -> Option<ResgTarget> {
+        self.state.lock().ok()?.snapshot.active.as_ref()?.resg
+    }
+
+    pub(crate) fn refresh_soon(&self) {
+        self.wake.notify_one();
+    }
+
     pub(crate) fn set_auto_connect(&self, enabled: bool) -> Result<(), &'static str> {
         let mut state = self.state.lock().map_err(|_| "客户端状态不可用。")?;
         if state.auto_connect != enabled {
@@ -147,7 +164,12 @@ impl ClientRuntime {
         Ok(())
     }
 
-    async fn sample(&self, client: &LocalClient) -> Result<Option<ActiveClient>, LcuError> {
+    async fn sample(
+        &self,
+        client: &LocalClient,
+        resg_enabled: bool,
+        previous_chart: Option<ResgTarget>,
+    ) -> Result<Option<ActiveClient>, LcuError> {
         if !client.alive() {
             return Ok(None);
         }
@@ -161,16 +183,56 @@ impl ClientRuntime {
             .read_gameflow_session(&target)
             .await?
             .filter(|session| session.phase == phase);
+        let mut resg = None;
+        if let Some(game) = session
+            .as_ref()
+            .filter(|game| resg_enabled && game.is_hextech_aram())
+        {
+            let game_id = game
+                .game_data
+                .as_ref()
+                .and_then(|data| data.game_id)
+                .filter(|&id| id != 0);
+            let selection = if phase == "ChampSelect" {
+                // An optional chart request cannot hold up the connection status.
+                tokio::time::timeout(
+                    Duration::from_millis(750),
+                    self.transport.read_champ_select(&target),
+                )
+                .await
+                .ok()
+                .and_then(Result::ok)
+            } else {
+                Some(Value::Null)
+            };
+            resg = if let Some(selection) = selection {
+                let puuid = summoner.as_ref().map(|player| player.puuid.as_str());
+                game.resg_champion(&selection, puuid)
+                    .map(|champion_id| ResgTarget {
+                        instance: client.instance,
+                        game_id,
+                        champion_id,
+                    })
+            } else {
+                // Keep the current chart during an optional read timeout for the same verified game.
+                previous_chart.filter(|previous| {
+                    game_id.is_some()
+                        && previous.game_id == game_id
+                        && previous.instance == client.instance
+                })
+            };
+        }
         Ok(client.alive().then(|| ActiveClient {
             instance: client.instance,
             phase,
             session: json!(session),
             summoner: json!(summoner),
+            resg,
         }))
     }
 
-    async fn refresh(&self, app: &AppHandle) {
-        let (generation, manual, connected, auto_connect) = {
+    async fn refresh(&self, app: &AppHandle, resg_enabled: bool) {
+        let (generation, manual, connected, auto_connect, previous_chart) = {
             let Ok(state) = self.state.lock() else {
                 return;
             };
@@ -179,6 +241,11 @@ impl ClientRuntime {
                 state.manual_client,
                 state.snapshot.active.as_ref().map(|client| client.instance),
                 state.auto_connect && !state.manually_disconnected,
+                state
+                    .snapshot
+                    .active
+                    .as_ref()
+                    .and_then(|client| client.resg),
             )
         };
         let clients = tauri::async_runtime::spawn_blocking(discover_clients)
@@ -195,11 +262,14 @@ impl ClientRuntime {
                 .or_else(|| (auto_connect && clients.len() == 1).then(|| &clients[0]))
         };
         let active = match candidate {
-            Some(client) => tokio::time::timeout(Duration::from_secs(4), self.sample(client))
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .flatten(),
+            Some(client) => tokio::time::timeout(
+                Duration::from_secs(4),
+                self.sample(client, resg_enabled, previous_chart),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten(),
             None => None,
         };
         let mut known_clients: Vec<_> = clients.iter().map(|client| client.instance).collect();
@@ -230,8 +300,10 @@ impl ClientRuntime {
 
 pub(crate) async fn monitor(app: AppHandle) {
     let runtime = app.state::<ClientRuntime>();
+    let resg = app.state::<ResgWindow>();
     loop {
-        runtime.refresh(&app).await;
+        runtime.refresh(&app, resg.enabled()).await;
+        let _ = resg.reconcile(&app, ResgAction::Synchronize);
         let _ = tokio::time::timeout(Duration::from_secs(2), runtime.wake.notified()).await;
     }
 }

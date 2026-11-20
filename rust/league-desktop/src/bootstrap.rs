@@ -286,14 +286,8 @@ fn valid_setting(default: &Value, value: &Value) -> bool {
     }
 }
 
-pub(super) fn resg_snapshot(db: &LeagueProfileDatabase) -> Result<Value, ProfileDatabaseError> {
-    let preferences = settings(db, RESG_NAMESPACE)?.expect("known RESG settings");
-    Ok(json!({
-        "enabled":preferences["enabled"],"autoShow":preferences["autoShow"],
-        "alwaysOnTop":preferences["alwaysOnTop"],"displayMode":preferences["displayMode"],
-        "displayFallback":false,"visible":false,"available":false,"championId":0,
-        "status":if preferences["enabled"] == true { "waiting" } else { "disabled" },"error":null,
-    }))
+pub(super) fn resg_preferences(db: &LeagueProfileDatabase) -> Result<Value, ProfileDatabaseError> {
+    Ok(settings(db, RESG_NAMESPACE)?.expect("known RESG settings"))
 }
 
 fn aram_defaults(key: &str) -> Option<Value> {
