@@ -19,6 +19,9 @@ mod lcu;
 mod resg_window;
 
 #[cfg(windows)]
+mod opgg_window;
+
+#[cfg(windows)]
 mod aram_automation;
 
 #[cfg(windows)]

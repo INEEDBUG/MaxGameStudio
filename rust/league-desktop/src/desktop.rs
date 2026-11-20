@@ -1,6 +1,7 @@
 use crate::{
     client_runtime::{client_from_view, monitor, ClientRuntime, CLIENT},
     lcu::game_art::GameArtPath,
+    opgg_window::{self, OpggPreferences, OpggWindow},
     profile::DesktopProfile,
     resg_window::{self, ResgAction, ResgWindow},
 };
@@ -272,11 +273,34 @@ fn bundled_navigation(url: &tauri::Url) -> bool {
         )
 }
 
+pub(crate) fn show_opgg_companion(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    show_companion(app, OPGG_WINDOW, true)
+}
+
+pub(crate) fn close_opgg_companion(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("opgg") {
+        window.destroy()?;
+        publish_window_property(&window, "show", json!(false))?;
+        publish_window_property(&window, "ready", json!(false))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn show_companion(
     app: &AppHandle,
     namespace: &str,
     inactive: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let opgg_draft = if namespace == OPGG_WINDOW {
+        Some(
+            app.state::<OpggWindow>()
+                .target(app)
+                .ok_or("请先开启 OP.GG 并进入大乱斗选人。")?
+                .scope,
+        )
+    } else {
+        None
+    };
     let (label, entry, title, width, height, min_height) = match namespace {
         AUX_WINDOW => ("aux", "aux-window.html", "小型辅助面板", 340., 420., 420.),
         OPGG_WINDOW => ("opgg", "opgg-window.html", "OP.GG", 530., 720., 530.),
@@ -325,7 +349,21 @@ pub(crate) fn show_companion(
             == true
     };
     if !enabled {
+        if opgg_draft.is_some() {
+            let _ = close_opgg_companion(app);
+        }
         return Err("该辅助窗口已关闭。".into());
+    }
+    if let Some(expected) = opgg_draft {
+        let opgg = app.state::<OpggWindow>();
+        match opgg.target(app) {
+            Some(current) if current.scope == expected => opgg.mark_shown(expected),
+            Some(_) => return Err("当前大乱斗选人已变更。".into()),
+            None => {
+                let _ = close_opgg_companion(app);
+                return Err("当前大乱斗选人已结束。".into());
+            }
+        }
     }
     target.show()?;
     if !inactive {
@@ -465,6 +503,12 @@ async fn league_call(
                 };
                 Ok(app.state::<ResgWindow>().reconcile(app, action)?)
             }
+            (opgg_window::NAMESPACE, "openGuide")
+                if window.label() == "opgg" && args.is_empty() =>
+            {
+                app.state::<OpggWindow>().open_guide(app)?;
+                Ok(Value::Null)
+            }
             (SYNC_NAMESPACE, "subscribeAndGetInitialState") => {
                 match (
                     args.first().and_then(Value::as_str),
@@ -595,6 +639,15 @@ async fn league_call(
                 let value = value.expect("settings reads have returned");
                 let revision = revision.next();
                 drop(db);
+                if namespace == OPGG_WINDOW && matches!(key, "enabled" | "autoShow") {
+                    let opgg = app.state::<OpggWindow>();
+                    let value = value.as_bool().ok_or("无效的 OP.GG 设置值。")?;
+                    opgg.update_setting(key, value)?;
+                    client.refresh_soon();
+                    if key == "enabled" && !value {
+                        opgg.reconcile(app)?;
+                    }
+                }
                 if let Some(target) =
                     window_label(namespace).and_then(|label| app.get_webview_window(label))
                 {
@@ -672,7 +725,7 @@ pub(crate) fn run() -> tauri::Result<()> {
             let profile = DesktopProfile::prepare(app)
                 .map_err(|error| io::Error::other(format!("工具箱数据无法准备。{error}")))?;
             let webview_directory = profile.webview_directory()?;
-            let (auto_connect, resg_preferences, aram_options) = {
+            let (auto_connect, resg_preferences, aram_options, opgg_preferences) = {
                 let db = profile
                     .database
                     .lock()
@@ -682,15 +735,23 @@ pub(crate) fn run() -> tauri::Result<()> {
                     .map_err(io::Error::other)?
                     .as_bool()
                     .unwrap_or(true);
+                let opgg = bootstrap::initial_state(&db, OPGG_WINDOW, "settings")
+                    .map_err(io::Error::other)?
+                    .expect("known OP.GG window settings");
                 (
                     auto_connect,
                     bootstrap::resg_preferences(&db).map_err(io::Error::other)?,
                     bootstrap::aram_options(&db).map_err(io::Error::other)?,
+                    OpggPreferences {
+                        enabled: opgg["enabled"] == true,
+                        auto_show: opgg["autoShow"] == true,
+                    },
                 )
             };
             app.manage(profile);
             app.manage(ClientRuntime::new(auto_connect, aram_options)?);
             app.manage(ResgWindow::new(resg_preferences));
+            app.manage(OpggWindow::new(opgg_preferences));
             app.manage(SettingsRevision::default());
             app.manage(updater::LeagueUpdater::default());
             let show = MenuItem::with_id(app, "show", "显示工具箱", true, None::<&str>)?;

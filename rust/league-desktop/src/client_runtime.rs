@@ -9,6 +9,7 @@ use crate::{
         player_search::PlayerSearchShard,
         GameflowSession, LcuError, LcuTransport,
     },
+    opgg_window::{self, OpggTarget, OpggWindow},
     resg_window::{ResgAction, ResgWindow},
 };
 pub(crate) use maxgamestudio_league_core::shell_preferences::LEAGUE_CLIENT as CLIENT;
@@ -35,6 +36,7 @@ struct ActiveClient {
     session: Value,
     summoner: Value,
     resg: Option<ResgTarget>,
+    opgg: Option<OpggTarget>,
     shard: Option<PlayerSearchShard>,
 }
 
@@ -87,6 +89,9 @@ impl Snapshot {
                 "session": active.map(|client| &client.session),
             })),
             (CLIENT, "summoner") => Some(json!({"me": active.map(|client| &client.summoner)})),
+            (opgg_window::NAMESPACE, "state") => Some(json!({
+                "draft": active.and_then(|client| client.opgg).map(OpggTarget::view),
+            })),
             (SGP, "state") => Some(json!({
                 "availability": {
                     "region": shard.map_or("", |shard| shard.region.as_str()),
@@ -102,12 +107,13 @@ impl Snapshot {
     }
 }
 
-const PUBLIC_STATES: [(&str, &str); 5] = [
+const PUBLIC_STATES: [(&str, &str); 6] = [
     (CLIENT_DISCOVERY, "state"),
     (CLIENT, "state"),
     (CLIENT, "gameflow"),
     (CLIENT, "summoner"),
     (SGP, "state"),
+    (opgg_window::NAMESPACE, "state"),
 ];
 
 #[derive(Default)]
@@ -126,6 +132,7 @@ struct RuntimeState {
     data_task: Option<tauri::async_runtime::JoinHandle<()>>,
     game_data: Map<String, Value>,
     art_client: Option<Arc<LocalClient>>,
+    opgg_checked_at: Option<Instant>,
 }
 
 pub(crate) fn empty_game_data() -> Value {
@@ -136,6 +143,16 @@ pub(crate) fn empty_game_data() -> Value {
 }
 
 impl RuntimeState {
+    fn verified_opgg_target(&self) -> Option<OpggTarget> {
+        let active = self.snapshot.active.as_ref()?;
+        let target = active.opgg?;
+        let client = self.art_client.as_ref()?;
+        (self.opgg_checked_at?.elapsed() <= Duration::from_secs(5)
+            && client.instance == active.instance
+            && client.alive())
+        .then_some(target)
+    }
+
     fn refresh_game_data(&mut self, app: &AppHandle) {
         let active = self.snapshot.active.as_ref().map(|client| client.instance);
         if self.data_client == active {
@@ -210,6 +227,24 @@ impl ClientRuntime {
 
     pub(crate) fn resg_target(&self) -> Option<ResgTarget> {
         self.state.lock().ok()?.snapshot.active.as_ref()?.resg
+    }
+
+    pub(crate) fn opgg_target(&self) -> Option<OpggTarget> {
+        self.state.lock().ok()?.verified_opgg_target()
+    }
+
+    pub(crate) fn opgg_guide(&self) -> Option<(OpggTarget, String)> {
+        let state = self.state.lock().ok()?;
+        let target = state.verified_opgg_target()?;
+        let alias = target.champion_id.and_then(|id| {
+            state
+                .game_data
+                .get("champions")?
+                .get(id.to_string())?
+                .get("alias")?
+                .as_str()
+        });
+        Some((target, target.guide_url(alias)))
     }
 
     pub(crate) fn refresh_soon(&self) {
@@ -362,6 +397,7 @@ impl ClientRuntime {
         &self,
         client: &LocalClient,
         resg_enabled: bool,
+        opgg_enabled: bool,
         previous_chart: Option<ResgTarget>,
         previous_shard: Option<(String, PlayerSearchShard)>,
         automate: bool,
@@ -398,7 +434,8 @@ impl ClientRuntime {
         }
         let should_read = phase == "ChampSelect"
             && session.as_ref().is_some_and(|game| {
-                (automate && game.is_aram()) || (resg_enabled && game.is_hextech_aram())
+                ((automate || opgg_enabled) && game.is_aram())
+                    || (resg_enabled && game.is_hextech_aram())
             });
         let selection = if should_read {
             // The optional reads should leave time to publish connected state.
@@ -444,6 +481,14 @@ impl ClientRuntime {
                 })
             };
         }
+        let opgg = if opgg_enabled && summoner.is_some() {
+            session
+                .as_ref()
+                .zip(selection.as_ref())
+                .and_then(|(flow, select)| OpggTarget::from_sample(client.instance, flow, select))
+        } else {
+            None
+        };
         Ok(client.alive().then(|| {
             let client = ActiveClient {
                 instance: client.instance,
@@ -451,6 +496,7 @@ impl ClientRuntime {
                 session: json!(session),
                 summoner: json!(summoner),
                 resg,
+                opgg,
                 shard,
             };
             let selection = if automate {
@@ -462,7 +508,7 @@ impl ClientRuntime {
         }))
     }
 
-    async fn refresh(&self, app: &AppHandle, resg_enabled: bool) {
+    async fn refresh(&self, app: &AppHandle, resg_enabled: bool, opgg_enabled: bool) {
         let (generation, manual, connected, auto_connect, previous_chart, previous_shard, options) = {
             let Ok(state) = self.state.lock() else {
                 return;
@@ -509,6 +555,7 @@ impl ClientRuntime {
                 self.sample(
                     client,
                     resg_enabled,
+                    opgg_enabled,
                     previous_chart,
                     previous_shard.filter(|_| Some(client.instance) == connected),
                     options.is_some(),
@@ -559,6 +606,11 @@ impl ClientRuntime {
                         .is_some_and(|active| active.instance == candidate.instance)
                 })
                 .cloned();
+            state.opgg_checked_at = state
+                .snapshot
+                .active
+                .as_ref()
+                .and_then(|active| active.opgg.map(|_| Instant::now()));
             if state
                 .snapshot
                 .active
@@ -685,9 +737,11 @@ async fn load_game_data(app: AppHandle, instance: ClientInstance, ticket: u64) {
 pub(crate) async fn monitor(app: AppHandle) {
     let runtime = app.state::<ClientRuntime>();
     let resg = app.state::<ResgWindow>();
+    let opgg = app.state::<OpggWindow>();
     loop {
-        runtime.refresh(&app, resg.enabled()).await;
+        runtime.refresh(&app, resg.enabled(), opgg.enabled()).await;
         let _ = resg.reconcile(&app, ResgAction::Synchronize);
+        let _ = opgg.reconcile(&app);
         let interval = runtime
             .state
             .lock()
