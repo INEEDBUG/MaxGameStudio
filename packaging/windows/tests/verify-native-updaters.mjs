@@ -81,7 +81,8 @@ async function waitFor(description, milliseconds, predicate) {
     if (value) return value
     await delay(150)
   } while (Date.now() < stop)
-  throw new Error(`Timed out waiting for ${description}.`)
+  const detail = typeof description === 'function' ? description() : description
+  throw new Error(`Timed out waiting for ${detail}.`)
 }
 
 async function readFeed(url) {
@@ -134,7 +135,14 @@ async function connectPage(role, port) {
         try {
           const reply = JSON.parse(data)
           if (reply.id !== id) return
-          assert.ok(!reply.error && !reply.result.exceptionDetails, 'The installed updater call failed in WebView2.')
+          assert.ok(!reply.error, 'The installed updater debugger rejected the evaluation request.')
+          const exception = reply.result?.exceptionDetails
+          if (exception) {
+            const name = exception.exception?.className
+            const kind = ['Error', 'ReferenceError', 'TypeError', 'SyntaxError'].includes(name) ? name : 'evaluation-error'
+            throw new Error(`The installed updater evaluation failed in WebView2 (${kind}).`)
+          }
+          assert.ok(reply.result?.result, 'The installed updater debugger returned no evaluation result.')
           finish(resolve, reply.result.result.value)
         } catch (error) {
           finish(reject, error)
@@ -166,9 +174,69 @@ function mainCheck(allowDowngrades) {
   })()`
 }
 
-const leagueCheck = `window.__TAURI__.core.invoke('league_call', {
-  namespace: 'league-update-main', method: 'check', args: []
-})`
+const leagueReadiness = `(() => {
+  if (document.readyState === 'loading') return 'document-loading'
+  if (typeof window.__TAURI__?.core?.invoke !== 'function') return 'bridge-unavailable'
+  return document.querySelector('#app[data-v-app]') ? 'ready' : 'mount-pending'
+})()`
+
+function leagueCall(namespace, method) {
+  const args = JSON.stringify({ namespace, method, args: [] })
+  return `(async () => {
+    try {
+      return { response: await window.__TAURI__.core.invoke('league_call', ${args}) }
+    } catch (error) {
+      const message = typeof error === 'string' ? error : error?.message
+      if (/not allowed|permission denied/i.test(message)) return { failure: 'ipc-denied' }
+      if (/command .*not found/i.test(message)) return { failure: 'ipc-command-missing' }
+      if (/invalid args/i.test(message)) return { failure: 'ipc-invalid-arguments' }
+      return { failure: 'ipc-rejected' }
+    }
+  })()`
+}
+
+export async function readLeagueUpdater(evaluate, current, readinessTimeout = 15_000) {
+  let state = 'not-observed'
+  await waitFor(() => `the League main renderer (${state})`, readinessTimeout, async () => {
+    const readiness = await evaluate(leagueReadiness)
+    assert.ok(['document-loading', 'bridge-unavailable', 'mount-pending', 'ready'].includes(readiness),
+      'The League readiness probe returned an invalid result.')
+    state = readiness
+    return state === 'ready'
+  })
+  const invoke = async (label, namespace, method) => {
+    const reply = await evaluate(leagueCall(namespace, method))
+    const failure = reply?.failure
+    if (['ipc-denied', 'ipc-command-missing', 'ipc-invalid-arguments', 'ipc-rejected'].includes(failure)) {
+      throw new Error(`The League ${label} call failed (${failure}).`)
+    }
+    const response = reply?.response
+    assert.ok(response?.success === true || response?.success === false, `The League ${label} response is invalid.`)
+    return response
+  }
+  const version = await invoke('version', 'app-common-main', 'getVersion')
+  assert.ok(version.success && version.data === current, 'League reported an unexpected version.')
+  return waitFor('the League native updater to become available', 15_000, async () => {
+    const result = await invoke('updater', 'league-update-main', 'check')
+    if (result.success) {
+      assert.ok(result.data && typeof result.data === 'object', 'The League updater response is missing its data.')
+      return result.data
+    }
+    const message = result.error?.message
+    if (message === 'League 更新检查正在进行。') return null
+    const category = {
+      '无法初始化 League 更新检查。': 'feed-initialization',
+      '无法连接 League 更新源。': 'feed-transport',
+      'League 更新检查超时。': 'feed-timeout',
+      'League 更新清单响应过大。': 'feed-size',
+    }
+    const kind = Object.hasOwn(category, message) ? category[message]
+      : /^League 更新源返回 HTTP \d{3}。$/.test(message) ? 'feed-http'
+      : typeof message === 'string' && message.startsWith('League 更新清单验证失败。') ? 'feed-manifest'
+      : 'check-rejected'
+    throw new Error(`The League updater call failed (${kind}).`)
+  })
+}
 
 const mainBackendCheck = `(async () => {
   const invoke = (command) => window.__TAURI_INTERNALS__.invoke(command)
@@ -234,14 +302,10 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
         healthStatus: 200, ready: true, version: current, anonymousStatus: 401, configStatus: 200, hasConfig: true,
       })
     } else {
-      const result = await waitFor('the League native updater', 15_000, async () => {
-        const check = await evaluate(leagueCheck)
-        return check?.error?.message === 'League 更新检查正在进行。' ? null : check
-      })
-      assert.equal(result.success, true, 'League did not accept its published manifest.')
-      assert.deepEqual(result.data, {
+      const result = await readLeagueUpdater(evaluate, current)
+      assert.ok(isDeepStrictEqual(result, {
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
-      })
+      }), 'League returned unexpected update feed metadata.')
     }
   } finally {
     socket.close()
