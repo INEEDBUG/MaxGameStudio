@@ -341,6 +341,7 @@ fn start_managed_backend(app: &AppHandle, state: &BackendProcess) -> Result<(), 
         app.package_info().version.to_string(),
         NativeProfile {
             config_path: Some(data_dir.join("cs2-insight.config.json")),
+            temp_dir: Some(desktop_storage::directory("temp")?),
             data_dir,
             bundle_data_dir: bundle_data.is_dir().then_some(bundle_data),
             legacy_config_path: None,
