@@ -9,9 +9,12 @@ mod replay_body;
 use crate::{
     demo_library::{DemoEdit, DemoLibrary, DemoReadError},
     gsi_ready::GsiReady,
+    parser_worker::ParserWorker,
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
-    replay_cache::{cache_summary, load_packet, ReplayCacheError, REQUIRED_PARSER_VERSION},
+    replay_cache::{
+        cache_summary, load_packet, ReplayCacheError, ReplayRepair, REQUIRED_PARSER_VERSION,
+    },
     runtime_session::RuntimeSession,
     session_auth::{strip_session_query, SessionAuth, SESSION_TOKEN_HEADER},
     wire_json::json_decode_error,
@@ -96,6 +99,8 @@ struct ProfileState {
     instance_id: String,
     session: RuntimeSession,
     disk: Arc<Semaphore>,
+    parser_worker: Option<ParserWorker>,
+    replay_repair: Semaphore,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
 }
@@ -117,6 +122,7 @@ impl NativeHttpServer {
                 "desktop session token is required",
             ));
         }
+        let parser_worker = ParserWorker::installed_with(profile.bundle_data_dir.as_deref());
         let state = ProfileState {
             config: ProfileConfig::new(
                 profile.data_dir,
@@ -128,6 +134,8 @@ impl NativeHttpServer {
             instance_id: profile.instance_id.trim().to_owned(),
             session: RuntimeSession::default(),
             disk: Arc::new(Semaphore::new(1)),
+            parser_worker,
+            replay_repair: Semaphore::new(1),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir
@@ -208,20 +216,20 @@ async fn serve_connection(
     state: Arc<State>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let stream_open = AtomicBool::new(false);
+    let extended_request = AtomicBool::new(false);
     let stop_body = shutdown.clone();
     let service = service_fn(|request| {
         let state = &state;
-        let stream_open = &stream_open;
+        let extended_request = &extended_request;
         let stop = stop_body.clone();
         async move {
-            let mut response = respond(state, request, stop).await;
+            let mut response = respond(state, request, stop, extended_request).await;
             if response
                 .headers()
                 .get(CONTENT_TYPE)
                 .is_some_and(|value| value == demo_events::CONTENT_TYPE)
             {
-                stream_open.store(true, Ordering::Relaxed);
+                extended_request.store(true, Ordering::Relaxed);
             } else {
                 response
                     .headers_mut()
@@ -248,8 +256,10 @@ async fn serve_connection(
             let _ = connection.await;
         }
     });
-    // Only authenticated, admitted EventSource responses outlive the request deadline.
-    if timeout(CONNECTION_LIMIT, &mut serve).await.is_err() && stream_open.load(Ordering::Relaxed) {
+    // Authenticated streams and admitted replay repairs have their own limits.
+    if timeout(CONNECTION_LIMIT, &mut serve).await.is_err()
+        && extended_request.load(Ordering::Relaxed)
+    {
         serve.await;
     }
 }
@@ -258,6 +268,7 @@ async fn respond(
     state: &State,
     request: Request<Incoming>,
     shutdown: watch::Receiver<bool>,
+    extended_request: &AtomicBool,
 ) -> HttpResponse {
     let origin = request.headers().get(ORIGIN).cloned();
     if let (Some(origin), Some(method)) = (
@@ -268,7 +279,7 @@ async fn respond(
     ) {
         return preflight(origin, method, request.headers());
     }
-    let mut response = route(state, request, shutdown).await;
+    let mut response = route(state, request, shutdown, extended_request).await;
     if let Some(origin) = origin.filter(allowed_origin) {
         response
             .headers_mut()
@@ -373,6 +384,7 @@ async fn route(
     state: &State,
     request: Request<Incoming>,
     shutdown: watch::Receiver<bool>,
+    extended_request: &AtomicBool,
 ) -> HttpResponse {
     let path = request.uri().path();
     let has_profile = state.profile.is_some();
@@ -431,7 +443,12 @@ async fn route(
         Route::GsiStatus => json_reply(StatusCode::OK, json!(state.gsi.status())),
         Route::Gsi => notify_gsi(state, request).await,
         Route::ReplayBinary => {
-            replay_response(state.profile.as_ref().expect("profile route"), request).await
+            replay_response(
+                state.profile.as_ref().expect("profile route"),
+                request,
+                extended_request,
+            )
+            .await
         }
         Route::Demos(route) => {
             demo_response(
@@ -446,7 +463,11 @@ async fn route(
     }
 }
 
-async fn replay_response(profile: &Arc<ProfileState>, request: Request<Incoming>) -> HttpResponse {
+async fn replay_response(
+    profile: &Arc<ProfileState>,
+    request: Request<Incoming>,
+    extended_request: &AtomicBool,
+) -> HttpResponse {
     let input = match model_body(request, "Replay request body is too large").await {
         Ok(value) => value,
         Err(response) => return *response,
@@ -458,26 +479,81 @@ async fn replay_response(profile: &Arc<ProfileState>, request: Request<Incoming>
     if let Err(error) = request.validate_range() {
         return detail(StatusCode::UNPROCESSABLE_ENTITY, &error);
     }
-    profile_disk(profile, move |profile| {
-        match load_packet(profile.config.data_dir(), &profile.upload_dir, &request) {
-            Ok(Some(bytes)) => Response::builder()
+    let warm_request = request.clone();
+    let existing = profile_disk(profile, move |profile| {
+        replay_packet_response(load_packet(
+            profile.config.data_dir(),
+            &profile.upload_dir,
+            &warm_request,
+        ))
+    })
+    .await;
+    let Some(worker) = &profile.parser_worker else {
+        return existing;
+    };
+    if existing.status() != StatusCode::CONFLICT {
+        return existing;
+    }
+    let Ok(_permit) = profile.replay_repair.try_acquire() else {
+        return detail(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Another Demo replay is being rebuilt",
+        );
+    };
+    let prepare_request = request.clone();
+    let repair = match profile_work(profile, move |profile| {
+        ReplayRepair::prepare(
+            profile.config.data_dir(),
+            &profile.upload_dir,
+            prepare_request,
+        )
+    })
+    .await
+    {
+        Ok(Ok(Some(repair))) => repair,
+        Ok(Ok(None)) => {
+            return profile_disk(profile, move |profile| {
+                replay_packet_response(load_packet(
+                    profile.config.data_dir(),
+                    &profile.upload_dir,
+                    &request,
+                ))
+            })
+            .await;
+        }
+        Ok(Err(error)) => return replay_packet_response(Err(error)),
+        Err(error) => return profile_io_error(&error),
+    };
+    extended_request.store(true, Ordering::Relaxed);
+    let generated = match repair.generate(worker).await {
+        Ok(generated) => generated,
+        Err(error) => return replay_packet_response(Err(error)),
+    };
+    profile_disk(profile, move |_| {
+        replay_packet_response(repair.finish(&generated))
+    })
+    .await
+}
+
+fn replay_packet_response(packet: Result<Option<Vec<u8>>, ReplayCacheError>) -> HttpResponse {
+    match packet {
+        Ok(Some(bytes)) => Response::builder()
                 .header(CONTENT_TYPE, "application/vnd.cs2-insight.replay-v1")
                 .header(CACHE_CONTROL, "no-store")
                 .header("x-cs2-replay-protocol", "1")
                 .body(Full::new(Bytes::from(bytes)).boxed_unsync())
                 .expect("valid binary replay response"),
-            Ok(None) => detail(
+        Ok(None) => detail(
                 StatusCode::CONFLICT,
                 "Binary replay cache is missing and cold repair is unavailable in the native runtime; analyze the demo again in the compatible backend",
             ),
-            Err(ReplayCacheError::EmptyPath) => detail(StatusCode::BAD_REQUEST, "Demo 路径为空"),
-            Err(ReplayCacheError::MissingDemo(path)) => detail(StatusCode::NOT_FOUND, &format!("未找到 Demo 文件: {path}")),
-            Err(ReplayCacheError::Unavailable(error)) => {
-                eprintln!("Native binary replay cache read failed: {error}");
-                detail(StatusCode::SERVICE_UNAVAILABLE, "Binary replay unavailable: Exception")
-            }
+        Err(ReplayCacheError::EmptyPath) => detail(StatusCode::BAD_REQUEST, "Demo 路径为空"),
+        Err(ReplayCacheError::MissingDemo(path)) => detail(StatusCode::NOT_FOUND, &format!("未找到 Demo 文件: {path}")),
+        Err(ReplayCacheError::Unavailable(error)) => {
+            eprintln!("Native binary replay cache operation failed: {error}");
+            detail(StatusCode::SERVICE_UNAVAILABLE, "Binary replay unavailable: Exception")
         }
-    }).await
+    }
 }
 
 async fn demo_response(
@@ -677,21 +753,27 @@ async fn profile_disk(
     profile: &Arc<ProfileState>,
     operation: impl FnOnce(&ProfileState) -> HttpResponse + Send + 'static,
 ) -> HttpResponse {
+    match profile_work(profile, operation).await {
+        Ok(response) => response,
+        Err(error) => profile_io_error(&error),
+    }
+}
+
+async fn profile_work<T: Send + 'static>(
+    profile: &Arc<ProfileState>,
+    operation: impl FnOnce(&ProfileState) -> T + Send + 'static,
+) -> Result<T, tokio::task::JoinError> {
     // Keep file work bounded even if a connection times out while an I/O operation is in progress.
     let permit = Arc::clone(&profile.disk)
         .acquire_owned()
         .await
         .expect("profile I/O semaphore");
     let profile = Arc::clone(profile);
-    match tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _permit = permit;
         operation(&profile)
     })
     .await
-    {
-        Ok(response) => response,
-        Err(error) => profile_io_error(&error),
-    }
 }
 
 fn profile_io_error(error: &dyn std::fmt::Display) -> HttpResponse {

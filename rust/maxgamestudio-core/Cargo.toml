@@ -22,10 +22,10 @@ serde_json.workspace = true
 sha2 = { version = "=0.10.9", optional = true }
 subtle = "=2.6.1"
 tempfile = "=3.27.0"
-tokio = { version = "=1.52.3", features = ["net", "rt", "sync", "time"], optional = true }
+tokio = { version = "=1.52.3", features = ["io-util", "net", "process", "rt", "sync", "time"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry"], optional = true }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_Threading"], optional = true }
 
 [[bin]]
 name = "maxgamestudio-native-http"

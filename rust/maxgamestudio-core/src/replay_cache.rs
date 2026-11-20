@@ -1,6 +1,7 @@
-//! Look up the shipped whole-match replay cache without creating or rebuilding it.
+//! Read whole-match replay caches and repair missing frames from complete legacy metadata.
 
 use crate::{
+    parser_worker::ParserWorker,
     profile_platform::{path_text, resolved_path},
     replay_packet::{replay_parquet_binary_packet, MAX_SAMPLE_TICKS},
 };
@@ -152,6 +153,7 @@ mod cache_usage_tests {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct ReplayRequest {
     pub path: String,
     pub start_tick: i64,
@@ -212,6 +214,144 @@ pub(crate) fn load_packet(
         return read_round(&parquet, &meta, &key, request);
     }
     Ok(None)
+}
+
+/// A repair may reuse complete, matching metadata while rebuilding the missing Parquet.
+/// The existing metadata and all unrelated cache files stay untouched.
+pub(crate) struct ReplayRepair {
+    demo: PathBuf,
+    parquet: PathBuf,
+    meta_file: PathBuf,
+    meta: Value,
+    key: String,
+    stage: tempfile::TempDir,
+    request: ReplayRequest,
+}
+
+impl ReplayRepair {
+    pub(crate) fn prepare(
+        data: &Path,
+        uploads: &Path,
+        request: ReplayRequest,
+    ) -> Result<Option<Self>, ReplayCacheError> {
+        let demo = resolve_demo(uploads, &request.path)?;
+        let Some(key) = cache_key(&demo, request.fps, request.tick_rate) else {
+            return Ok(None);
+        };
+        for root in [data.join(CURRENT_CACHE), data.join(LEGACY_CACHE)] {
+            let parquet = root.join(format!("{key}.parquet"));
+            let meta_file = root.join(format!("{key}.meta.json"));
+            if parquet.try_exists().map_err(repair_error)? {
+                continue;
+            }
+            let Some(meta) = read_metadata(&meta_file)? else {
+                continue;
+            };
+            if meta["version"].as_u64() != Some(REPLAY_MATCH_CACHE_VERSION)
+                || meta["parser_runtime"] != REQUIRED_PARSER_VERSION
+                || meta["cache_key"] != key
+                || !entries(&meta["rounds"]).iter().any(|round| {
+                    integer(&round["start_tick"]) == request.start_tick
+                        && integer(&round["end_tick"]) == request.end_tick
+                })
+            {
+                continue;
+            }
+            let stage = tempfile::Builder::new()
+                .prefix("mgs-replay-")
+                .tempdir_in(root)
+                .map_err(repair_error)?;
+            return Ok(Some(Self {
+                demo,
+                parquet,
+                meta_file,
+                meta,
+                key,
+                stage,
+                request,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub(crate) async fn generate(&self, worker: &ParserWorker) -> Result<Value, ReplayCacheError> {
+        let rounds: Vec<_> = entries(&self.meta["rounds"])
+            .iter()
+            .map(|round| {
+                json!({
+                    "round_number": integer(&round["round_number"]),
+                    "start_tick": integer(&round["start_tick"]),
+                    "end_tick": integer(&round["end_tick"]),
+                })
+            })
+            .collect();
+        worker
+            .write_replay(
+                &self.demo,
+                &self.temporary_path(),
+                self.request.tick_rate,
+                self.request.fps,
+                &json!(rounds),
+            )
+            .await
+            .map_err(repair_error)
+    }
+
+    fn temporary_path(&self) -> PathBuf {
+        self.stage.path().join("rebuilt.parquet.partial")
+    }
+
+    pub(crate) fn finish(self, result: &Value) -> Result<Option<Vec<u8>>, ReplayCacheError> {
+        let saved = entries(&self.meta["rounds"]);
+        let generated = entries(&result["rounds"]);
+        let groups = entries(&result["row_groups"]);
+        if saved.len() != generated.len()
+            || saved.len() != groups.len()
+            || !saved
+                .iter()
+                .zip(generated.iter().zip(groups))
+                .all(|(old, (new, group))| {
+                    old["round_number"] == new["round_number"]
+                        && old["start_tick"] == new["start_tick"]
+                        && old["end_tick"] == new["end_tick"]
+                        && old["sample_ticks"] == new["sample_ticks"]
+                        && old["round_number"] == group["round_number"]
+                        && old["row_group"] == group["row_group"]
+                        && old["player_rows"] == group["rows"]
+                })
+        {
+            return Err(ReplayCacheError::Unavailable(
+                "Parser worker did not reproduce the stored replay frames".into(),
+            ));
+        }
+        let stable_demo = cache_key(&self.demo, self.request.fps, self.request.tick_rate)
+            .as_deref()
+            == Some(self.key.as_str());
+        if !stable_demo || read_metadata(&self.meta_file)?.as_ref() != Some(&self.meta) {
+            return Err(ReplayCacheError::Unavailable(
+                "Replay source or metadata changed during repair".into(),
+            ));
+        }
+        let staged = self.temporary_path();
+        let packet = read_round(&staged, &self.meta, &self.key, &self.request)?;
+        if packet.is_none() {
+            return Ok(None);
+        }
+        let result = tempfile::TempPath::try_from_path(&staged)
+            .map_err(repair_error)?
+            .persist_noclobber(&self.parquet);
+        match result {
+            Ok(()) => Ok(packet),
+            Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+                read_round(&self.parquet, &self.meta, &self.key, &self.request)
+            }
+            Err(error) => Err(repair_error(error.error)),
+        }
+    }
+}
+
+fn repair_error(error: io::Error) -> ReplayCacheError {
+    ReplayCacheError::Unavailable(error.to_string())
 }
 
 fn resolve_demo(upload_dir: &Path, path: &str) -> Result<PathBuf, ReplayCacheError> {

@@ -12,6 +12,8 @@ mod profile_platform;
 #[cfg(feature = "native-http")]
 mod replay_cache;
 #[cfg(feature = "native-http")]
+mod parser_worker;
+#[cfg(feature = "native-http")]
 mod replay_packet;
 pub mod runtime_session;
 pub mod session_auth;
