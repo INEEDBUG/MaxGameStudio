@@ -980,6 +980,238 @@ fn round_recording_plan_uses_the_demo_file_end_instead_of_saved_tick_estimates()
 }
 
 #[test]
+#[cfg(windows)]
+fn recording_routes_keep_desktop_and_game_sessions_separate() {
+    let scratch = tempfile::tempdir().unwrap();
+    let profile = scratch.path().join("profile");
+    let server = RunningServer::launch("3.2.0-fixture", Some((&profile, scratch.path())));
+    let queue = "/api/recording/queue";
+    let abort = "/api/recording/abort";
+    let recording_gsi = "/api/gsi/recording";
+    assert_eq!(
+        profile_request(&server, "POST", queue, &json!({}), false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "POST", queue, &json!({"requests":[]}), true).0,
+        422
+    );
+    assert_eq!(
+        profile_request(&server, "POST", abort, &Value::Null, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "POST", abort, &Value::Null, true),
+        (200, json!({"status":"idle"}))
+    );
+    let arbitrary = json!({"provider":{"appid":730},"auth":{"token":"fixture-invalid-game-token"}});
+    let (status, reply) = profile_request(&server, "POST", recording_gsi, &arbitrary, true);
+    assert_eq!(status, 401);
+    assert!(!reply.to_string().contains("fixture-invalid-game-token"));
+    assert!(!profile.join(".cs2_config_backup").exists());
+    assert!(!profile.join("cs2-insight.db").exists());
+    server.stop();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "uses only a compiled synthetic playback process and trusted FFmpeg binaries"]
+fn cancelled_recording_queue_restores_fixture_player_data() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_websockets::{Message, ServerBuilder};
+
+    // Running this actual backend fixture on a Steam host could expose real
+    // userdata to the recorder's ordinary configuration snapshot.
+    let system = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+    for key in [
+        r"HKLM\SOFTWARE\WOW6432Node\Valve\Steam",
+        r"HKLM\SOFTWARE\Valve\Steam",
+        r"HKCU\Software\Valve\Steam",
+    ] {
+        let registered = Command::new(system.join("System32/reg.exe"))
+            .args(["query", key, "/v", "InstallPath"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("read-only Steam registration check");
+        assert!(
+            !registered.success(),
+            "run this fixture on a Windows runner without Steam registration"
+        );
+    }
+
+    let fixture_root =
+        std::path::PathBuf::from(std::env::var_os("MGS_PLAYBACK_TEST_ROOT").unwrap());
+    let ffmpeg = std::path::PathBuf::from(std::env::var_os("MGS_QUEUE_TEST_FFMPEG").unwrap());
+    let scratch = tempfile::tempdir_in(fixture_root.as_path()).unwrap();
+    let root = scratch.path();
+    let game = root.join("game");
+    let csgo = game.join("csgo");
+    let cfg = csgo.join("cfg");
+    let executable = game.join("bin/win64/cs2.exe");
+    let recordings = root.join("recordings");
+    fs::create_dir_all(&cfg).unwrap();
+    fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    fs::create_dir(&recordings).unwrap();
+    fs::copy(
+        fixture_root.join("synthetic-playback-fixture.exe"),
+        &executable,
+    )
+    .unwrap();
+    let original = b"original fixture player.cfg\r\n";
+    let player = cfg.join("cs2_user.cfg");
+    fs::write(&player, original).unwrap();
+    fs::write(cfg.join("unrelated.cfg"), b"leave alone").unwrap();
+    let demo = root.join("original.dem");
+    let mut original_demo = b"PBDEMS2\0\0\0\0\0\0\0\0\0".to_vec();
+    original_demo.extend([1, 244, 3, 0, 0, 255, 255, 255, 255, 15, 0]);
+    fs::write(&demo, &original_demo).unwrap();
+
+    let obs_socket = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let obs_port = obs_socket.local_addr().unwrap().port();
+    obs_socket.set_nonblocking(true).unwrap();
+    let obs = thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                tokio::time::timeout(Duration::from_secs(15), async move {
+                    let listener = tokio::net::TcpListener::from_std(obs_socket).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let (_, mut wire) = ServerBuilder::new().accept(stream).await.unwrap();
+                    wire.send(Message::text(
+                        json!({"op":0,"d":{"rpcVersion":1}}).to_string(),
+                    ))
+                    .await
+                    .unwrap();
+                    let greeting = wire.next().await.unwrap().unwrap();
+                    let greeting: Value =
+                        serde_json::from_str(greeting.as_text().unwrap()).unwrap();
+                    assert_eq!(greeting["d"]["eventSubscriptions"], 64);
+                    wire.send(Message::text(
+                        json!({"op":2,"d":{"negotiatedRpcVersion":1}}).to_string(),
+                    ))
+                    .await
+                    .unwrap();
+                    for (method, reply) in [
+                        (
+                            "GetRecordStatus",
+                            json!({"outputActive":false,"outputPaused":false}),
+                        ),
+                        (
+                            "GetCurrentProgramScene",
+                            json!({"currentProgramSceneName":"CS2 Insight Recording"}),
+                        ),
+                        ("GetRecordDirectory", json!({"recordDirectory":recordings})),
+                    ] {
+                        let request = wire.next().await.unwrap().unwrap();
+                        let request: Value =
+                            serde_json::from_str(request.as_text().unwrap()).unwrap();
+                        assert_eq!(request["d"]["requestType"], method);
+                        wire.send(Message::text(
+                            json!({"op":7,"d":{
+                                "requestType":method,"requestId":request["d"]["requestId"],
+                                "requestStatus":{"result":true,"code":100},"responseData":reply
+                            }})
+                            .to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    }
+                    assert!(wire
+                        .next()
+                        .await
+                        .and_then(Result::ok)
+                        .and_then(|message| message.as_text().map(str::to_owned))
+                        .is_none());
+                })
+                .await
+                .expect("fixture OBS preflight and disconnect")
+            })
+    });
+
+    let profile = root.join("profile");
+    let settings = root.join("config.json");
+    fs::create_dir(&profile).unwrap();
+    let database = profile.join("cs2-insight.db");
+    let old = rusqlite::Connection::open(&database).unwrap();
+    old.execute_batch(
+        "CREATE TABLE old_library_note(id INTEGER); INSERT INTO old_library_note VALUES(9);",
+    )
+    .unwrap();
+    drop(old);
+    let original_db = fs::read(&database).unwrap();
+    fs::write(
+        &settings,
+        json!({
+            "cs2_path":executable,"ffmpeg_path":ffmpeg,
+            "obs":{"host":"127.0.0.1","port":obs_port,"password":""},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let server =
+        RunningServer::launch_with_config("3.2.0-fixture", Some((&profile, root)), Some(&settings));
+    let payload = json!({"requests":[{
+        "request_id":"round abort fixture","request_type":"round_compilation","source_type":"round",
+        "demo":{
+            "demo_path":demo,"demo_filename":"original.dem","map_name":"de_fixture",
+            "tick_rate":64.0,"first_tick":32,"demo_end_tick":2000,"final_round":1,
+            "final_round_start_tick":32,"final_round_end_tick":495
+        },
+        "target_player":{"name":"Fixture","steamid64":"76561198000000001","spec_slot":1},
+        "rounds":[{"round":1,"round_start_tick":32,"round_end_tick":495,"freeze_end_tick":160}]
+    }]});
+    thread::scope(|scope| {
+        let recording = scope
+            .spawn(|| profile_request(&server, "POST", "/api/recording/queue", &payload, true));
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while fs::read(&player).unwrap() == original {
+            assert!(
+                Instant::now() < deadline,
+                "synthetic player fixture did not start"
+            );
+            thread::sleep(Duration::from_millis(15));
+        }
+        assert_eq!(
+            profile_request(
+                &server,
+                "POST",
+                "/api/config-backup/restore",
+                &Value::Null,
+                true
+            )
+            .0,
+            409
+        );
+        assert_eq!(
+            profile_request(&server, "POST", "/api/recording/queue", &payload, true).0,
+            409
+        );
+        assert_eq!(
+            profile_request(&server, "POST", "/api/recording/abort", &Value::Null, true),
+            (200, json!({"status":"ok"}))
+        );
+        let (status, reply) = recording.join().unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(reply[0]["aborted"], true, "{reply}");
+    });
+    assert_eq!(fs::read(&player).unwrap(), original);
+    assert_eq!(fs::read(cfg.join("unrelated.cfg")).unwrap(), b"leave alone");
+    assert_eq!(fs::read(&demo).unwrap(), original_demo);
+    assert_eq!(fs::read(database).unwrap(), original_db);
+    assert_eq!(fs::read_dir(&cfg).unwrap().count(), 2);
+    assert_eq!(fs::read_dir(&csgo).unwrap().count(), 1);
+    assert_eq!(
+        profile_request(&server, "POST", "/api/recording/abort", &Value::Null, true),
+        (200, json!({"status":"idle"}))
+    );
+    obs.join().unwrap();
+    server.stop();
+}
+
+#[test]
 fn opens_saved_lite_cut_projects_snapshots_and_exports_in_the_existing_profile() {
     let scratch = tempfile::tempdir().unwrap();
     let database = scratch.path().join("cs2-insight.db");

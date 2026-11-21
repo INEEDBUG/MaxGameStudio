@@ -22,7 +22,7 @@ pub(super) fn command(executable: &Path) -> Command {
     command
 }
 
-pub(super) fn find_ffprobe(ffmpeg: &Path) -> Option<PathBuf> {
+pub(in crate::native_http) fn find_ffprobe(ffmpeg: &Path) -> Option<PathBuf> {
     let name = if cfg!(windows) {
         "ffprobe.exe"
     } else {
@@ -41,7 +41,7 @@ pub(super) fn find_ffprobe(ffmpeg: &Path) -> Option<PathBuf> {
     })
 }
 
-pub(super) async fn inspect(
+pub(in crate::native_http) async fn inspect(
     ffprobe: &Path,
     file: &Path,
     cancel: Option<&watch::Receiver<bool>>,

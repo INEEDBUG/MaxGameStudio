@@ -1,7 +1,23 @@
 mod compilations;
 mod event_clips;
+#[cfg(windows)]
+mod execute_single;
+#[cfg(windows)]
+mod game_window;
+#[cfg(windows)]
+mod obs_capture;
+#[cfg(windows)]
+mod playback_gsi;
+#[cfg(windows)]
+mod playback_process;
+#[cfg(windows)]
+mod playback_spec;
+#[cfg(windows)]
+mod playback_stage;
 mod postprocess;
 mod pov_interleave;
+#[cfg(windows)]
+pub(super) mod queue;
 mod request;
 mod rounds;
 

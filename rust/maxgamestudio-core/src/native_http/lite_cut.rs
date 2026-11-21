@@ -3,7 +3,7 @@ mod audio_mix;
 mod export_job;
 mod export_sources;
 mod exports;
-mod ffmpeg;
+pub(super) mod ffmpeg;
 mod fonts;
 mod project_schema;
 mod project_store;

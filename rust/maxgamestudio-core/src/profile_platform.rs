@@ -241,7 +241,7 @@ fn detect_cs2_in_roots(mut roots: Vec<PathBuf>) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn registry_steam_path() -> Option<PathBuf> {
+pub(crate) fn registry_steam_path() -> Option<PathBuf> {
     use std::ptr::null_mut;
     use windows_sys::Win32::{
         Foundation::ERROR_SUCCESS,

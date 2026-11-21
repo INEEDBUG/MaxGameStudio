@@ -91,6 +91,8 @@ struct State {
     backend_url: String,
     started: Instant,
     gsi: GsiReady,
+    #[cfg(windows)]
+    recording_port: std::num::NonZeroU16,
     profile: Option<Arc<ProfileState>>,
 }
 
@@ -118,6 +120,8 @@ struct ProfileState {
     lite_cut_exports: lite_cut::ActiveExports,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
+    #[cfg(windows)]
+    recording: recording_plan::queue::Recorder,
 }
 
 pub struct NativeHttpServer {
@@ -159,6 +163,8 @@ impl NativeHttpServer {
                 .temp_dir
                 .unwrap_or_else(std::env::temp_dir)
                 .join("cs2_insight_demos"),
+            #[cfg(windows)]
+            recording: recording_plan::queue::Recorder::default(),
         };
         Self::bind_inner(port, version, Some(Arc::new(state)))
     }
@@ -170,7 +176,8 @@ impl NativeHttpServer {
     ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         listener.set_nonblocking(true)?;
-        let backend_url = format!("http://{}", listener.local_addr()?);
+        let address = listener.local_addr()?;
+        let backend_url = format!("http://{address}");
         Ok(Self {
             listener,
             state: Arc::new(State {
@@ -178,6 +185,8 @@ impl NativeHttpServer {
                 backend_url,
                 started: Instant::now(),
                 gsi: GsiReady::default(),
+                #[cfg(windows)]
+                recording_port: std::num::NonZeroU16::new(address.port()).expect("bound HTTP port"),
                 profile,
             }),
         })
@@ -223,6 +232,8 @@ impl NativeHttpServer {
             connections.shutdown().await;
         }
         if let Some(profile) = &self.state.profile {
+            #[cfg(windows)]
+            profile.recording.shutdown().await;
             profile.lite_cut_exports.shutdown().await;
         }
         if let Some(publisher) = publisher {
@@ -380,6 +391,12 @@ enum Route {
     ObsSetup(obs_setup::Route),
     ObsStatus,
     RecordingPlan,
+    #[cfg(windows)]
+    RecordingQueue,
+    #[cfg(windows)]
+    RecordingAbort,
+    #[cfg(windows)]
+    RecordingGsi,
 }
 
 impl Route {
@@ -397,6 +414,12 @@ impl Route {
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             "/api/obs-config/status" if has_profile => Some(Self::ObsStatus),
             "/api/recording/plan" if has_profile => Some(Self::RecordingPlan),
+            #[cfg(windows)]
+            "/api/recording/queue" if has_profile => Some(Self::RecordingQueue),
+            #[cfg(windows)]
+            "/api/recording/abort" if has_profile => Some(Self::RecordingAbort),
+            #[cfg(windows)]
+            "/api/gsi/recording" if has_profile => Some(Self::RecordingGsi),
             "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
             "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
             _ if has_profile => DemoRoute::from_path(path)
@@ -410,6 +433,10 @@ impl Route {
 
     fn is_guest(&self) -> bool {
         // These are guest routes in the deployed backend. The game sends no desktop header.
+        #[cfg(windows)]
+        if matches!(self, Self::RecordingGsi) {
+            return true;
+        }
         matches!(self, Self::Health | Self::Gsi | Self::GsiStatus)
     }
 }
@@ -455,6 +482,8 @@ async fn route(
         }
     }
     let allowed = match route {
+        #[cfg(windows)]
+        Route::RecordingQueue | Route::RecordingAbort | Route::RecordingGsi => "POST",
         Route::Gsi
         | Route::BackupRestore
         | Route::ReplayBinary
@@ -515,6 +544,23 @@ async fn route(
             let profile = state.profile.as_ref().expect("profile route");
             extended_request.store(true, Ordering::Relaxed);
             profile_disk(profile, |profile| {
+                let _lease =
+                    match profile
+                        .session
+                        .try_begin(crate::runtime_session::OperationOwner {
+                            id: "restore-config".to_owned(),
+                            operation: "/api/config-backup/restore".to_owned(),
+                            started_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs_f64()
+                                .to_string(),
+                        }) {
+                        Ok(lease) => lease,
+                        Err(busy) => {
+                            return json_reply(StatusCode::CONFLICT, json!({"detail":busy}))
+                        }
+                    };
                 config_backup::restore(profile.config.data_dir())
             })
             .await
@@ -565,6 +611,33 @@ async fn route(
                 extended_request,
             )
             .await
+        }
+        #[cfg(windows)]
+        Route::RecordingQueue => {
+            recording_plan::queue::respond(
+                state.profile.as_ref().expect("profile route"),
+                state.recording_port,
+                request,
+                extended_request,
+            )
+            .await
+        }
+        #[cfg(windows)]
+        Route::RecordingAbort => state
+            .profile
+            .as_ref()
+            .expect("profile route")
+            .recording
+            .abort(),
+        #[cfg(windows)]
+        Route::RecordingGsi => {
+            state
+                .profile
+                .as_ref()
+                .expect("profile route")
+                .recording
+                .notify_gsi(request)
+                .await
         }
         Route::Demos(route) => {
             demo_response(

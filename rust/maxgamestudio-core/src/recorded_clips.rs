@@ -1,5 +1,8 @@
 //! Read and update recorded clip metadata in the existing shared SQLite database.
 
+#[cfg(windows)]
+pub(crate) mod capture;
+
 use rusqlite::{params, types::ValueRef, Connection, OpenFlags, Params, Row};
 use serde_json::{Map, Number, Value};
 use std::{

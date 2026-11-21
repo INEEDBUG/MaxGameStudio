@@ -1,8 +1,12 @@
+#[cfg(windows)]
+pub(super) mod snapshot;
+
 use super::{json_reply, HttpResponse};
 use crate::profile_platform::{path_text, probe_process, CS2_CONFIG_BACKUP_DIR};
 use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs::{self, File},
@@ -22,6 +26,7 @@ struct SavedConfig {
     #[serde(default = "existed_by_default")]
     existed: bool,
     backup_relpath: Option<PathBuf>,
+    native_sha256: Option<String>,
 }
 
 fn existed_by_default() -> bool {
@@ -29,58 +34,66 @@ fn existed_by_default() -> bool {
 }
 
 pub(super) fn restore(data_dir: &Path) -> HttpResponse {
+    match restore_profile(data_dir) {
+        Ok(Some(restored)) => json_reply(
+            StatusCode::OK,
+            json!({"ok":true,"code":"CONFIG_RESTORE_OK","restored":restored}),
+        ),
+        Ok(None) => json_reply(
+            StatusCode::OK,
+            json!({"ok":true,"code":"CONFIG_RESTORE_NOT_NEEDED","restored":0}),
+        ),
+        Err(RestoreError::GameRunning) => json_reply(
+            StatusCode::CONFLICT,
+            json!({"detail":{"code":"CS2_RUNNING"}}),
+        ),
+        Err(RestoreError::Partial(path, error)) => partial(&path, &error),
+    }
+}
+
+pub(super) enum RestoreError {
+    GameRunning,
+    Partial(PathBuf, io::Error),
+}
+
+pub(super) fn restore_profile(data_dir: &Path) -> Result<Option<usize>, RestoreError> {
     let backup = data_dir.join(CS2_CONFIG_BACKUP_DIR);
     let state_path = backup.join("recording_state.json");
     let mut state: Value = match read_json(&state_path) {
         Ok(state) => state,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Value::Null,
-        Err(error) => return partial(&state_path, &error),
+        Err(error) => return Err(RestoreError::Partial(state_path, error)),
     };
     if state["status"] != "recording" {
-        return json_reply(
-            StatusCode::OK,
-            json!({"ok":true,"code":"CONFIG_RESTORE_NOT_NEEDED","restored":0}),
-        );
+        return Ok(None);
     }
     let manifest = backup.join("manifest.json");
-    let entries = match prepare(&backup, &manifest) {
-        Ok(entries) => entries,
-        Err((original, error)) => return partial(&original, &error),
-    };
+    let entries = prepare(&backup, &manifest)
+        .map_err(|(original, error)| RestoreError::Partial(original, error))?;
     match probe_process("cs2.exe") {
-        Ok(true) => {
-            return json_reply(
-                StatusCode::CONFLICT,
-                json!({"detail":{"code":"CS2_RUNNING"}}),
-            );
-        }
+        Ok(true) => return Err(RestoreError::GameRunning),
         Ok(false) => {}
-        Err(error) => return partial(&state_path, &error),
+        Err(error) => return Err(RestoreError::Partial(state_path, error)),
     }
     let mut restored = 0;
-    for (target, source) in entries {
-        match restore_file(&target, source.as_deref()) {
+    for (target, source, hash) in entries {
+        match restore_file(&target, source.as_deref(), hash.as_deref()) {
             Ok(wrote) => restored += usize::from(wrote),
-            Err(error) => return partial(&target, &error),
+            Err(error) => return Err(RestoreError::Partial(target, error)),
         }
     }
     state["status"] = json!("recorded");
     state["message"] = json!("玩家配置状态正常");
-    let save = (|| {
+    (|| {
         let mut staged = NamedTempFile::new_in(&backup)?;
         serde_json::to_writer_pretty(&mut staged, &state)?;
         commit(staged, &state_path)
-    })();
-    if let Err(error) = save {
-        return partial(&state_path, &error);
-    }
-    json_reply(
-        StatusCode::OK,
-        json!({"ok":true,"code":"CONFIG_RESTORE_OK","restored":restored}),
-    )
+    })()
+    .map_err(|error| RestoreError::Partial(state_path, error))?;
+    Ok(Some(restored))
 }
 
-type RestoreFiles = Vec<(PathBuf, Option<PathBuf>)>;
+type RestoreFiles = Vec<(PathBuf, Option<PathBuf>, Option<String>)>;
 
 fn prepare(backup: &Path, manifest: &Path) -> Result<RestoreFiles, (PathBuf, io::Error)> {
     let saved: Manifest = read_json(manifest).map_err(|error| (manifest.to_owned(), error))?;
@@ -106,7 +119,7 @@ fn prepare(backup: &Path, manifest: &Path) -> Result<RestoreFiles, (PathBuf, io:
             if !seen.insert(key) {
                 return Err((entry.original, invalid("备份清单中有重复的配置路径")));
             }
-            Ok((target, source))
+            Ok((target, source, entry.native_sha256))
         })
         .collect()
 }
@@ -142,6 +155,7 @@ fn restore_paths(entry: &SavedConfig, backup: &Path) -> io::Result<(PathBuf, Opt
         if !source.starts_with(backup) || !existing_file(&source)? {
             return Err(invalid("配置备份文件须位于当前备份目录内"));
         }
+        verify_digest(&source, entry.native_sha256.as_deref())?;
         Some(source)
     } else {
         None
@@ -187,7 +201,7 @@ fn valid_config_dir(path: &Path) -> bool {
     }
 }
 
-fn restore_file(target: &Path, source: Option<&Path>) -> io::Result<bool> {
+fn restore_file(target: &Path, source: Option<&Path>, hash: Option<&str>) -> io::Result<bool> {
     let exists = existing_file(target)?;
     let Some(source) = source else {
         if exists {
@@ -198,16 +212,46 @@ fn restore_file(target: &Path, source: Option<&Path>) -> io::Result<bool> {
         }
         return Ok(exists);
     };
-    if exists && same_content(target, source)? {
-        return Ok(false);
+    if exists {
+        let already_restored = match hash {
+            Some(hash) => format!("{:x}", digest(target)?) == hash,
+            None => same_content(target, source)?,
+        };
+        if already_restored {
+            return Ok(false);
+        }
     }
     let mut staged = NamedTempFile::new_in(target.parent().expect("validated config path"))?;
     io::copy(&mut File::open(source)?, &mut staged)?;
+    verify_digest(staged.path(), hash)?;
     commit(staged, target)?;
     if !same_content(target, source)? {
         return Err(io::Error::other("还原后的文件与备份内容不同"));
     }
     Ok(true)
+}
+
+fn verify_digest(path: &Path, hash: Option<&str>) -> io::Result<()> {
+    if let Some(hash) = hash {
+        if format!("{:x}", digest(path)?) != hash {
+            return Err(invalid("玩家配置备份内容校验失败"));
+        }
+    }
+    Ok(())
+}
+
+fn digest(path: &Path) -> io::Result<sha2::digest::Output<Sha256>> {
+    let mut file = File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut bytes = [0_u8; 32 * 1024];
+    loop {
+        let read = file.read(&mut bytes)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&bytes[..read]);
+    }
+    Ok(digest.finalize())
 }
 
 fn existing_file(path: &Path) -> io::Result<bool> {
