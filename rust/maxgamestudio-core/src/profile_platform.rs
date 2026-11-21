@@ -7,6 +7,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+pub(crate) const CS2_CONFIG_BACKUP_DIR: &str = ".cs2_config_backup";
+
 pub(crate) fn resolved_path(path: &Path) -> io::Result<PathBuf> {
     fs::canonicalize(path).or_else(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -298,7 +300,7 @@ fn registry_steam_path() -> Option<PathBuf> {
 }
 
 pub(crate) fn backup_status(data_dir: &Path) -> io::Result<Value> {
-    let root = data_dir.join(".cs2_config_backup");
+    let root = data_dir.join(CS2_CONFIG_BACKUP_DIR);
     let state = read_backup_object(&root.join("recording_state.json"));
     let manifest = read_backup_object(&root.join("manifest.json"));
     let restore_required = state["status"] == "recording";
@@ -346,14 +348,18 @@ fn backup_account(entry: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-#[cfg(windows)]
 pub(crate) fn process_is_running(executable: &str) -> bool {
+    probe_process(executable).unwrap_or(false)
+}
+
+#[cfg(windows)]
+pub(crate) fn probe_process(executable: &str) -> io::Result<bool> {
     use std::{
         mem::size_of,
         os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     };
     use windows_sys::Win32::{
-        Foundation::INVALID_HANDLE_VALUE,
+        Foundation::{ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE},
         System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
             TH32CS_SNAPPROCESS,
@@ -362,7 +368,7 @@ pub(crate) fn process_is_running(executable: &str) -> bool {
     // Take ownership of the new, valid snapshot handle once.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
-        return false;
+        return Err(io::Error::last_os_error());
     }
     let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
     let mut entry = PROCESSENTRY32W {
@@ -379,16 +385,21 @@ pub(crate) fn process_is_running(executable: &str) -> bool {
             .position(|&value| value == 0)
             .unwrap_or(entry.szExeFile.len());
         if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case(executable) {
-            return true;
+            return Ok(true);
         }
         found = unsafe { Process32NextW(handle, &mut entry) };
     }
-    false
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(not(windows))]
-pub(crate) fn process_is_running(_: &str) -> bool {
-    false
+pub(crate) fn probe_process(_: &str) -> io::Result<bool> {
+    Ok(false)
 }
 
 fn cs2_running() -> bool {

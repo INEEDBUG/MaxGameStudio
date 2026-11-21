@@ -1,5 +1,6 @@
 //! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
+mod config_backup;
 mod demo_body;
 mod demo_events;
 mod demo_open;
@@ -363,6 +364,7 @@ enum Route {
     FfmpegCheck,
     DataDirInfo,
     BackupStatus,
+    BackupRestore,
     RuntimeState,
     Demos(DemoRoute),
     ReplayBinary,
@@ -385,6 +387,7 @@ impl Route {
             "/api/config/ffmpeg-check" if has_profile => Some(Self::FfmpegCheck),
             "/api/config/data-dir-info" if has_profile => Some(Self::DataDirInfo),
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
+            "/api/config-backup/restore" if has_profile => Some(Self::BackupRestore),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             "/api/obs-config/status" if has_profile => Some(Self::ObsStatus),
             "/api/recording/plan" if has_profile => Some(Self::RecordingPlan),
@@ -447,6 +450,7 @@ async fn route(
     }
     let allowed = match route {
         Route::Gsi
+        | Route::BackupRestore
         | Route::ReplayBinary
         | Route::ObsSetup(_)
         | Route::RecordingPlan
@@ -491,6 +495,14 @@ async fn route(
         ),
         Route::GsiStatus => json_reply(StatusCode::OK, json!(state.gsi.status())),
         Route::Gsi => notify_gsi(state, request).await,
+        Route::BackupRestore => {
+            let profile = state.profile.as_ref().expect("profile route");
+            extended_request.store(true, Ordering::Relaxed);
+            profile_disk(profile, |profile| {
+                config_backup::restore(profile.config.data_dir())
+            })
+            .await
+        }
         Route::ReplayBinary => {
             replay_response(
                 state.profile.as_ref().expect("profile route"),

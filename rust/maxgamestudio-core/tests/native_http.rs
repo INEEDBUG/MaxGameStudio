@@ -306,6 +306,93 @@ fn config_routes_replay_python_and_keep_unrecognized_profile_data() {
 }
 
 #[test]
+fn restores_existing_cs2_config_backup_and_preserves_failed_recovery() {
+    let scratch = tempfile::tempdir().unwrap();
+    let profile = scratch.path().join("测试数据");
+    let bundle = scratch.path().join("bundle");
+    let backup = profile.join(".cs2_config_backup");
+    let steam_cfg = scratch.path().join("Steam/userdata/123/730/local/cfg");
+    fs::create_dir_all(&steam_cfg).unwrap();
+    fs::create_dir_all(&backup).unwrap();
+    fs::create_dir(&bundle).unwrap();
+    let state = backup.join("recording_state.json");
+    let marker = br#"{"version":1,"status":"recording","started_at_iso":"fixture-time"}"#;
+    fs::write(&state, marker).unwrap();
+    let current = steam_cfg.join("cs2_machine_convars.vcfg");
+    let generated = steam_cfg.join("cs2_video.txt");
+    let untouched = steam_cfg.join("my-video.txt");
+    fs::write(&current, b"modified during capture").unwrap();
+    fs::write(&generated, b"generated during capture").unwrap();
+    fs::write(&untouched, b"other data").unwrap();
+    let backup_rel = "Steam账号_123/730/local/cfg/cs2_machine_convars.vcfg";
+    let saved = backup.join(backup_rel);
+    fs::create_dir_all(saved.parent().unwrap()).unwrap();
+    let original = b"pre-recording\r\nsettings\xff";
+    fs::write(&saved, original).unwrap();
+    let manifest = backup.join("manifest.json");
+    let entries = json!([
+        {"original":current,"account_id":"123","existed":true,"backup_relpath":backup_rel},
+        {"original":generated,"existed":false},
+    ]);
+    let mut invalid = entries.clone();
+    invalid[1]["original"] = json!(untouched);
+    fs::write(
+        &manifest,
+        json!({"version":4,"entries":invalid}).to_string(),
+    )
+    .unwrap();
+
+    let server = RunningServer::launch("3.2.0-fixture", Some((&profile, &bundle)));
+    let restore = "/api/config-backup/restore";
+    assert_eq!(
+        profile_request(&server, "POST", restore, &Value::Null, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "GET", restore, &Value::Null, true).0,
+        405
+    );
+    let (status, refused) = profile_request(&server, "POST", restore, &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(refused["ok"], false);
+    assert_eq!(refused["code"], "CONFIG_RESTORE_PARTIAL");
+    assert_eq!(fs::read(&state).unwrap(), marker);
+    assert_eq!(fs::read(&current).unwrap(), b"modified during capture");
+    assert_eq!(fs::read(&untouched).unwrap(), b"other data");
+
+    let valid = json!({"version":4,"entries":entries}).to_string();
+    fs::write(&manifest, &valid).unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", restore, &Value::Null, true),
+        (
+            200,
+            json!({"ok":true,"code":"CONFIG_RESTORE_OK","restored":2})
+        )
+    );
+    assert_eq!(fs::read(&current).unwrap(), original);
+    assert!(!generated.exists());
+    assert_eq!(fs::read(&untouched).unwrap(), b"other data");
+    assert_eq!(fs::read(&saved).unwrap(), original);
+    assert_eq!(fs::read_to_string(&manifest).unwrap(), valid);
+    let (_, status) = profile_request(
+        &server,
+        "GET",
+        "/api/config-backup/status",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(status["restore_required"], false);
+    assert_eq!(
+        profile_request(&server, "POST", restore, &Value::Null, true),
+        (
+            200,
+            json!({"ok":true,"code":"CONFIG_RESTORE_NOT_NEEDED","restored":0})
+        )
+    );
+    server.stop();
+}
+
+#[test]
 fn config_startup_uses_bundle_data_and_reports_owned_identity_and_recovery() {
     let scratch = tempfile::tempdir().unwrap();
     let profile = scratch.path().join("profile");
