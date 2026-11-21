@@ -72,6 +72,19 @@ impl ProfileConfig {
         self.path.with_file_name("cs2-insight.db")
     }
 
+    pub(crate) fn lite_cut_assets_dir(&self) -> io::Result<PathBuf> {
+        let stored = self.load()?;
+        let configured = stored.known["lite_cut_assets_dir"]
+            .as_str()
+            .expect("normalized asset directory")
+            .trim();
+        if configured.is_empty() {
+            Ok(self.data_dir.join("lite_cut_assets"))
+        } else {
+            crate::profile_platform::expand_user(configured)
+        }
+    }
+
     pub(crate) fn obs_settings(&self) -> io::Result<crate::obs_wire::ObsSettings> {
         let mut stored = self.load()?;
         serde_json::from_value(

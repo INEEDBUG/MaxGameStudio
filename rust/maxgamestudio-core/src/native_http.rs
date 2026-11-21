@@ -8,6 +8,7 @@ mod demo_radar;
 mod demo_roster;
 mod demo_watch;
 mod lite_cut;
+mod media_stream;
 mod recordings;
 mod replay_body;
 
@@ -494,6 +495,7 @@ async fn route(
                 state.profile.as_ref().expect("profile route"),
                 route,
                 request,
+                extended_request,
             )
             .await
         }

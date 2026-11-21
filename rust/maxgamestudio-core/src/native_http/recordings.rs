@@ -1,16 +1,15 @@
 use super::{
     demo_body::{bounded_float, field_issue, model, text},
     demo_query::{parse_offset_page, parse_path_integer, parse_waveform},
-    detail, json_reply, model_body, profile_disk, profile_work, validation_reply, HttpResponse,
-    ProfileState,
+    detail, json_reply, media_stream, model_body, profile_disk, profile_work, validation_reply,
+    HttpResponse, ProfileState,
 };
 use crate::{
     obs_wire::ObsRpc,
     profile_platform::{expand_user, path_text},
     recorded_clips, recording_waveform,
 };
-use http_body_util::BodyExt;
-use hyper::{body::Incoming, header::RANGE, Method, Request, StatusCode};
+use hyper::{body::Incoming, Method, Request, StatusCode};
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
 use std::{
@@ -22,7 +21,6 @@ use std::{
     time::Duration,
 };
 use tokio::time::timeout;
-use tower_http::services::ServeFile;
 
 const CLIP_PREFIX: &str = "/api/recorded-clips/";
 
@@ -370,7 +368,7 @@ fn clip_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
 
 async fn stream(
     profile: &Arc<ProfileState>,
-    mut request: Request<Incoming>,
+    request: Request<Incoming>,
     extended_request: &AtomicBool,
 ) -> HttpResponse {
     let decoded = percent_decode_str(request.uri().path()).decode_utf8_lossy();
@@ -395,22 +393,8 @@ async fn stream(
         Ok(Ok(None)) => return missing_clip(id),
         _ => return read_error(),
     };
-    // Direct browser seeking sends one range. A multipart request may fetch the
-    // complete file as allowed by HTTP rather than allocating a compound buffer.
-    if request
-        .headers()
-        .get(RANGE)
-        .is_some_and(|range| range.as_bytes().contains(&b','))
-    {
-        request.headers_mut().remove(RANGE);
-    }
-    match ServeFile::new(file).try_call(request).await {
-        Ok(response) => {
-            if response.status().is_success() {
-                extended_request.store(true, Ordering::Relaxed);
-            }
-            response.map(BodyExt::boxed_unsync)
-        }
+    match media_stream::serve(file, request, extended_request).await {
+        Ok(response) => response,
         Err(_) => detail(StatusCode::INTERNAL_SERVER_ERROR, "无法读取录制文件"),
     }
 }

@@ -780,6 +780,100 @@ fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
 }
 
 #[test]
+fn streams_existing_lite_cut_media_and_its_saved_proxy_from_selected_storage() {
+    let scratch = tempfile::tempdir().unwrap();
+    let data = scratch.path().join("data");
+    let assets = scratch.path().join("自定义素材");
+    fs::create_dir(&assets).unwrap();
+    let settings = scratch.path().join("settings.json");
+    fs::write(&settings, json!({"lite_cut_assets_dir":assets}).to_string()).unwrap();
+    let outside = scratch.path().join("elsewhere.mp4");
+    let original = assets.join("original.mov");
+    let proxy = assets.join("original.preview-alpha-v3.webm");
+    fs::write(&original, b"old motion source").unwrap();
+    fs::write(&proxy, b"old preview cache").unwrap();
+    fs::write(&outside, b"outside storage").unwrap();
+
+    let db = scratch.path().join("cs2-insight.db");
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE lite_cut_assets (
+             id INTEGER PRIMARY KEY, project_id INTEGER, name TEXT NOT NULL, kind TEXT NOT NULL,
+             mime_type TEXT, file_path TEXT NOT NULL, duration_sec REAL, created_at TEXT NOT NULL
+         );",
+        )
+        .unwrap();
+    for (id, project, name, path) in [
+        (1, Some(7), "旧素材", &original),
+        (2, Some(8), "另一工程", &original),
+        (3, None, "外部素材", &outside),
+    ] {
+        connection.execute(
+            "INSERT INTO lite_cut_assets VALUES(?1, ?2, ?3, 'video', NULL, ?4, 2.5, '2026-11-20')",
+            rusqlite::params![id, project, name, path.to_str().unwrap()],
+        ).unwrap();
+    }
+    let old_db = fs::read(&db).unwrap();
+    let old_settings = fs::read(&settings).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let (status, page) = profile_request(
+        &server,
+        "GET",
+        "/api/lite-cut/assets?project_id=7",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(status, 200);
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let material = items.iter().find(|entry| entry["id"] == 1).unwrap();
+    assert_eq!(material["preview_proxy_status"], "ready");
+    assert_eq!(material["has_alpha"], true);
+    assert_eq!(material["width"], Value::Null);
+    assert_eq!(material["file_path"], original.to_str().unwrap());
+    assert_eq!(page["limit"], 500);
+    assert_eq!(
+        profile_request(
+            &server,
+            "GET",
+            "/api/lite-cut/assets/1/stream",
+            &Value::Null,
+            false
+        )
+        .0,
+        401,
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "GET",
+            "/api/lite-cut/assets/3/stream",
+            &Value::Null,
+            true
+        ),
+        (403, json!({"detail":"asset path outside storage"})),
+    );
+    let response = send_request(server.addr, &format!(
+        "GET /api/lite-cut/assets/1/stream?_session=synthetic-token HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nRange: bytes=4-10\r\n\r\n",
+        server.addr,
+    ));
+    assert_eq!(response.status, 206);
+    assert_eq!(response.headers["content-type"], "video/webm");
+    assert_eq!(response.headers["content-range"], "bytes 4-10/17");
+    assert_eq!(response.body, "preview");
+    assert_eq!(fs::read(db).unwrap(), old_db);
+    assert_eq!(fs::read(settings).unwrap(), old_settings);
+    assert_eq!(fs::read(original).unwrap(), b"old motion source");
+    assert_eq!(fs::read(proxy).unwrap(), b"old preview cache");
+    server.stop();
+}
+
+#[test]
 fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
     let scratch = tempfile::tempdir().unwrap();
     let path = scratch.path().join("cs2-insight.db");

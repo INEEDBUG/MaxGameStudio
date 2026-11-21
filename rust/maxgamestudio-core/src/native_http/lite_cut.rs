@@ -1,3 +1,5 @@
+mod assets;
+
 use super::{
     demo_query::{parse_offset_page, parse_path_integer},
     detail, json_reply, profile_disk, validation_reply, HttpResponse, ProfileState,
@@ -6,7 +8,12 @@ use hyper::{body::Incoming, Request, StatusCode};
 use percent_encoding::percent_decode_str;
 use rusqlite::{params, types::Type, Connection, OpenFlags, OptionalExtension, Row};
 use serde_json::{json, Value};
-use std::{error::Error, path::Path, sync::Arc, time::Duration};
+use std::{
+    error::Error,
+    path::Path,
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
+};
 
 const PROJECTS_PATH: &str = "/api/lite-cut/projects";
 const PROJECT_COLUMNS: &str = "id, name, body_json, created_at, updated_at";
@@ -15,6 +22,7 @@ pub(super) enum Route {
     List,
     Project,
     Snapshots,
+    Assets(assets::Route),
 }
 
 impl Route {
@@ -23,6 +31,9 @@ impl Route {
             return Some(Self::List);
         }
         let path = percent_decode_str(path).decode_utf8_lossy();
+        if let Some(route) = assets::Route::from_path(&path) {
+            return Some(Self::Assets(route));
+        }
         let tail = path.strip_prefix(PROJECTS_PATH)?.strip_prefix('/')?;
         match tail.split_once('/') {
             None if !tail.is_empty() => Some(Self::Project),
@@ -36,6 +47,7 @@ pub(super) async fn respond(
     profile: &Arc<ProfileState>,
     route: Route,
     request: Request<Incoming>,
+    extended_request: &AtomicBool,
 ) -> HttpResponse {
     let uri = request.uri();
     let selection = match route {
@@ -54,6 +66,9 @@ pub(super) async fn respond(
                 Ok(id) => ProjectRead::One(id),
                 Err(errors) => return validation_reply(errors),
             }
+        }
+        Route::Assets(route) => {
+            return assets::respond(profile, route, request, extended_request).await
         }
     };
     profile_disk(profile, move |profile| {
@@ -81,40 +96,51 @@ impl ProjectRead {
             Self::Page { limit, offset } => Some(json!({"items":[],"limit":limit,"offset":offset})),
             _ => None,
         };
-        if !path.try_exists()? {
-            return Ok(empty_database());
-        }
-        let mut connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        connection.busy_timeout(Duration::from_secs(5))?;
-        let transaction = connection.transaction()?;
-        if !has_table(&transaction, "lite_cut_projects")? {
-            return Ok(empty_database());
-        }
-        let result = match self {
-            Self::Page { limit, offset } => {
-                let mut query = transaction.prepare(&format!(
-                    "SELECT {PROJECT_COLUMNS} FROM lite_cut_projects
+        let result = read_table(path, "lite_cut_projects", |transaction| {
+            Ok(match self {
+                Self::Page { limit, offset } => {
+                    let mut query = transaction.prepare(&format!(
+                        "SELECT {PROJECT_COLUMNS} FROM lite_cut_projects
                      ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
-                ))?;
-                let rows = query.query_map(params![limit, offset], project_json)?;
-                let items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-                Some(json!({"items":items,"limit":limit,"offset":offset}))
-            }
-            Self::One(id) => transaction
-                .query_row(
-                    &format!("SELECT {PROJECT_COLUMNS} FROM lite_cut_projects WHERE id = ?1"),
-                    [id],
-                    project_json,
-                )
-                .optional()?,
-            Self::Snapshots(id) => read_snapshots(&transaction, id)?,
-        };
-        transaction.commit()?;
-        Ok(result)
+                    ))?;
+                    let rows = query.query_map(params![limit, offset], project_json)?;
+                    let items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+                    Some(json!({"items":items,"limit":limit,"offset":offset}))
+                }
+                Self::One(id) => transaction
+                    .query_row(
+                        &format!("SELECT {PROJECT_COLUMNS} FROM lite_cut_projects WHERE id = ?1"),
+                        [id],
+                        project_json,
+                    )
+                    .optional()?,
+                Self::Snapshots(id) => read_snapshots(transaction, id)?,
+            })
+        })?;
+        Ok(result.unwrap_or_else(empty_database))
     }
+}
+
+fn read_table<T>(
+    path: &Path,
+    table: &str,
+    read: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+) -> Result<Option<T>, Box<dyn Error>> {
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    let mut connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.busy_timeout(Duration::from_secs(5))?;
+    let transaction = connection.transaction()?;
+    if !has_table(&transaction, table)? {
+        return Ok(None);
+    }
+    let result = read(&transaction)?;
+    transaction.commit()?;
+    Ok(Some(result))
 }
 
 fn has_table(connection: &Connection, name: &str) -> rusqlite::Result<bool> {

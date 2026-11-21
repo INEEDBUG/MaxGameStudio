@@ -177,6 +177,18 @@ pub(super) fn parse_offset_page(
     }
 }
 
+pub(super) fn parse_asset_page(query: &str) -> Result<(Option<i64>, i64, i64), Vec<Value>> {
+    let mut query = Query::new(query);
+    let project = query.integer("project_id", i64::MIN, None);
+    let limit = query.integer("limit", 1, Some(1000)).unwrap_or(500);
+    let offset = query.integer("offset", 0, None).unwrap_or_default();
+    if query.errors.is_empty() {
+        Ok((project, limit, offset))
+    } else {
+        Err(query.errors)
+    }
+}
+
 pub(super) fn parse_waveform(
     query: &str,
 ) -> Result<crate::recording_waveform::WaveformSlice, Vec<Value>> {
