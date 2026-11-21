@@ -455,6 +455,7 @@ async fn route(
         | Route::ObsSetup(_)
         | Route::RecordingPlan
         | Route::LiteCut(lite_cut::Route::Restore { .. })
+        | Route::LiteCut(lite_cut::Route::ValidateAssets)
         | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
         Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
         _ => "GET",

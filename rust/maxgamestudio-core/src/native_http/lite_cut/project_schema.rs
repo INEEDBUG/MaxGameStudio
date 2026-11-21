@@ -496,7 +496,7 @@ fn numeric_float(value: &Value) -> Option<f64> {
     .filter(|value| value.is_finite())
 }
 
-fn list(value: &Value) -> &[Value] {
+pub(super) fn list(value: &Value) -> &[Value] {
     value.as_array().expect("normalized model list")
 }
 

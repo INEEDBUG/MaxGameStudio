@@ -1,4 +1,5 @@
 mod assets;
+mod export_sources;
 mod exports;
 mod project_schema;
 mod project_store;
@@ -30,6 +31,7 @@ pub(super) enum Route {
     Snapshots(String),
     Restore { project: String, snapshot: String },
     Assets(assets::Route),
+    ValidateAssets,
     ExportList,
     Export(String),
 }
@@ -38,6 +40,9 @@ impl Route {
     pub(super) fn from_path(path: &str) -> Option<Self> {
         if path == PROJECTS_PATH {
             return Some(Self::List);
+        }
+        if path == "/api/lite-cut/assets/validate" {
+            return Some(Self::ValidateAssets);
         }
         let path = percent_decode_str(path).decode_utf8_lossy();
         if let Some(route) = assets::Route::from_path(&path) {
@@ -79,7 +84,7 @@ impl Route {
         match self {
             Self::List => "GET, POST",
             Self::Project(_) => "GET, PATCH",
-            Self::Restore { .. } => "POST",
+            Self::Restore { .. } | Self::ValidateAssets => "POST",
             _ => "GET",
         }
     }
@@ -125,6 +130,7 @@ pub(super) async fn respond(
         Route::Assets(route) => {
             return assets::respond(profile, route, request, extended_request).await
         }
+        Route::ValidateAssets => return export_sources::validate(profile, request).await,
         Route::ExportList => {
             let page = parse_project_page(uri.query().unwrap_or_default(), 20, 100);
             let (project_id, limit, offset) = match page {

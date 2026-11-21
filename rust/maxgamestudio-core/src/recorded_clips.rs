@@ -3,6 +3,7 @@
 use rusqlite::{params, types::ValueRef, Connection, OpenFlags, Params, Row};
 use serde_json::{Map, Number, Value};
 use std::{
+    collections::{BTreeSet, HashMap},
     fmt, fs, io,
     path::{Path, PathBuf},
     time::Duration,
@@ -38,6 +39,7 @@ pub(crate) fn list(path: &Path, limit: i64, offset: i64) -> Result<Vec<Value>, R
         path,
         "ORDER BY id DESC LIMIT ?1 OFFSET ?2",
         params![limit, offset],
+        row_to_json,
     )
 }
 
@@ -46,7 +48,30 @@ pub(crate) fn output_path(path: &Path, id: i64) -> Result<Option<String>, Record
 }
 
 pub(crate) fn get(path: &Path, id: i64) -> Result<Option<Value>, RecordedClipsError> {
-    Ok(read(path, "WHERE id = ?1", [id])?.into_iter().next())
+    Ok(read(path, "WHERE id = ?1", [id], row_to_json)?
+        .into_iter()
+        .next())
+}
+
+pub(crate) fn output_paths(
+    path: &Path,
+    ids: &BTreeSet<i64>,
+) -> Result<HashMap<i64, String>, RecordedClipsError> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = read(
+        path,
+        "WHERE id IN (SELECT value FROM json_each(?1))",
+        [serde_json::json!(ids).to_string()],
+        |row| {
+            let id = row.get(0)?;
+            let item = row_to_json(row)?;
+            let output = item["output_path"].as_str().unwrap_or_default().to_owned();
+            Ok((id, output))
+        },
+    )?;
+    Ok(rows.into_iter().collect())
 }
 
 pub(crate) fn update_duration(
@@ -74,11 +99,12 @@ pub(crate) fn update_duration(
     )? > 0)
 }
 
-fn read(
+fn read<T>(
     path: &Path,
     selection: &str,
     bindings: impl Params,
-) -> Result<Vec<Value>, RecordedClipsError> {
+    map: impl FnMut(&Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>, RecordedClipsError> {
     let Some(mut connection) = open_existing(path, OpenFlags::SQLITE_OPEN_READ_ONLY)? else {
         return Ok(Vec::new());
     };
@@ -98,7 +124,7 @@ fn read(
              duration_sec, status, created_at, {metadata_column} AS clip_meta
              FROM recorded_clips {selection}"
         ))?;
-        let rows = statement.query_map(bindings, row_to_json)?;
+        let rows = statement.query_map(bindings, map)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     transaction.commit()?;

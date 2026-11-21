@@ -1054,6 +1054,91 @@ fn opens_saved_lite_cut_projects_snapshots_and_exports_in_the_existing_profile()
 }
 
 #[test]
+fn lite_cut_asset_validation_reports_only_media_needed_for_export() {
+    let scratch = tempfile::tempdir().unwrap();
+    let data = scratch.path().join("data");
+    let bundle = scratch.path().join("bundle");
+    let visible = scratch.path().join("缺少的视频.mp4");
+    let missing_audio = scratch.path().join("音乐.wav");
+    let missing_image = scratch.path().join("画面.png");
+    fs::create_dir(&bundle).unwrap();
+    let server = RunningServer::launch("3.2.0-fixture", Some((&data, &bundle)));
+    let route = "/api/lite-cut/assets/validate";
+    let input = json!({"body":{
+        "tracks":[
+            {"id":"top","label":"Superimposed","type":"video","clips":[
+                {"id":"image","source_type":"file","file_path":missing_image},
+            ]},
+            {"id":"base","label":"Base","type":"video","clips":[
+                {"id":"visible","source_type":"file","file_path":visible},
+                {"id":"recorded","source_id":29,"timeline_start":4},
+            ]},
+            {"id":"hidden","label":"Hidden","type":"video","hidden":true,"clips":[
+                {"id":"not_rendered","source_type":"file","file_path":"absent-but-hidden.mp4"},
+            ]},
+            {"id":"a1","label":"Audio","type":"audio","solo":true,"clips":[
+                {"id":"audio","source_type":"file","file_path":missing_audio},
+            ]},
+            {"id":"a2","label":"Audio 2","type":"audio","clips":[
+                {"id":"silent","source_type":"file","file_path":"not-in-solo.wav"},
+            ]},
+        ],
+        "overlay_tracks":[{"id":"blocked","hidden":true}],
+        "overlays":[
+            {"id":"repeat","type":"sticker","asset_path":missing_image},
+            {"id":"invisible","type":"sticker","asset_path":"hidden.png","meta":{"overlay_track_id":"blocked"}},
+        ],
+    }});
+    assert_eq!(
+        profile_request(&server, "POST", route, &input, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "POST", route, &input, true),
+        (
+            200,
+            json!({"items":[
+                {"kind":"video","name":"缺少的视频.mp4","path":visible},
+                {"kind":"overlay","name":"画面.png","path":missing_image},
+                {"kind":"audio","name":"音乐.wav","path":missing_audio},
+                {"kind":"recording","name":"Insight recording #29","path":"","source_id":29},
+            ]})
+        ),
+    );
+    fs::write(&visible, b"test media").unwrap();
+    fs::write(&missing_image, b"test media").unwrap();
+    fs::write(&missing_audio, b"test media").unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", route, &input, true).1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let database = data.join("cs2-insight.db");
+    assert!(!database.exists());
+    fs::create_dir_all(&data).unwrap();
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(
+        "CREATE TABLE recorded_clips (
+             id INTEGER PRIMARY KEY, clip_id TEXT, demo_path TEXT, demo_filename TEXT, player_name TEXT,
+             output_path TEXT, duration_sec REAL, status TEXT, created_at TEXT, clip_meta TEXT
+         );",
+    ).unwrap();
+    db.execute(
+        "INSERT INTO recorded_clips (id, output_path, clip_meta) VALUES (29, 'old-location.mp4', ?1)",
+        [json!({"output_path": visible}).to_string()],
+    ).unwrap();
+    let database_before = fs::read(&database).unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", route, &input, true),
+        (200, json!({"items":[]})),
+    );
+    assert_eq!(fs::read(&database).unwrap(), database_before);
+    server.stop();
+}
+
+#[test]
 fn saves_existing_lite_cut_projects_and_restores_a_snapshot_atomically() {
     let scratch = tempfile::tempdir().unwrap();
     let db = scratch.path().join("cs2-insight.db");
