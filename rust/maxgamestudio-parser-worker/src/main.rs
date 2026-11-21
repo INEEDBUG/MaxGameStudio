@@ -39,12 +39,23 @@ struct Request {
 #[serde(tag = "action", rename_all = "snake_case")]
 enum Action {
     Probe,
-    InspectHeader { path: PathBuf },
+    InspectHeader {
+        path: PathBuf,
+    },
     WriteReplayParquet(replay::WriteReplayRequest),
     ExtractReplayEffectRows(replay_effect_rows::ExtractReplayEffectRowsRequest),
-    InspectDemo { path: PathBuf },
-    InspectRoster { path: PathBuf },
-    InspectRoundWindows { path: PathBuf, tick_rate: f64 },
+    InspectDemo {
+        path: PathBuf,
+    },
+    InspectRoster {
+        path: PathBuf,
+    },
+    InspectRoundWindows {
+        path: PathBuf,
+        tick_rate: f64,
+        #[serde(default)]
+        include_match_summary: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -166,7 +177,11 @@ fn run(input: impl Read) -> Result<Value, Failure> {
         Action::ExtractReplayEffectRows(request) => replay_effect_rows::extract(request),
         Action::InspectDemo { path } => demo_inspection::inspect(&path),
         Action::InspectRoster { path } => demo_inspection::inspect_roster(&path),
-        Action::InspectRoundWindows { path, tick_rate } => round_windows::inspect(&path, tick_rate),
+        Action::InspectRoundWindows {
+            path,
+            tick_rate,
+            include_match_summary,
+        } => round_windows::inspect(&path, tick_rate, include_match_summary),
     }
 }
 

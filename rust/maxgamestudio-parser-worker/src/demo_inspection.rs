@@ -1,7 +1,7 @@
 use crate::{
     case_fold::case_fold,
     header_fields, parser_inputs, replay_io,
-    round_windows::{end_tick, field, integer, match_start_tick},
+    round_windows::{end_tick, field, integer, match_start_tick, match_summary},
     Failure,
 };
 use parser::{
@@ -24,7 +24,7 @@ use std::{
     path::Path,
 };
 
-const CONTROLLER_TEAM: &str = "CCSPlayerController.m_iTeamNum";
+pub(crate) const CONTROLLER_TEAM: &str = "CCSPlayerController.m_iTeamNum";
 
 #[derive(Debug, Serialize)]
 struct Player {
@@ -45,11 +45,12 @@ pub(crate) fn inspect(path: &Path) -> Result<Value, Failure> {
         let players = parsed
             .map(|output| collect_players(output.player_md))
             .unwrap_or_default();
-        let players = if players.is_empty() {
-            inspect_death_roster(bytes, &huffman)?
-        } else {
-            players
-        };
+        if players.is_empty() {
+            let (roster, summary) = inspect_death_roster(bytes, &huffman, Some(&header))?;
+            if let Some(summary) = summary.filter(|_| !roster.is_empty()) {
+                return Ok(json!({ "players": roster, "match_meta": summary }));
+            }
+        }
         let map = header
             .get("map_name")
             .filter(|name| !name.is_empty())
@@ -113,7 +114,7 @@ fn collect_players(records: Vec<PlayerEndMetaData>) -> Vec<Player> {
     players.into_iter().map(|(_, player)| player).collect()
 }
 
-fn player_name(value: &str) -> Option<&str> {
+pub(crate) fn player_name(value: &str) -> Option<&str> {
     let value =
         value.trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch));
     (!value.is_empty() && !value.eq_ignore_ascii_case("nan")).then_some(value)
@@ -123,11 +124,16 @@ pub(crate) fn inspect_roster(path: &Path) -> Result<Value, Failure> {
     replay_io::with_demo_bytes(path, |bytes| {
         header_fields(bytes)?;
         let huffman = create_huffman_lookup_table();
-        Ok(json!({ "players": inspect_death_roster(bytes, &huffman)? }))
+        let (players, _) = inspect_death_roster(bytes, &huffman, None)?;
+        Ok(json!({ "players": players }))
     })
 }
 
-fn inspect_death_roster(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<Player>, Failure> {
+fn inspect_death_roster(
+    bytes: &[u8],
+    huffman: &Vec<(u8, u8)>,
+    summary_header: Option<&BTreeMap<String, String>>,
+) -> Result<(Vec<Player>, Option<Value>), Failure> {
     let mut inputs = parser_inputs(huffman);
     inputs.only_header = false;
     inputs.parse_ents = true;
@@ -135,10 +141,13 @@ fn inspect_death_roster(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<Pla
         .into_iter()
         .map(str::to_owned)
         .collect();
+    if summary_header.is_some() {
+        inputs.wanted_events.push("round_end".to_owned());
+    }
     let events = match Parser::new(inputs, ParsingMode::Normal).parse_demo(bytes) {
         Ok(output) => output.game_events,
         // A header-only recording has no gameplay at any positive tick.
-        Err(_) if end_tick(bytes)? == 0 => return Ok(Vec::new()),
+        Err(_) if end_tick(bytes)? == 0 => return Ok((Vec::new(), None)),
         Err(_) => {
             return Err(Failure::replay_parse(
                 "could not read Demo player death events",
@@ -156,25 +165,40 @@ fn inspect_death_roster(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<Pla
         .filter(|&tick| start_tick <= 0 || tick >= start_tick)
         .collect();
     if team_ticks.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     if start_tick > 0 {
         team_ticks.push(start_tick);
     }
+    let summary_end = summary_header.map(|_| end_tick(bytes)).transpose()?;
+    let properties = if let Some(demo_end) = summary_end {
+        // The fallback already reads the death-event teams. Fetch the round-end
+        // teams in the same selected-tick scan for the summary.
+        team_ticks.extend(match_summary::summary_ticks(&events, demo_end));
+        match_summary::PROPERTIES
+    } else {
+        &[]
+    };
     team_ticks.sort_unstable();
     team_ticks.dedup();
-    let team_output = parse_team_ticks(bytes, huffman, team_ticks)?;
+    let team_output = parse_team_ticks(bytes, huffman, team_ticks, properties)?;
     let teams = team_samples(&team_output)?;
-    Ok(death_roster(deaths, start_tick, &teams))
+    let roster = death_roster(deaths, start_tick, &teams);
+    let summary = summary_header.zip(summary_end).map(|(header, demo_end)| {
+        match_summary::summarize(header, &events, demo_end, Some(&team_output))
+    });
+    Ok((roster, summary))
 }
 
-fn parse_team_ticks(
+pub(crate) fn parse_team_ticks(
     bytes: &[u8],
     huffman: &Vec<(u8, u8)>,
     ticks: Vec<i32>,
+    extra_props: &[&str],
 ) -> Result<DemoOutput, Failure> {
     let wanted = ["team_num", CONTROLLER_TEAM, "name"]
         .into_iter()
+        .chain(extra_props.iter().copied())
         .map(str::to_owned)
         .collect();
     let props = rm_user_friendly_names(&wanted)
@@ -209,16 +233,8 @@ fn team_samples(output: &DemoOutput) -> Result<Teams<'_>, Failure> {
             "Demo team rows have inconsistent lengths",
         ));
     }
-    let team_column = |name| {
-        output
-            .prop_controller
-            .prop_infos
-            .iter()
-            .find(|prop| prop.prop_friendly_name == name)
-            .and_then(|prop| column(prop.id))
-    };
-    let pawn_team = team_column("team_num");
-    let controller_team = team_column(CONTROLLER_TEAM);
+    let pawn_team = named_column(output, "team_num");
+    let controller_team = named_column(output, CONTROLLER_TEAM);
     for (index, (tick, name)) in ticks.iter().zip(names).enumerate() {
         let (Some(tick), Some(name)) = (tick, name.as_deref().and_then(player_name)) else {
             continue;
@@ -232,7 +248,16 @@ fn team_samples(output: &DemoOutput) -> Result<Teams<'_>, Failure> {
     Ok(teams)
 }
 
-fn team_at_column(column: Option<&VarVec>, index: usize) -> Option<i32> {
+pub(crate) fn named_column<'a>(output: &'a DemoOutput, name: &str) -> Option<&'a VarVec> {
+    let prop = output
+        .prop_controller
+        .prop_infos
+        .iter()
+        .find(|prop| prop.prop_friendly_name == name)?;
+    output.df.get(&prop.id)?.data.as_ref()
+}
+
+pub(crate) fn team_at_column(column: Option<&VarVec>, index: usize) -> Option<i32> {
     let team = match column? {
         VarVec::I32(values) => values.get(index)?.as_ref().map(|&team| i64::from(team)),
         VarVec::U32(values) => values.get(index)?.as_ref().map(|&team| i64::from(team)),

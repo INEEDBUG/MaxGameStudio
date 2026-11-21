@@ -28,7 +28,11 @@ struct RoundWindow {
     record_end_tick: i64,
 }
 
-pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
+pub(crate) fn inspect(
+    path: &Path,
+    tick_rate: f64,
+    include_match_summary: bool,
+) -> Result<Value, Failure> {
     if !tick_rate.is_finite() || !(1.0..=256.0).contains(&tick_rate) {
         return Err(Failure::request("unsupported Demo tick rate"));
     }
@@ -52,11 +56,24 @@ pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
         .into_iter()
         .map(str::to_owned)
         .collect();
-        let parsed = Parser::new(inputs, ParsingMode::Normal)
-            .parse_demo(bytes)
-            .map_err(|_| Failure::replay_parse("could not read round events"))?;
-        let (start, rounds) = windows(parsed.game_events, tick_rate, demo_end_tick);
-        Ok(json!({"match_start_tick":start, "demo_end_tick":demo_end_tick, "rounds":rounds}))
+        if include_match_summary {
+            inputs.wanted_events.push("player_death".to_owned());
+        }
+        let events = match Parser::new(inputs, ParsingMode::Normal).parse_demo(bytes) {
+            Ok(output) => output.game_events,
+            Err(_) if include_match_summary && demo_end_tick == 0 => Vec::new(),
+            Err(_) => return Err(Failure::replay_parse("could not read round events")),
+        };
+        let summary = include_match_summary
+            .then(|| match_summary::build(bytes, &huffman, demo_end_tick, &events))
+            .transpose()?;
+        let (start, rounds) = windows(events, tick_rate, demo_end_tick);
+        let mut result =
+            json!({"match_start_tick":start, "demo_end_tick":demo_end_tick, "rounds":rounds});
+        if let Some(summary) = summary {
+            result["match_meta"] = summary;
+        }
+        Ok(result)
     })
 }
 
@@ -247,6 +264,297 @@ fn read_varint(bytes: &mut &[u8]) -> Option<u64> {
         }
     }
     None
+}
+
+pub(crate) mod match_summary {
+    use super::{field, integer, match_start_tick, GameEvent, Variant};
+    use crate::{
+        demo_inspection::{
+            named_column, parse_team_ticks, player_name, team_at_column, CONTROLLER_TEAM,
+        },
+        header_fields, Failure,
+    };
+    use parser::{
+        first_pass::prop_controller::{STEAMID_ID, TICK_ID},
+        parse_demo::DemoOutput,
+        second_pass::variants::VarVec,
+    };
+    use serde_json::{json, Value};
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+    const CLAN_NAME: &str = "CCSTeam.m_szClanTeamname";
+    const CLAN_SIDE: &str = "CCSTeam.m_iTeamNum";
+    pub(crate) const PROPERTIES: &[&str] = &["steamid", CLAN_NAME, CLAN_SIDE];
+    const LEGACY_TICKS_PER_MINUTE: i64 = 64 * 60;
+
+    type Member = (Option<u64>, i32);
+    type MembersByTick = BTreeMap<i32, Vec<Member>>;
+
+    #[derive(Default)]
+    struct TeamObservations {
+        members: MembersByTick,
+        names: [Option<String>; 2],
+    }
+
+    pub(super) fn build(
+        bytes: &[u8],
+        huffman: &Vec<(u8, u8)>,
+        demo_end_tick: i64,
+        events: &[GameEvent],
+    ) -> Result<Value, Failure> {
+        let header = header_fields(bytes)?;
+        let ticks = summary_ticks(events, demo_end_tick);
+        let output = if ticks.is_empty() {
+            None
+        } else {
+            // Empty tick lists select all rows, so only call the parser when at least one is needed.
+            Some(parse_team_ticks(bytes, huffman, ticks, PROPERTIES)?)
+        };
+        Ok(summarize(&header, events, demo_end_tick, output.as_ref()))
+    }
+
+    pub(crate) fn summary_ticks(events: &[GameEvent], demo_end_tick: i64) -> Vec<i32> {
+        if demo_end_tick <= 0 {
+            return Vec::new();
+        }
+        let start = match_start_tick(events);
+        let mut ticks = BTreeSet::from([start.max(1)]);
+        if let Some(decisions) = round_decisions(events, start) {
+            ticks.extend(decisions.into_iter().map(|(tick, _)| tick));
+        }
+        ticks.into_iter().collect()
+    }
+
+    pub(crate) fn summarize(
+        header: &BTreeMap<String, String>,
+        events: &[GameEvent],
+        demo_end_tick: i64,
+        output: Option<&DemoOutput>,
+    ) -> Value {
+        let start = match_start_tick(events);
+        let observations = output
+            .map(|output| observe_teams(output, start.max(1)))
+            .unwrap_or_default();
+        let scores = round_decisions(events, start)
+            .as_deref()
+            .and_then(|decisions| fixed_team_scores(start, decisions, &observations.members));
+        let duration_mins = duration(header, start, events);
+        let [team_a_name, team_b_name] = observations.names;
+        let map_name = header
+            .get("map_name")
+            .filter(|name| !name.is_empty())
+            .map_or("unknown", String::as_str);
+        let server_name = header.get("server_name").map_or("", |name| {
+            name.trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
+        });
+        json!({
+            "map_name": map_name, "server_name": server_name, "target_player": "",
+            "target_player_user_id": null, "target_steam_id": null,
+            "total_rounds": scores.map(|[a,b]| a+b),
+            "target_kills": 0, "target_deaths": 0,
+            "team_a_score": scores.map(|[a,_]| a),
+            "team_b_score": scores.map(|[_,b]| b),
+            "team_a_name": team_a_name.as_deref().unwrap_or("Team A"),
+            "team_b_name": team_b_name.as_deref().unwrap_or("Team B"),
+            "match_date": "", "duration_mins": duration_mins, "demo_end_tick": demo_end_tick,
+        })
+    }
+
+    fn round_decisions(events: &[GameEvent], start: i32) -> Option<Vec<(i32, i32)>> {
+        let mut decisions = BTreeMap::new();
+        for event in events
+            .iter()
+            .filter(|event| event.name == "round_end" && event.tick >= start)
+        {
+            let side = field(event, "winner").and_then(winning_side)?;
+            if event.tick <= 0 || decisions.insert(event.tick, side).is_some() {
+                return None;
+            }
+        }
+        Some(decisions.into_iter().collect())
+    }
+
+    fn winning_side(value: &Variant) -> Option<i32> {
+        let side = if let Variant::String(name) = value {
+            match name.trim().to_ascii_uppercase().as_str() {
+                "CT" | "CTS" | "COUNTER-TERRORISTS" | "COUNTER_TERRORISTS" => 3,
+                "T" | "TS" | "TERRORIST" | "TERRORISTS" => 2,
+                name => {
+                    let number = name.parse::<f64>().ok()?;
+                    if !number.is_finite() {
+                        return None;
+                    }
+                    number as i64
+                }
+            }
+        } else {
+            integer(value)?
+        };
+        matches!(side, 2 | 3).then_some(side as i32)
+    }
+
+    fn observe_teams(output: &DemoOutput, opening_tick: i32) -> TeamObservations {
+        let mut observations = TeamObservations::default();
+        let column = |id| output.df.get(&id).and_then(|column| column.data.as_ref());
+        let Some(VarVec::I32(ticks)) = column(TICK_ID) else {
+            return observations;
+        };
+        let steamids = match column(STEAMID_ID) {
+            Some(VarVec::U64(ids)) => Some(ids),
+            _ => None,
+        };
+        let pawn_side = named_column(output, "team_num");
+        let controller_side = named_column(output, CONTROLLER_TEAM);
+        let clan_side = named_column(output, CLAN_SIDE);
+        let clan_names = match named_column(output, CLAN_NAME) {
+            Some(VarVec::String(names)) => Some(names),
+            _ => None,
+        };
+        for (index, tick) in ticks.iter().copied().enumerate() {
+            let Some(tick) = tick else {
+                continue;
+            };
+            if let Some(side) =
+                team_at_column(pawn_side, index).or_else(|| team_at_column(controller_side, index))
+            {
+                let steamid = steamids
+                    .and_then(|ids| ids.get(index))
+                    .copied()
+                    .flatten()
+                    .filter(|&id| id > 0);
+                observations
+                    .members
+                    .entry(tick)
+                    .or_default()
+                    .push((steamid, side));
+            }
+            if tick == opening_tick && observations.names.iter().any(Option::is_none) {
+                if let Some((side, name)) = team_at_column(clan_side, index).zip(
+                    clan_names
+                        .and_then(|names| names.get(index))
+                        .and_then(Option::as_deref)
+                        .and_then(player_name),
+                ) {
+                    if !matches!(name.to_ascii_lowercase().as_str(), "t" | "ct" | "terrorist") {
+                        observations.names[(side - 2) as usize] = Some(name.to_owned());
+                    }
+                }
+            }
+        }
+        observations
+    }
+
+    fn fixed_team_scores(
+        start: i32,
+        decisions: &[(i32, i32)],
+        members: &MembersByTick,
+    ) -> Option<[usize; 2]> {
+        if decisions.is_empty() {
+            return Some([0, 0]);
+        }
+        if start <= 0 {
+            return None;
+        }
+        let mut opening = HashMap::new();
+        for &(id, side) in members.get(&start)? {
+            if let Some(id) = id {
+                if opening.insert(id, side).is_some_and(|prior| prior != side) {
+                    return None;
+                }
+            }
+        }
+        if ![2, 3]
+            .iter()
+            .all(|side| opening.values().any(|value| value == side))
+        {
+            return None;
+        }
+        let mut scores = [0, 0];
+        for &(tick, side) in decisions {
+            let observed = members.get(&tick)?;
+            let first_winner = observed.iter().find(|(_, current)| *current == side)?.0?;
+            let initial_team = *opening.get(&first_winner)?;
+            for &(id, current) in observed {
+                if let Some(known_team) = id.and_then(|id| opening.get(&id)) {
+                    if (*known_team == initial_team) != (current == side) {
+                        return None;
+                    }
+                }
+            }
+            scores[(initial_team - 2) as usize] += 1;
+        }
+        Some(scores)
+    }
+
+    fn duration(header: &BTreeMap<String, String>, start: i32, events: &[GameEvent]) -> i64 {
+        if !events.iter().any(|event| event.name == "round_end") {
+            return 0;
+        }
+        let header_minutes = header
+            .get("playback_time")
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|seconds| seconds.is_finite())
+            .map_or(0, |seconds| (seconds / 60.0).floor() as i64);
+        let last_tick = events
+            .iter()
+            .filter(|event| {
+                event.name == "round_end" || (event.name == "player_death" && event.tick >= start)
+            })
+            .map(|event| i64::from(event.tick))
+            .max()
+            .unwrap_or(0);
+        let event_minutes = (last_tick - i64::from(start.max(0))).max(0) / LEGACY_TICKS_PER_MINUTE;
+        header_minutes.max(event_minutes)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use parser::second_pass::game_events::EventField;
+
+        #[test]
+        fn counts_fixed_memberships_across_halftime_and_an_overtime_swap() {
+            let start = 100;
+            let demo_trace = [
+                (3900, "T", 2),
+                (8000, "CT", 2),
+                (12000, "CT", 3),
+                (16000, "CT", 3),
+                (20000, "T", 3),
+                (24000, "T", 2),
+            ];
+            let (a, b) = (76561198000000001, 76561198000000002);
+            let mut members = MembersByTick::from([(start, vec![(Some(a), 2), (Some(b), 3)])]);
+            let mut events = Vec::new();
+            for (tick, winner, a_side) in demo_trace {
+                members.insert(tick, vec![(Some(a), a_side), (Some(b), 5 - a_side)]);
+                events.push(GameEvent {
+                    name: "round_end".to_owned(),
+                    fields: vec![EventField {
+                        name: "winner".to_owned(),
+                        data: Some(Variant::String(winner.to_owned())),
+                    }],
+                    tick,
+                });
+            }
+            events.push(GameEvent {
+                name: "player_death".to_owned(),
+                fields: Vec::new(),
+                tick: 24600,
+            });
+            let decisions = round_decisions(&events, start).unwrap();
+            assert_eq!(decisions.len(), 6);
+            assert_eq!(fixed_team_scores(start, &decisions, &members), Some([4, 2]));
+            assert_eq!(duration(&BTreeMap::new(), start, &events), 6);
+
+            // A mixed or unavailable roster must leave the scores unknown.
+            members.insert(24000, vec![(Some(a), 2), (Some(b), 2)]);
+            assert_eq!(fixed_team_scores(start, &decisions, &members), None);
+            members.remove(&24000);
+            assert_eq!(fixed_team_scores(start, &decisions, &members), None);
+            assert_eq!(fixed_team_scores(start, &[], &members), Some([0, 0]));
+        }
+    }
 }
 
 #[cfg(test)]

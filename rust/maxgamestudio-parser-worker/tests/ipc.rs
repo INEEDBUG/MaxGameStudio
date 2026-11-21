@@ -107,6 +107,37 @@ fn inspection_preserves_a_real_header_and_unknown_match_fields_without_a_roster(
 }
 
 #[test]
+fn requested_match_summary_reports_no_rounds_for_a_header_only_demo() {
+    let scratch = tempfile::tempdir().unwrap();
+    let sample = scratch.path().join("header-only.dem");
+    let source = fixture_header();
+    fs::write(&sample, &source).unwrap();
+    let inspected = request(json!({
+        "protocol": 1, "action": "inspect_round_windows", "path": sample,
+        "tick_rate": 64.0, "include_match_summary": true,
+    }));
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stdout)
+    );
+    assert_eq!(
+        result(&inspected)["result"],
+        json!({
+            "match_start_tick": 0, "demo_end_tick": 0, "rounds": [],
+            "match_meta": {
+                "map_name": "de_fixture", "server_name": "", "target_player": "",
+                "target_player_user_id": null, "target_steam_id": null,
+                "total_rounds": 0, "target_kills": 0, "target_deaths": 0,
+                "team_a_score": 0, "team_b_score": 0, "team_a_name": "Team A",
+                "team_b_name": "Team B", "match_date": "", "duration_mins": 0, "demo_end_tick": 0,
+            },
+        })
+    );
+    assert_eq!(fs::read(sample).unwrap(), source);
+}
+
+#[test]
 fn replay_writer_preserves_final_and_existing_staged_files() {
     let scratch = tempfile::tempdir().unwrap();
     let source = scratch.path().join("sample.dem");
