@@ -20,6 +20,7 @@ pub(super) enum DemoRoute {
     UtilityMask,
     Detail,
     PlayerStats,
+    Players,
     Remark,
 }
 
@@ -59,6 +60,7 @@ impl DemoRoute {
                 }
                 match rest.split_once('/') {
                     Some((id, "player-stats")) if !id.is_empty() => Some(Self::PlayerStats),
+                    Some((id, "players")) if !id.is_empty() => Some(Self::Players),
                     Some((id, "remark")) if !id.is_empty() => Some(Self::Remark),
                     Some(_) => None,
                     None => Some(Self::Detail),

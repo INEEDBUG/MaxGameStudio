@@ -5,6 +5,7 @@ mod demo_events;
 mod demo_open;
 mod demo_query;
 mod demo_radar;
+mod demo_roster;
 mod demo_watch;
 mod recordings;
 mod replay_body;
@@ -599,6 +600,9 @@ async fn demo_response(
 ) -> HttpResponse {
     match route {
         DemoRoute::OpenLocal => demo_open::open(profile, request, extended_request).await,
+        DemoRoute::Players => {
+            demo_roster::players(profile, request.uri().path(), extended_request).await
+        }
         DemoRoute::RadarMap | DemoRoute::UtilityMask => demo_radar::image(route, request.uri()),
         DemoRoute::Stream => {
             let Some(body) = profile.demo_events.stream(shutdown) else {

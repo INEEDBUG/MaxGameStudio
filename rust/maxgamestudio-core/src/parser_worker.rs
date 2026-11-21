@@ -59,6 +59,14 @@ impl ParserWorker {
         .await
     }
 
+    pub(crate) async fn inspect_roster(&self, path: &Path) -> io::Result<Value> {
+        self.run(
+            json!({"protocol": 1, "action": "inspect_roster", "path": path}),
+            Duration::from_secs(90),
+        )
+        .await
+    }
+
     async fn run(&self, input: Value, limit: Duration) -> io::Result<Value> {
         let request = serde_json::to_vec(&input)?;
         if request.len() > INPUT_LIMIT {

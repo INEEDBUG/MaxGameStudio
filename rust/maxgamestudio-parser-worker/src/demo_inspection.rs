@@ -119,6 +119,14 @@ fn player_name(value: &str) -> Option<&str> {
     (!value.is_empty() && !value.eq_ignore_ascii_case("nan")).then_some(value)
 }
 
+pub(crate) fn inspect_roster(path: &Path) -> Result<Value, Failure> {
+    replay_io::with_demo_bytes(path, |bytes| {
+        header_fields(bytes)?;
+        let huffman = create_huffman_lookup_table();
+        Ok(json!({ "players": inspect_death_roster(bytes, &huffman)? }))
+    })
+}
+
 fn inspect_death_roster(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<Player>, Failure> {
     let mut inputs = parser_inputs(huffman);
     inputs.only_header = false;

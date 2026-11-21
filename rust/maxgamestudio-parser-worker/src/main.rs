@@ -43,6 +43,7 @@ enum Action {
     WriteReplayParquet(replay::WriteReplayRequest),
     ExtractReplayEffectRows(replay_effect_rows::ExtractReplayEffectRowsRequest),
     InspectDemo { path: PathBuf },
+    InspectRoster { path: PathBuf },
     InspectRoundWindows { path: PathBuf, tick_rate: f64 },
 }
 
@@ -157,13 +158,14 @@ fn run(input: impl Read) -> Result<Value, Failure> {
     }
     match request.action {
         Action::Probe => Ok(json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_round_windows"],
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows"],
             "upstream_tag": "v0.41.4"
         })),
         Action::InspectHeader { path } => inspect_header(&path),
         Action::WriteReplayParquet(request) => replay::write(request),
         Action::ExtractReplayEffectRows(request) => replay_effect_rows::extract(request),
         Action::InspectDemo { path } => demo_inspection::inspect(&path),
+        Action::InspectRoster { path } => demo_inspection::inspect_roster(&path),
         Action::InspectRoundWindows { path, tick_rate } => round_windows::inspect(&path, tick_rate),
     }
 }

@@ -516,6 +516,88 @@ fn seed_demo_library(connection: &rusqlite::Connection) -> Value {
 }
 
 #[test]
+fn demo_players_reuses_only_a_matching_legacy_roster_snapshot() {
+    let scratch = tempfile::tempdir().unwrap();
+    let demo = scratch.path().join("测试 roster.dem");
+    fs::write(&demo, b"cached demo fixture").unwrap();
+    let metadata = fs::metadata(&demo).unwrap();
+    let modified = metadata
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as i64;
+    let config = scratch.path().join("settings.json");
+    let database = scratch.path().join("cs2-insight.db");
+    let wal = database.with_file_name("cs2-insight.db-wal");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    seed_demo_library(&connection);
+    let demo_path = demo.to_str().unwrap();
+    connection
+        .execute("UPDATE demo_files SET path = ? WHERE id = 1", [demo_path])
+        .unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE demo_roster_cache (demo_id INTEGER PRIMARY KEY, demo_path TEXT NOT NULL,
+          cache_version INTEGER NOT NULL, source_content_md5 TEXT, source_file_size INTEGER,
+          source_mtime_ns INTEGER, state TEXT NOT NULL, row_count INTEGER NOT NULL,
+          error_msg TEXT, updated_at TEXT NOT NULL)",
+        )
+        .unwrap();
+    connection.execute(
+        "INSERT INTO demo_roster_cache VALUES (1, ?, 1, 'fixture-md5-one', ?, ?, 'ready', 2, NULL, '')",
+        rusqlite::params![demo_path, i64::try_from(metadata.len()).unwrap(), modified],
+    ).unwrap();
+    let before = fs::read(&database).unwrap();
+    let wal_before = fs::read(&wal).unwrap();
+    let data = scratch.path().join("data");
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&config),
+    );
+    let route = "/api/demos/1/players";
+    assert_eq!(
+        profile_request(&server, "GET", route, &Value::Null, false).0,
+        401
+    );
+    let (status, data) = profile_request(&server, "GET", route, &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(
+        data["players"][0],
+        json!({
+            "name": "Q'uote%_玩家", "player_name": "Q'uote%_玩家", "team": 2, "team_number": 2,
+            "team_name": "甲", "steam_id": "STEAM_1:1:40", "steam_id64": "76561198000000123",
+            "steamid64": "76561198000000123", "account_id": "39734400", "user_id": "12",
+            "kills": 17, "deaths": 5, "assists": 8, "kd": 3.4,
+        })
+    );
+    assert_eq!(data["players"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        data["match_meta"],
+        json!({
+            "map_name": "de_荒漠", "total_rounds": 20, "team_a_score": 13, "team_b_score": 7,
+            "duration_mins": 24.5, "match_date": "2025-03-18T23:59:59Z",
+        })
+    );
+    assert_eq!(fs::read(&database).unwrap(), before);
+    assert_eq!(fs::read(&wal).unwrap(), wal_before);
+    assert_eq!(
+        profile_request(&server, "GET", "/api/demos/441/players", &Value::Null, true).0,
+        404
+    );
+    fs::write(&demo, b"changed source is longer than cached one").unwrap();
+    assert_eq!(
+        profile_request(&server, "GET", route, &Value::Null, true).0,
+        503
+    );
+    server.stop();
+}
+
+#[test]
 fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
     let scratch = tempfile::tempdir().unwrap();
     let path = scratch.path().join("cs2-insight.db");
