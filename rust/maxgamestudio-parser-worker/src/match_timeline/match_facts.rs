@@ -3,6 +3,7 @@
 use super::{
     damage_stats::DamageInput,
     player_stats::{self, Player},
+    round_economy::{self, RoundEconomy},
     round_score::{self, RoundOutcome, Side, TeamKey},
 };
 use crate::{
@@ -22,15 +23,22 @@ pub(super) fn collect(
     demo_end_tick: i64,
     freeze_ticks: &BTreeMap<i64, i64>,
     visible: &[RoundWindow],
-    rounds: &[Value],
-) -> Result<(Value, Vec<RoundOutcome>), Failure> {
+    rounds: &mut [Value],
+) -> Result<Value, Failure> {
+    let start_tick = match_start_tick(events);
+    let economy_ticks = round_economy::freeze_end_rounds(events, start_tick);
     let mut ticks = match_summary::summary_ticks(events, demo_end_tick);
     ticks.extend(freeze_ticks.values().map(|&tick| tick as i32));
+    ticks.extend(economy_ticks.keys().copied());
     ticks.sort_unstable();
     ticks.dedup();
+    let mut properties = match_summary::PROPERTIES.to_vec();
+    if !economy_ticks.is_empty() {
+        properties.extend_from_slice(round_economy::PROPERTIES);
+    }
     // An empty selection asks the parser for every tick.
     let sample = (!ticks.is_empty())
-        .then(|| parse_team_ticks(bytes, huffman, ticks, match_summary::PROPERTIES))
+        .then(|| parse_team_ticks(bytes, huffman, ticks, &properties))
         .transpose()?;
     let header = header_fields(bytes)?;
     let (summary, members) =
@@ -99,10 +107,18 @@ pub(super) fn collect(
         &scores.rounds,
         DamageInput {
             events,
-            match_start_tick: match_start_tick(events),
+            match_start_tick: start_tick,
             freeze_ticks: &visible_freeze_ticks,
         },
     );
+    let economy = sample
+        .as_ref()
+        .filter(|_| !economy_ticks.is_empty())
+        .map(|sample| {
+            round_economy::collect(sample, &economy_ticks, &players, scores.halftime_round)
+        })
+        .unwrap_or_default();
+    add_round_facts(rounds, &scores.rounds, &economy);
     let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);
     let players: Vec<_> = players
         .iter()
@@ -138,10 +154,14 @@ pub(super) fn collect(
         "player_stats": player_stats,
         "ranked_player_ids": ranked_player_ids,
     });
-    Ok((facts, scores.rounds))
+    Ok(facts)
 }
 
-pub(super) fn add_round_scores(rounds: &mut [Value], scores: Vec<RoundOutcome>) {
+fn add_round_facts(
+    rounds: &mut [Value],
+    scores: &[RoundOutcome],
+    economy: &BTreeMap<i64, RoundEconomy>,
+) {
     for (round, score) in rounds.iter_mut().zip(scores) {
         debug_assert_eq!(round["round_number"].as_i64(), Some(score.round_number));
         let [side_a, side_b] = score.sides;
@@ -154,5 +174,8 @@ pub(super) fn add_round_scores(rounds: &mut [Value], scores: Vec<RoundOutcome>) 
         round["team_b_score_before"] = json!(before_b);
         round["team_a_score_after"] = json!(after_a);
         round["team_b_score_after"] = json!(after_b);
+        if let Some(economy) = economy.get(&score.round_number) {
+            economy.write(round, score.sides);
+        }
     }
 }

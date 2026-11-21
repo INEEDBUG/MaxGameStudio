@@ -250,7 +250,21 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     let rows = opt_in["rounds"].as_array_mut().unwrap();
     assert_eq!(rows.len(), 9);
     let winners = ["b", "a", "a", "b", "a", "a", "a", "a", "a"];
-    for (round, winner) in rows.iter_mut().zip(winners) {
+    // Round-start equipment and player buy votes from the pinned legacy wheel.
+    let economy = [
+        (2400, 3650, "pistol", "pistol"),
+        (14850, 3700, "full", "eco"),
+        (17200, 26700, "full", "full"),
+        (20800, 2650, "full", "eco"),
+        (22100, 12450, "full", "full"),
+        (23750, 25850, "full", "full"),
+        (27150, 12400, "full", "force"),
+        (27950, 4100, "full", "eco"),
+        (27950, 14000, "full", "full"),
+    ];
+    for ((round, winner), (equipment_a, equipment_b, buy_a, buy_b)) in
+        rows.iter_mut().zip(winners).zip(economy)
+    {
         let row = round.as_object_mut().unwrap();
         assert_eq!(row.remove("winner_team_key"), Some(json!(winner)));
         assert_eq!(row.remove("team_a_side"), Some(json!("T")));
@@ -260,6 +274,16 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         scores[usize::from(winner == "b")] += 1;
         assert_eq!(row.remove("team_a_score_after"), Some(json!(scores[0])));
         assert_eq!(row.remove("team_b_score_after"), Some(json!(scores[1])));
+        assert_eq!(
+            row.remove("team_a_equipment_value"),
+            Some(json!(equipment_a))
+        );
+        assert_eq!(
+            row.remove("team_b_equipment_value"),
+            Some(json!(equipment_b))
+        );
+        assert_eq!(row.remove("team_a_economy"), Some(json!(buy_a)));
+        assert_eq!(row.remove("team_b_economy"), Some(json!(buy_b)));
     }
     assert_eq!(scores, [7, 2]);
     assert!(
