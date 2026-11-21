@@ -18,12 +18,12 @@ const ROUNDS_PLAYED: &str = "total_rounds_played";
 
 #[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct RoundWindow {
-    round_number: i64,
+    pub(crate) round_number: i64,
     pub(crate) start_tick: i64,
     pub(crate) freeze_end_tick: i64,
     round_end_tick: i64,
     pub(crate) end_tick: i64,
-    winner_side: Option<i64>,
+    pub(crate) winner_side: Option<i64>,
     end_reason: Option<String>,
     record_end_tick: i64,
 }
@@ -68,7 +68,7 @@ pub(crate) fn inspect(
             .then(|| match_summary::build(bytes, &huffman, demo_end_tick, &events))
             .transpose()?;
         events.sort_by_key(|event| event.tick);
-        let (start, rounds) = windows(&events, tick_rate, demo_end_tick);
+        let (start, _, rounds) = windows(&events, tick_rate, demo_end_tick);
         let mut result =
             json!({"match_start_tick":start, "demo_end_tick":demo_end_tick, "rounds":rounds});
         if let Some(summary) = summary {
@@ -83,7 +83,7 @@ pub(crate) fn windows(
     events: &[GameEvent],
     tick_rate: f64,
     demo_end: i64,
-) -> (i64, Vec<RoundWindow>) {
+) -> (i64, BTreeMap<i64, i64>, Vec<RoundWindow>) {
     let start = i64::from(match_start_tick(events));
     let mut freezetime = BTreeMap::<i64, i64>::new();
     let mut restarts = BTreeSet::new();
@@ -179,7 +179,7 @@ pub(crate) fn windows(
     for round in &mut rounds {
         round.record_end_tick = round.end_tick;
     }
-    (start, rounds)
+    (start, freezetime, rounds)
 }
 
 pub(crate) fn match_start_tick(events: &[GameEvent]) -> i32 {
@@ -258,8 +258,7 @@ pub(crate) mod match_summary {
     pub(crate) const PROPERTIES: &[&str] = &["steamid", CLAN_NAME, CLAN_SIDE];
     const LEGACY_TICKS_PER_MINUTE: i64 = 64 * 60;
 
-    type Member = (Option<u64>, i32);
-    type MembersByTick = BTreeMap<i32, Vec<Member>>;
+    pub(crate) type MembersByTick = BTreeMap<i32, Vec<(Option<u64>, i32)>>;
 
     #[derive(Default)]
     struct TeamObservations {
@@ -302,6 +301,15 @@ pub(crate) mod match_summary {
         demo_end_tick: i64,
         output: Option<&DemoOutput>,
     ) -> Value {
+        summarize_with_members(header, events, demo_end_tick, output).0
+    }
+
+    pub(crate) fn summarize_with_members(
+        header: &BTreeMap<String, String>,
+        events: &[GameEvent],
+        demo_end_tick: i64,
+        output: Option<&DemoOutput>,
+    ) -> (Value, MembersByTick) {
         let start = match_start_tick(events);
         let observations = output
             .map(|output| observe_teams(output, start.max(1)))
@@ -318,7 +326,7 @@ pub(crate) mod match_summary {
         let server_name = header.get("server_name").map_or("", |name| {
             name.trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
         });
-        json!({
+        let summary = json!({
             "map_name": map_name, "server_name": server_name, "target_player": "",
             "target_player_user_id": null, "target_steam_id": null,
             "total_rounds": scores.map(|[a,b]| a+b),
@@ -328,7 +336,8 @@ pub(crate) mod match_summary {
             "team_a_name": team_a_name.as_deref().unwrap_or("Team A"),
             "team_b_name": team_b_name.as_deref().unwrap_or("Team B"),
             "match_date": "", "duration_mins": duration_mins, "demo_end_tick": demo_end_tick,
-        })
+        });
+        (summary, observations.members)
     }
 
     fn round_decisions(events: &[GameEvent], start: i32) -> Option<Vec<(i32, i32)>> {
@@ -582,7 +591,7 @@ mod tests {
             ),
         ];
         events.sort_by_key(|event| event.tick);
-        let (start, rounds) = windows(&events, 64.0, 150);
+        let (start, _, rounds) = windows(&events, 64.0, 150);
         assert_eq!(start, 20);
         assert_eq!(rounds.len(), 2);
         assert_eq!(

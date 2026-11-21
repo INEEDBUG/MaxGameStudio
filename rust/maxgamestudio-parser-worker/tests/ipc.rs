@@ -138,6 +138,93 @@ fn requested_match_summary_reports_no_rounds_for_a_header_only_demo() {
 }
 
 #[test]
+#[ignore = "requires the pinned public demo via MGS_ANALYSIS_EVENTS_FIXTURE"]
+fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
+    let sample = std::path::PathBuf::from(
+        std::env::var_os("MGS_ANALYSIS_EVENTS_FIXTURE").expect("public demo fixture path"),
+    );
+    let mut payload = json!({
+        "protocol":1, "action":"inspect_match_timeline", "path":sample, "tick_rate":64,
+    });
+    let default = request(payload.clone());
+    assert!(default.status.success());
+    let default = result(&default)["result"].clone();
+    assert!(default.get("match_facts").is_none());
+
+    payload["include_match_facts"] = json!(true);
+    let opt_in = request(payload);
+    assert!(opt_in.status.success());
+    let mut opt_in = result(&opt_in)["result"].clone();
+    let facts = opt_in
+        .as_object_mut()
+        .unwrap()
+        .remove("match_facts")
+        .unwrap();
+    let summary = &facts["match_meta"];
+    assert_eq!(summary["map_name"], "de_mirage");
+    assert_eq!(summary["total_rounds"], 10);
+    assert_eq!(
+        (
+            summary["team_a_score"].as_i64(),
+            summary["team_b_score"].as_i64()
+        ),
+        (Some(8), Some(2))
+    );
+    assert!(summary.get("target_player").is_none());
+    assert_eq!(facts["team_assignment_source"], "round_side_groups");
+    assert_eq!(
+        (
+            facts["team_a_group"].as_i64(),
+            facts["team_b_group"].as_i64()
+        ),
+        (Some(2), Some(3))
+    );
+    assert_eq!(
+        facts["phase_meta"],
+        json!({"halftime_round":null,"regulation_end_round":null})
+    );
+
+    let players = facts["players"].as_array().unwrap();
+    assert_eq!(players.len(), 10);
+    for (group, key) in [(2, "a"), (3, "b")] {
+        assert_eq!(
+            players
+                .iter()
+                .filter(|player| player["team_key"] == key && player["final_group"] == group)
+                .count(),
+            5
+        );
+    }
+    assert!(players.iter().all(|player| {
+        player["name"].as_str().is_some_and(|name| !name.is_empty())
+            && player["steam_id64"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("7656"))
+    }));
+
+    let mut scores = [0, 0];
+    let rows = opt_in["rounds"].as_array_mut().unwrap();
+    assert_eq!(rows.len(), 9);
+    let winners = ["b", "a", "a", "b", "a", "a", "a", "a", "a"];
+    for (round, winner) in rows.iter_mut().zip(winners) {
+        let row = round.as_object_mut().unwrap();
+        assert_eq!(row.remove("winner_team_key"), Some(json!(winner)));
+        assert_eq!(row.remove("team_a_side"), Some(json!("T")));
+        assert_eq!(row.remove("team_b_side"), Some(json!("CT")));
+        assert_eq!(row.remove("team_a_score_before"), Some(json!(scores[0])));
+        assert_eq!(row.remove("team_b_score_before"), Some(json!(scores[1])));
+        scores[usize::from(winner == "b")] += 1;
+        assert_eq!(row.remove("team_a_score_after"), Some(json!(scores[0])));
+        assert_eq!(row.remove("team_b_score_after"), Some(json!(scores[1])));
+    }
+    assert_eq!(scores, [7, 2]);
+    assert!(
+        opt_in == default,
+        "opt-in fields must preserve the existing timeline"
+    );
+}
+
+#[test]
 fn replay_writer_preserves_final_and_existing_staged_files() {
     let scratch = tempfile::tempdir().unwrap();
     let source = scratch.path().join("sample.dem");

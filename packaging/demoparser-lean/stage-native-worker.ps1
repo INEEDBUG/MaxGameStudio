@@ -16,7 +16,8 @@ $stageRoot = Join-Path $source $worker
 $files = @(
     "Cargo.toml", "Cargo.lock", "src/main.rs", "src/demo_inspection.rs", "src/replay.rs",
     "src/replay_effect_rows.rs", "src/replay_io.rs", "src/round_windows.rs", "tests/ipc.rs",
-    "src/analysis_events.rs", "src/match_timeline.rs", "src/replay_effect_rows/inferno_tracks.rs",
+    "src/analysis_events.rs", "src/match_timeline.rs", "src/match_timeline/match_facts.rs",
+    "src/match_timeline/round_score.rs", "src/replay_effect_rows/inferno_tracks.rs",
     "src/replay_effect_rows/smoke_tracks.rs", "src/replay_effect_rows/smoke_formation.rs",
     "src/replay_effect_rows/trajectory_paths.rs"
 )

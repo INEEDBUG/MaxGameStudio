@@ -67,6 +67,8 @@ enum Action {
     InspectMatchTimeline {
         path: PathBuf,
         tick_rate: f64,
+        #[serde(default)]
+        include_match_facts: bool,
     },
 }
 
@@ -203,9 +205,11 @@ fn run(input: impl Read) -> Result<Value, Failure> {
             tick_rate,
             include_match_summary,
         } => round_windows::inspect(&path, tick_rate, include_match_summary),
-        Action::InspectMatchTimeline { path, tick_rate } => {
-            match_timeline::inspect(&path, tick_rate)
-        }
+        Action::InspectMatchTimeline {
+            path,
+            tick_rate,
+            include_match_facts,
+        } => match_timeline::inspect(&path, tick_rate, include_match_facts),
     }
 }
 

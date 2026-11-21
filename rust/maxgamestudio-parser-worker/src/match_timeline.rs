@@ -1,5 +1,8 @@
 //! Build the named replay events from a single tick-ordered parser scan.
 
+mod match_facts;
+mod round_score;
+
 use crate::{
     analysis_events::{self, AnalysisRow, BombKind, EventKind, Position},
     replay_io,
@@ -10,7 +13,11 @@ use parser::second_pass::parser_settings::create_huffman_lookup_table;
 use serde_json::{json, Value};
 use std::{collections::HashSet, path::Path};
 
-pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
+pub(crate) fn inspect(
+    path: &Path,
+    tick_rate: f64,
+    include_match_facts: bool,
+) -> Result<Value, Failure> {
     if !tick_rate.is_finite() || !(1.0..=256.0).contains(&tick_rate) {
         return Err(Failure::request("unsupported Demo tick rate"));
     }
@@ -18,7 +25,7 @@ pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
         let huffman = create_huffman_lookup_table();
         let demo_end = end_tick(bytes)?;
         let events = analysis_events::scan(bytes, &huffman)?;
-        let (start, windows) = windows(&events, tick_rate, demo_end);
+        let (start, freeze_ticks, windows) = windows(&events, tick_rate, demo_end);
         let mut rounds: Vec<_> = (0..windows.len()).map(|_| Timeline::default()).collect();
         for event in &events {
             let Some(row) = analysis_events::project(event) else {
@@ -35,12 +42,20 @@ pub(crate) fn inspect(path: &Path, tick_rate: f64) -> Result<Value, Failure> {
                 rounds[index].push(row, &event.name);
             }
         }
-        let rounds = rounds
+        let mut rounds = rounds
             .into_iter()
-            .zip(windows)
-            .map(|(timeline, window)| timeline.finish(&window, tick_rate))
+            .zip(&windows)
+            .map(|(timeline, window)| timeline.finish(window, tick_rate))
             .collect::<Vec<_>>();
-        Ok(json!({"match_start_tick":start,"demo_end_tick":demo_end,"rounds":rounds}))
+        let mut result = json!({"match_start_tick":start,"demo_end_tick":demo_end});
+        if include_match_facts {
+            let (facts, round_scores) =
+                match_facts::collect(bytes, &huffman, &events, demo_end, &freeze_ticks, &windows)?;
+            match_facts::add_round_scores(&mut rounds, round_scores);
+            result["match_facts"] = facts;
+        }
+        result["rounds"] = Value::Array(rounds);
+        Ok(result)
     })
 }
 
