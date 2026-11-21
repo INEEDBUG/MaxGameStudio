@@ -1,5 +1,6 @@
-use super::{NormalizedRequest, Perspective, RecordingSegment};
+use super::{request::strip, NormalizedRequest, Perspective, RecordingSegment};
 use serde_json::Value;
+use std::fmt::Write;
 
 pub(super) fn finish(
     req: &NormalizedRequest,
@@ -39,17 +40,18 @@ pub(super) fn finish(
         segment.voice_listen_mask = Some(team);
         segment.voice_listen_mask_enemy = Some(enemy);
 
-        let name = segment.target_player_name.trim();
+        let name = strip(&segment.target_player_name);
         if !segment.disabled && segment.perspective == Perspective::Victim && !name.is_empty() {
-            if segment.target_steamid64.trim().is_empty() {
+            let label = name_repr(&segment.target_player_name);
+            if strip(&segment.target_steamid64).is_empty() {
                 warnings.push(format!(
-                    "segment {}: victim segment missing steamid64 for {name:?} — will spectate by name without verification",
+                    "segment {}: victim segment missing steamid64 for {label} — will spectate by name without verification",
                     segment.segment_index,
                 ));
             }
             if segment.target_spec_slot.is_none() {
                 warnings.push(format!(
-                    "segment {}: victim {name:?} missing spec_slot — will spectate by name",
+                    "segment {}: victim {label} missing spec_slot — will spectate by name",
                     segment.segment_index,
                 ));
             }
@@ -62,6 +64,34 @@ pub(super) fn finish(
         }
     }
     (active, disabled, warnings)
+}
+
+fn name_repr(name: &str) -> String {
+    let quote = if name.contains('\'') && !name.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut text = String::with_capacity(name.len() + 2);
+    text.push(quote);
+    for ch in name.chars() {
+        match ch {
+            '\n' => text.push_str("\\n"),
+            '\r' => text.push_str("\\r"),
+            '\t' => text.push_str("\\t"),
+            '\\' => text.push_str("\\\\"),
+            ch if ch == quote => {
+                text.push('\\');
+                text.push(ch);
+            }
+            ch if ch.is_control() => {
+                write!(text, "\\x{:02x}", u32::from(ch)).expect("string write")
+            }
+            ch => text.push(ch),
+        }
+    }
+    text.push(quote);
+    text
 }
 
 fn disable(segment: &mut RecordingSegment, reason: &str) {

@@ -494,7 +494,7 @@ fn roster_int(value: &Value) -> Option<i64> {
     }
 }
 
-fn strip(value: &str) -> &str {
+pub(super) fn strip(value: &str) -> &str {
     value.trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
 }
 

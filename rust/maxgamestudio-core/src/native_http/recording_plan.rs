@@ -1,11 +1,16 @@
+mod compilations;
+mod event_clips;
 mod postprocess;
+mod pov_interleave;
 mod request;
 mod rounds;
 
 use super::{detail, json_reply, model_body, HttpResponse, ProfileState};
 use crate::demo_boundary;
 use hyper::{body::Incoming, Request, StatusCode};
-use request::{NormalizedRequest, Perspective, RecordingRequestDto, RequestType, SourceType};
+use request::{
+    NormalizedRequest, Perspective, RecordingRequestDto, RequestType, SourceType, TargetPlayer,
+};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::{
@@ -81,13 +86,25 @@ fn build(dto: RecordingRequestDto) -> Result<Value, (StatusCode, String)> {
     })?;
     let mut req =
         request::normalize(dto, end).map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    if req.options.use_ai_director
+        && matches!(
+            req.request_type,
+            RequestType::Highlight | RequestType::KillCompilation
+        )
+    {
+        return Err((
+            StatusCode::NOT_IMPLEMENTED,
+            "Rust 版 AI 导播计划尚未接入".to_owned(),
+        ));
+    }
     let (segments, warnings) = match req.request_type {
         RequestType::RoundCompilation | RequestType::TimelineRound => rounds::plan(&req),
-        _ => {
-            return Err((
-                StatusCode::NOT_IMPLEMENTED,
-                "此录制类型的 Rust 计划尚未接入".to_owned(),
-            ))
+        RequestType::Highlight
+        | RequestType::Fail
+        | RequestType::TimelineKill
+        | RequestType::TimelineDeath => (event_clips::plan(&req), Vec::new()),
+        RequestType::KillCompilation | RequestType::DeathCompilation => {
+            (compilations::plan(&req), Vec::new())
         }
     };
     req.warnings.extend(warnings);
@@ -110,6 +127,40 @@ fn build(dto: RecordingRequestDto) -> Result<Value, (StatusCode, String)> {
         "active_segments":active.into_iter().map(segment_debug).collect::<Vec<_>>(),
         "disabled_segments":disabled.into_iter().map(segment_debug).collect::<Vec<_>>(),
     }))
+}
+
+fn event_segment(
+    req: &NormalizedRequest,
+    source_type: SourceType,
+    perspective: Perspective,
+    round: i64,
+    target: &TargetPlayer,
+    (start, end): (i64, i64),
+    anchor_ticks: Vec<i64>,
+) -> RecordingSegment {
+    let start_tick = start.max(req.demo.first_tick);
+    let end_tick = end.min(req.demo.demo_end_tick);
+    let preroll = (5.0 * req.demo.tick_rate) as i64;
+    RecordingSegment {
+        segment_index: 0,
+        source_type,
+        start_tick,
+        end_tick,
+        anchor_ticks,
+        round: Some(round),
+        target_player_name: target.name.clone(),
+        target_steamid64: target.steamid64.clone(),
+        target_spec_slot: target.spec_slot,
+        perspective,
+        is_final_round: round == req.demo.final_round,
+        safe_seek_tick: start_tick.saturating_sub(preroll).max(req.demo.first_tick),
+        safe_end_tick: None,
+        disabled: false,
+        disabled_reason: None,
+        metadata: Map::new(),
+        voice_listen_mask: None,
+        voice_listen_mask_enemy: None,
+    }
 }
 
 fn segment_debug(segment: RecordingSegment) -> Value {
