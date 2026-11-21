@@ -16,7 +16,7 @@ use hyper::{body::Incoming, Request, StatusCode};
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     error::Error,
     fs, io,
     path::{Component, Path, PathBuf},
@@ -154,6 +154,7 @@ struct Prepared {
     paths: Vec<PathBuf>,
     track_gain: f64,
     audio: audio_mix::Plan,
+    overlays: render::overlay::Plan,
     range: Option<(f64, Option<f64>)>,
     ffmpeg: PathBuf,
     ffprobe: PathBuf,
@@ -389,11 +390,12 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         .map_err(|_| Problem(StatusCode::INTERNAL_SERVER_ERROR, FAILED, None))?;
     let resolved = resolve_media(&clips, &recordings)?;
     let audio = audio_mix::Plan::from_project(&body, |id| recordings.get(&id).map(PathBuf::from));
+    let overlays = render::overlay::Plan::from_project(&body).map_err(|()| unavailable_effect())?;
     let mut source_lengths: HashMap<_, _> = resolved
         .iter()
         .map(|(path, bytes)| (path.clone(), *bytes))
         .collect();
-    for path in audio.sources() {
+    for path in audio.sources().chain(overlays.sources()) {
         let (path, bytes) = readable_media(path)?;
         source_lengths.insert(path, bytes);
     }
@@ -437,6 +439,7 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         paths,
         track_gain,
         audio,
+        overlays,
         range,
         ffmpeg,
         ffprobe,
@@ -446,14 +449,6 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
 }
 
 fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<(), Problem> {
-    let hidden_overlays: HashSet<_> = list(&project["overlay_tracks"])
-        .iter()
-        .filter(|track| track["hidden"] == true)
-        .filter_map(|track| track["id"].as_str())
-        .collect();
-    let overlay = list(&project["overlays"]).iter().any(|clip| {
-        !hidden_overlays.contains(clip["meta"]["overlay_track_id"].as_str().unwrap_or("ot1"))
-    });
     let tracks = list(&project["tracks"]);
     let parallel = tracks[..base].iter().any(|track| {
         track["hidden"] == false && track["type"] == "video" && !list(&track["clips"]).is_empty()
@@ -470,16 +465,18 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
                 .iter()
                 .any(|key| !list(&clip[*key]).is_empty())
     });
-    if overlay || parallel || effects {
-        return Err(Problem(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "LITECUT_EXPORT_EFFECT_UNAVAILABLE",
-            Some(
-                json!({"message":"此 Rust 测试版本暂未支持工程中的画面叠加、转场或视频片段关键帧效果"}),
-            ),
-        ));
+    if parallel || effects {
+        return Err(unavailable_effect());
     }
     Ok(())
+}
+
+fn unavailable_effect() -> Problem {
+    Problem(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "LITECUT_EXPORT_EFFECT_UNAVAILABLE",
+        Some(json!({"message":"此 Rust 测试版本暂未支持工程中的部分叠加、转场或关键帧效果"})),
+    )
 }
 
 fn resolve_media(
@@ -728,6 +725,11 @@ async fn execute(
         .render_base(&media, &clips, stage.path(), |progress, name| {
             job.update(progress, name)
         })
+        .await?;
+    job.update(0.72, "overlays");
+    let base = prepared
+        .overlays
+        .compose(&media, base, stage.path(), settings.fast)
         .await?;
     job.update(0.84, "audio");
     let mixed = prepared.audio.mix(&media, &stage, &base).await?;

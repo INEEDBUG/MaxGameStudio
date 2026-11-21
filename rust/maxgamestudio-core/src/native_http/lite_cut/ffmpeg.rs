@@ -56,7 +56,7 @@ pub(super) async fn inspect(
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,codec_name,width,height,r_frame_rate",
+            "format=duration:stream=codec_type,codec_name,width,height,r_frame_rate,duration",
             "-of",
             "json",
         ])

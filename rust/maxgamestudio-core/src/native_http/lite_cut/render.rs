@@ -1,3 +1,5 @@
+pub(super) mod overlay;
+
 use super::ffmpeg::{command, inspect};
 use super::project_schema::list;
 use crate::profile_platform::path_text;
@@ -33,7 +35,7 @@ pub(super) struct Timeline<'a> {
     fit: &'a str,
     background: String,
     blur: u64,
-    fast: bool,
+    pub(super) fast: bool,
 }
 
 impl<'a> Timeline<'a> {
