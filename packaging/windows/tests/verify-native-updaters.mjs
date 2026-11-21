@@ -225,6 +225,12 @@ function leagueStartupEvents() {
   const shards = new Set()
   const errors = new Set()
   const assetFailures = new Set()
+  const parsedModules = new Set()
+  const bundledScript = input => {
+    const url = typeof input === 'string' && URL.parse(input)
+    return url?.origin === 'http://tauri.localhost' && /^\/assets\/[-\w.]+\.m?js$/i.test(url.pathname)
+      ? url.pathname : null
+  }
   const captureError = exception => {
     errors.add(browserErrorKind(exception))
     const description = exception?.description
@@ -246,6 +252,10 @@ function leagueStartupEvents() {
       }
     } else if (event?.method === 'Runtime.exceptionThrown') {
       captureError(event.params?.exceptionDetails?.exception)
+    } else if (event?.method === 'Debugger.scriptParsed' || event?.method === 'Debugger.scriptFailedToParse') {
+      const script = bundledScript(event.params?.url)
+      if (script && event.method === 'Debugger.scriptParsed') parsedModules.add(script)
+      else if (script) errors.add('script-parse')
     } else if (event?.method === 'Log.entryAdded') {
       const entry = event.params?.entry
       if (entry?.source === 'security' && /content security policy/i.test(entry.text)) errors.add('csp-blocked')
@@ -258,8 +268,31 @@ function leagueStartupEvents() {
     }
   }
   return { receive, summary: () =>
-    `shards=${[...shards].sort().join(',') || 'none'} errors=${[...errors].sort().join(',') || 'none'} assetErrors=${assetFailures.size}` }
+    `shards=${[...shards].sort().join(',') || 'none'} errors=${[...errors].sort().join(',') || 'none'} assetErrors=${assetFailures.size} parsedModules=${parsedModules.size}` }
 }
+
+const leagueDocumentProbe = `(async () => {
+  const root = document.getElementById('app')
+  const shell = !root ? 'missing' : root.childElementCount ? 'populated' : 'empty'
+  const scripts = [...document.querySelectorAll('script[type="module"][src]')]
+  const entry = scripts.map(script => new URL(script.src)).find(url =>
+    url.origin === window.location.origin && /^\\/assets\\/main-[-\\w.]+\\.js$/.test(url.pathname))
+  const resources = performance.getEntriesByType('resource').filter(resource => {
+    const url = new URL(resource.name)
+    return url.origin === window.location.origin && /^\\/assets\\/[-\\w.]+\\.m?js$/i.test(url.pathname)
+  }).length
+  let entryState = entry ? 'unavailable' : 'missing'
+  if (entry) {
+    try {
+      const response = await fetch(entry, {cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(3000)})
+      const mime = response.headers.get('content-type') || ''
+      entryState = !response.ok ? 'http-error' : /\\b(?:javascript|ecmascript)\\b/i.test(mime)
+        ? 'javascript' : 'unexpected-content-type'
+      await response.body?.cancel()
+    } catch { entryState = 'fetch-rejected' }
+  }
+  return { shell, entryState, resources }
+})()`
 
 const leagueEventPermission = `(async () => {
   try {
@@ -282,9 +315,12 @@ export async function verifyLeaguePage(socket, { send, evaluate }, current, read
     try {
       return await readLeagueUpdater(evaluate, current, readinessTimeout)
     } catch (error) {
-      const [versionReply, eventReply] = await Promise.allSettled([
+      // Enable only after failure to collect scripts WebView2 has already parsed.
+      const [versionReply, eventReply, documentReply, debuggerReply] = await Promise.allSettled([
         evaluate(leagueCall('app-common-main', 'getVersion'), ipcTimeout),
         evaluate(leagueEventPermission, ipcTimeout),
+        evaluate(leagueDocumentProbe, ipcTimeout),
+        send('Debugger.enable', {}, ipcTimeout),
       ])
       const reply = versionReply.value
       let version = 'unavailable'
@@ -292,7 +328,11 @@ export async function verifyLeaguePage(socket, { send, evaluate }, current, read
       else if (leagueIpcFailures.includes(reply?.failure)) version = reply.failure
       const events = ['accepted', 'denied', 'failed'].includes(eventReply.value) ? eventReply.value : 'unavailable'
       const streams = domains.filter(result => result.status === 'fulfilled').length
-      report(`LEAGUE_STARTUP_DIAGNOSTICS: ${summary()} version=${version} events=${events} streams=${streams}/2`)
+      const { shell, entryState, resources } = documentReply.value ?? {}
+      const document = `shell=${['missing', 'empty', 'populated'].includes(shell) ? shell : 'unknown'} ` +
+        `entry=${['missing', 'javascript', 'http-error', 'unexpected-content-type', 'fetch-rejected', 'unavailable'].includes(entryState) ? entryState : 'unknown'} ` +
+        `resources=${Number.isSafeInteger(resources) && resources >= 0 ? resources : 'unknown'}`
+      report(`LEAGUE_STARTUP_DIAGNOSTICS: ${summary()} version=${version} events=${events} ${document} streams=${streams}/2 debugger=${debuggerReply.status}`)
       throw error
     }
   } finally {
