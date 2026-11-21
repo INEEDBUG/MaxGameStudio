@@ -236,6 +236,13 @@ exit $app.ExitCode
     }
     & node $probe ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port
     if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) installed updater verification failed." }
+    if ($Product.Name -eq 'League') {
+      if (!$app.WaitForExit(8000) -or $app.ExitCode -ne 0) {
+        throw 'The installed League Toolbox did not exit cleanly using its close dialog.'
+      }
+      Write-Host 'NATIVE_LEAGUE_EXIT_VERIFIED: the standalone close dialog exited the installed process.'
+      return
+    }
     if ($app.HasExited) { throw "$($Product.Name) exited during updater verification." }
     if ($Product.Name -eq 'Main') {
       $api = @(Get-NetTCPConnection -LocalPort 19871 -State Listen -OwningProcess $app.Id -ErrorAction SilentlyContinue)

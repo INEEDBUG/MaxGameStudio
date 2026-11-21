@@ -414,6 +414,30 @@ export async function verifyLeagueNavigation(evaluate) {
   await expectPlayerLookup()
 }
 
+export async function selectLeagueExit(evaluate) {
+  assert.equal(await evaluate(`(() => {
+    const button = document.querySelector('.traffic-buttons .close')
+    if (!button) return false
+    button.click()
+    return true
+  })()`), true, 'The installed League close control was unavailable.')
+  await waitFor('the installed League close confirmation', 8_000, () => evaluate(`(() => {
+    const modal = document.querySelector('.close-confirmation-header')?.closest('.n-card')
+    return !!modal?.getClientRects().length
+  })()`))
+  assert.equal(await evaluate(`(() => {
+    const modal = document.querySelector('.close-confirmation-header')?.closest('.n-card')
+    const choices = [...(modal?.querySelectorAll('label.n-radio') ?? [])]
+    const exit = choices.find(choice => /^(彻底关闭|Exit Toolbox)$/.test(choice.textContent.trim()))
+    const confirm = modal?.querySelector('button.n-button--primary-type')
+    if (choices.length !== 2 || !exit || !confirm) return false
+    exit.click()
+    // Give the debugger its reply before the native application exits.
+    setTimeout(() => confirm.click(), 250)
+    return true
+  })()`), true, 'The installed League close dialog did not offer the expected exit choice.')
+}
+
 const mainBackendCheck = `(async () => {
   const invoke = (command) => window.__TAURI_INTERNALS__.invoke(command)
   await invoke('ensure_backend')
@@ -499,6 +523,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
       }), 'League returned unexpected update feed metadata.')
       await verifyLeagueNavigation(evaluate)
       console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: both bundled game icons and both player lookup entries.')
+      await selectLeagueExit(evaluate)
     }
   } finally {
     socket.close()
