@@ -14,7 +14,11 @@ use crate::{
 };
 use parser::second_pass::parser_settings::create_huffman_lookup_table;
 use serde_json::{json, Value};
-use std::{collections::HashSet, path::Path};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 
 pub(crate) fn inspect(
     path: &Path,
@@ -52,7 +56,7 @@ pub(crate) fn inspect(
             .collect::<Vec<_>>();
         let mut result = json!({"match_start_tick":start,"demo_end_tick":demo_end});
         if include_match_facts {
-            result["match_facts"] = match_facts::collect(
+            let facts = match_facts::collect(
                 bytes,
                 &huffman,
                 &events,
@@ -61,10 +65,88 @@ pub(crate) fn inspect(
                 &windows,
                 &mut rounds,
             )?;
+            let team_labels =
+                [("team_a_name", "A 队"), ("team_b_name", "B 队")].map(|(key, fallback)| {
+                    facts["match_meta"][key]
+                        .as_str()
+                        .map(player_stats::clean_name)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or(fallback)
+                });
+            for (round, window) in rounds.iter_mut().zip(&windows) {
+                let duration = ((window.end_tick - window.freeze_end_tick) as f64 / tick_rate)
+                    .round_ties_even()
+                    .max(0.0) as i64;
+                annotate_round(round, team_labels, duration);
+            }
+            result["match_facts"] = facts;
         }
         result["rounds"] = Value::Array(rounds);
         Ok(result)
     })
+}
+
+fn annotate_round(round: &mut Value, team_labels: [&str; 2], duration: i64) {
+    let mut kills = BTreeMap::<&str, (usize, usize)>::new();
+    let mut headshot = false;
+    let mut plant = None;
+    let timeline = round["events"].as_array().expect("projected round events");
+    for (index, event) in timeline.iter().enumerate() {
+        match event["type"].as_str() {
+            Some("kill") => {
+                let actor = event["actor"].as_str().unwrap_or_default();
+                if !actor.is_empty() && actor != "World" {
+                    kills
+                        .entry(player_stats::clean_name(actor))
+                        .or_insert((0, index))
+                        .0 += 1;
+                    headshot |= event["headshot"] == true;
+                }
+            }
+            Some("plant") => {
+                plant.get_or_insert(event);
+            }
+            _ => (),
+        }
+    }
+    let (top_player, top_kills) = kills
+        .into_iter()
+        .max_by_key(|(_, (count, first))| (*count, Reverse(*first)))
+        .map_or(("", 0), |(name, (count, _))| (name, count));
+    let site = plant
+        .and_then(|event| event["site"].as_str())
+        .map(player_stats::clean_name)
+        .filter(|site| !site.is_empty());
+    let winner = match round["winner_team_key"].as_str() {
+        Some("a") => team_labels[0],
+        Some("b") => team_labels[1],
+        _ => "本回合胜方",
+    };
+    let headline = if top_kills >= 2 {
+        let numeral = ["双", "三", "四", "五"][top_kills.min(5) - 2];
+        format!("{top_player} {numeral}杀帮助 {winner} 拿下回合")
+    } else if let Some(site) = site {
+        format!("{winner} 在 {site} 区下包后赢下回合")
+    } else {
+        format!("{winner} 赢下第 {} 回合", round["round_number"])
+    };
+    let mut tags = Vec::new();
+    if top_kills > 0 {
+        tags.push("首杀".to_owned());
+    }
+    if top_kills >= 2 {
+        tags.push(format!("{top_kills}K"));
+    }
+    if headshot {
+        tags.push("爆头".to_owned());
+    }
+    if plant.is_some() {
+        tags.push("下包".to_owned());
+    }
+    round["site"] = json!(site);
+    round["headline"] = json!(headline);
+    round["tags"] = json!(tags);
+    round["duration_seconds"] = json!(duration);
 }
 
 #[derive(Default)]

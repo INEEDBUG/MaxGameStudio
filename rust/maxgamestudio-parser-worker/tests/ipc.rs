@@ -20,6 +20,12 @@ fn request(action: Value) -> Output {
     call(&serde_json::to_vec(&action).unwrap())
 }
 
+fn fixture_checksum(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf29ce484222325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
 fn result(output: &Output) -> Value {
     assert_eq!(output.stdout.split(|&byte| byte == b'\n').count(), 2);
     let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -148,6 +154,12 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     });
     let default = request(payload.clone());
     assert!(default.status.success());
+    let default_bytes = default
+        .stdout
+        .strip_suffix(b"\r\n")
+        .or_else(|| default.stdout.strip_suffix(b"\n"))
+        .unwrap();
+    assert_eq!(fixture_checksum(default_bytes), 0xed28e20cc8b12a6a);
     let default = result(&default)["result"].clone();
     assert!(default.get("match_facts").is_none());
 
@@ -249,6 +261,7 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     );
 
     let mut scores = [0, 0];
+    let mut legacy_annotations = Vec::new();
     let rows = opt_in["rounds"].as_array_mut().unwrap();
     assert_eq!(rows.len(), 9);
     let winners = ["b", "a", "a", "b", "a", "a", "a", "a", "a"];
@@ -286,8 +299,31 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         );
         assert_eq!(row.remove("team_a_economy"), Some(json!(buy_a)));
         assert_eq!(row.remove("team_b_economy"), Some(json!(buy_b)));
+        let mut annotations: serde_json::Map<String, Value> = [
+            "site",
+            "headline",
+            "tags",
+            "duration_seconds",
+            "special_events",
+        ]
+        .into_iter()
+        .map(|field| (field.to_owned(), row.remove(field).unwrap()))
+        .collect();
+        // The released Python clutch list uses a set for player iteration.
+        annotations
+            .get_mut("special_events")
+            .unwrap()
+            .as_array_mut()
+            .unwrap()
+            .sort_by_cached_key(Value::to_string);
+        legacy_annotations.push(json!([row["round_number"], annotations]));
     }
     assert_eq!(scores, [7, 2]);
+    // Canonical annotation rows recorded from the pinned legacy wheel.
+    assert_eq!(
+        fixture_checksum(&serde_json::to_vec(&legacy_annotations).unwrap()),
+        0x4da3581a08cf87c6
+    );
     assert!(
         opt_in == default,
         "opt-in fields must preserve the existing timeline"

@@ -118,8 +118,9 @@ pub(super) fn collect(
             round_economy::collect(sample, &economy_ticks, &players, scores.halftime_round)
         })
         .unwrap_or_default();
-    for (stats, player) in player_stats.iter_mut().zip(&players) {
-        stats["average_equipment_value"] = json!(economy.average_equipment(player.name));
+    for stats in &mut player_stats {
+        let name = stats["name"].as_str().expect("native stats player name");
+        stats["average_equipment_value"] = json!(economy.average_equipment(name));
     }
     add_round_facts(rounds, &scores.rounds, &economy.rounds);
     let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);

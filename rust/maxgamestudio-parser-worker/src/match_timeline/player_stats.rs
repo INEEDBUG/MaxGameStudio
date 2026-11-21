@@ -20,7 +20,7 @@ pub(super) struct Player<'a> {
 
 pub(super) fn build(
     roster: &[Player<'_>],
-    rounds: &[Value],
+    rounds: &mut [Value],
     outcomes: &[RoundOutcome],
     damage: DamageInput<'_>,
 ) -> Vec<Value> {
@@ -40,7 +40,7 @@ pub(super) fn build(
         }
     }
     let mut totals = vec![Totals::default(); players.len()];
-    for (round, outcome) in rounds.iter().zip(outcomes) {
+    for (round, outcome) in rounds.iter_mut().zip(outcomes) {
         debug_assert_eq!(round["round_number"].as_i64(), Some(outcome.round_number));
         let deaths: Vec<_> = round["events"]
             .as_array()
@@ -49,13 +49,14 @@ pub(super) fn build(
             .filter(|event| event["type"] == "kill")
             .map(|event| Death::read(event, &by_name))
             .collect();
-        count_round(
+        let special_events = count_round(
             &players,
             &players_alive,
             &deaths,
             outcome.winner,
             &mut totals,
         );
+        round["special_events"] = Value::Array(special_events);
     }
     let damage = damage_stats::accumulate(damage, &players, &by_name);
     players
@@ -179,9 +180,10 @@ impl Totals {
 #[derive(Clone, Default)]
 struct RoundPlayer {
     kills: usize,
+    first_kill_index: Option<usize>,
     died: bool,
     contributed: bool,
-    clutch_attempted: bool,
+    clutch_opponents: usize,
 }
 
 fn count_round(
@@ -190,11 +192,12 @@ fn count_round(
     deaths: &[Death<'_>],
     winner: Option<TeamKey>,
     totals: &mut [Totals],
-) {
+) -> Vec<Value> {
     let (trade_kills, trade_deaths) = trade_pairs(players, deaths);
     let mut round = vec![RoundPlayer::default(); players.len()];
     let mut alive = players_alive.clone();
     let mut first_kill_seen = false;
+    let mut unrostered_kills = HashMap::new();
     note_clutches(&alive, &mut round);
     for (index, death) in deaths.iter().enumerate() {
         if let Some(victim) = death.target {
@@ -215,8 +218,15 @@ fn count_round(
                 stats.awp_kills += usize::from(death.awp);
                 stats.trade_kills += usize::from(trade_kills[index]);
                 stats.first_kills += usize::from(!first_kill_seen);
-                round[attacker].kills += 1;
-                round[attacker].contributed = true;
+                let round_player = &mut round[attacker];
+                round_player.kills += 1;
+                round_player.first_kill_index.get_or_insert(index);
+                round_player.contributed = true;
+            } else {
+                let (kills, _) = unrostered_kills
+                    .entry(death.actor_name.to_lowercase())
+                    .or_insert((0, index));
+                *kills += 1;
             }
             if !first_kill_seen {
                 if let Some(victim) = death.target {
@@ -230,6 +240,8 @@ fn count_round(
             round[assister].contributed = true;
         }
     }
+    let mut special_events = Vec::new();
+    let mut multikills = Vec::new();
     for ((totals, player), round) in totals.iter_mut().zip(players).zip(round) {
         let survived = !round.died;
         totals.survived_rounds += usize::from(survived);
@@ -237,11 +249,37 @@ fn count_round(
         if round.kills > 0 {
             totals.multi_kills[round.kills.min(5) - 1] += 1;
         }
-        if round.clutch_attempted {
+        if round.clutch_opponents > 0 {
+            let won = winner == Some(player.team_key);
             totals.clutch_attempts += 1;
-            totals.clutch_wins += usize::from(winner == Some(player.team_key));
+            totals.clutch_wins += usize::from(won);
+            special_events.push(json!({
+                "type":"clutch", "player":clean_name(player.name), "team_key":player.team_key.label(),
+                "opponents":round.clutch_opponents, "won":won,
+            }));
+        }
+        if round.kills >= 4 {
+            multikills.push((
+                round.first_kill_index.expect("multikill has a first kill"),
+                json!({
+                    "type":"multikill", "player":clean_name(player.name), "team_key":player.team_key.label(),
+                    "kills":round.kills,
+                }),
+            ));
         }
     }
+    for (name, (kills, first_kill)) in unrostered_kills {
+        if kills >= 4 {
+            multikills.push((
+                first_kill,
+                json!({"type":"multikill", "player":name, "team_key":null, "kills":kills}),
+            ));
+        }
+    }
+    // The legacy multikill counter emits in first-kill order, after the clutches.
+    multikills.sort_unstable_by_key(|(first_kill, _)| *first_kill);
+    special_events.extend(multikills.into_iter().map(|(_, event)| event));
+    special_events
 }
 
 fn trade_pairs(players: &[&Player<'_>], deaths: &[Death<'_>]) -> (Vec<bool>, Vec<bool>) {
@@ -274,9 +312,10 @@ fn trade_pairs(players: &[&Player<'_>], deaths: &[Death<'_>]) -> (Vec<bool>, Vec
 
 fn note_clutches(alive: &[HashSet<usize>; 2], round: &mut [RoundPlayer]) {
     for (team, teammates) in alive.iter().enumerate() {
-        if teammates.len() == 1 && !alive[1 - team].is_empty() {
+        let opponents = alive[1 - team].len();
+        if teammates.len() == 1 && opponents > 0 {
             let &solo = teammates.iter().next().expect("one surviving teammate");
-            round[solo].clutch_attempted = true;
+            round[solo].clutch_opponents = round[solo].clutch_opponents.max(opponents);
         }
     }
 }
@@ -321,7 +360,7 @@ mod tests {
                 final_group: if i < 3 { 2 } else { 3 },
             })
             .collect::<Vec<_>>();
-        let rounds = [
+        let mut rounds = [
             json!({"round_number":1,"events":[
                 death(100,"World","Charlie","",false,"ak47"),
                 death(200,"Delta","Bravo","Echo",false,"ak47"),
@@ -345,7 +384,7 @@ mod tests {
         .rounds;
         let actual = build(
             &roster,
-            &rounds,
+            &mut rounds,
             &outcomes,
             DamageInput {
                 events: &[],
@@ -393,6 +432,63 @@ mod tests {
             json!({"steam_id64":"4","name":"Delta","kills":9,"adr":55.0}),
         ];
         assert_eq!(ranked_player_ids(&stats), ["4", "3", "2", "1"]);
+    }
+
+    #[test]
+    fn round_annotations_keep_largest_clutch_and_first_multikill_order() {
+        let players = [
+            "Alpha", "Echo", "Bravo", "Charlie", "Delta", "Foxtrot", "Golf",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| Player {
+            name,
+            steam_id64: "",
+            team_key: if index < 2 { TeamKey::A } else { TeamKey::B },
+            final_group: if index < 2 { 2 } else { 3 },
+        })
+        .collect::<Vec<_>>();
+        let events: Vec<_> = [
+            ("Bravo", "Echo"),
+            ("Outsider", "Guest1"),
+            ("Alpha", "Bravo"),
+            ("OUTSIDER", "Guest2"),
+            ("Alpha", "Charlie"),
+            ("Outsider", "Guest3"),
+            ("Alpha", "Delta"),
+            ("Outsider", "Guest4"),
+            ("Alpha", "Foxtrot"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (actor, target))| {
+            death(512 + index as i64 * 40, actor, target, "", false, "ak47")
+        })
+        .collect();
+        let mut rounds = [json!({"round_number":1,"events":events})];
+        let outcomes =
+            round_score::build(Some([1, 0]), &BTreeMap::new(), &[(1, Some(Side::T))]).rounds;
+        let stats = build(
+            &players,
+            &mut rounds,
+            &outcomes,
+            DamageInput {
+                events: &[],
+                match_start_tick: 0,
+                freeze_ticks: &[],
+            },
+        );
+        assert_eq!(stats[0]["four_kill_rounds"], 1);
+        assert_eq!(stats[0]["clutch_wins"], 1);
+        assert_eq!(
+            rounds[0]["special_events"],
+            json!([
+                {"type":"clutch","player":"Alpha","team_key":"a","opponents":5,"won":true},
+                {"type":"clutch","player":"Golf","team_key":"b","opponents":1,"won":false},
+                {"type":"multikill","player":"outsider","team_key":null,"kills":4},
+                {"type":"multikill","player":"Alpha","team_key":"a","kills":4}
+            ]),
+        );
     }
 
     fn death(
