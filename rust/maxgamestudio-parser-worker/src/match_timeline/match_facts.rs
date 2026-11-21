@@ -101,7 +101,7 @@ pub(super) fn collect(
         })
         .collect();
     let visible_freeze_ticks: Vec<_> = visible.iter().map(|round| round.freeze_end_tick).collect();
-    let player_stats = player_stats::build(
+    let mut player_stats = player_stats::build(
         &players,
         rounds,
         &scores.rounds,
@@ -118,7 +118,10 @@ pub(super) fn collect(
             round_economy::collect(sample, &economy_ticks, &players, scores.halftime_round)
         })
         .unwrap_or_default();
-    add_round_facts(rounds, &scores.rounds, &economy);
+    for (stats, player) in player_stats.iter_mut().zip(&players) {
+        stats["average_equipment_value"] = json!(economy.average_equipment(player.name));
+    }
+    add_round_facts(rounds, &scores.rounds, &economy.rounds);
     let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);
     let players: Vec<_> = players
         .iter()

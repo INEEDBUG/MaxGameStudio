@@ -91,15 +91,39 @@ impl RoundEconomy {
     }
 }
 
+#[derive(Default)]
+pub(super) struct MatchEconomy {
+    pub(super) rounds: BTreeMap<i64, RoundEconomy>,
+    players: BTreeMap<String, PlayerEquipment>,
+}
+
+struct PlayerEquipment {
+    team_key: TeamKey,
+    total: i64,
+    observations: usize,
+}
+
+impl MatchEconomy {
+    pub(super) fn average_equipment(&self, name: &str) -> i64 {
+        self.players
+            .get(&clean_name(name).to_lowercase())
+            .filter(|player| player.observations > 0)
+            .map(|player| {
+                (player.total as f64 / player.observations as f64).round_ties_even() as i64
+            })
+            .unwrap_or_default()
+    }
+}
+
 pub(super) fn collect(
     output: &DemoOutput,
     tick_to_round: &BTreeMap<i32, i64>,
     players: &[Player<'_>],
     halftime: Option<i64>,
-) -> BTreeMap<i64, RoundEconomy> {
+) -> MatchEconomy {
     let column = |id| output.df.get(&id).and_then(|column| column.data.as_ref());
     let Some(VarVec::I32(ticks)) = column(TICK_ID) else {
-        return BTreeMap::new();
+        return MatchEconomy::default();
     };
     let names = match column(NAME_ID) {
         Some(VarVec::String(values)) => values.as_slice(),
@@ -146,12 +170,24 @@ fn summarize<'a>(
     tick_to_round: &BTreeMap<i32, i64>,
     players: &[Player<'_>],
     halftime: Option<i64>,
-) -> BTreeMap<i64, RoundEconomy> {
-    let teams: BTreeMap<_, _> = players
+) -> MatchEconomy {
+    let players = players
         .iter()
-        .map(|player| (clean_name(player.name).to_lowercase(), player.team_key))
+        .map(|player| {
+            (
+                clean_name(player.name).to_lowercase(),
+                PlayerEquipment {
+                    team_key: player.team_key,
+                    total: 0,
+                    observations: 0,
+                },
+            )
+        })
         .collect();
-    let mut economies = BTreeMap::<i64, RoundEconomy>::new();
+    let mut economy = MatchEconomy {
+        rounds: BTreeMap::new(),
+        players,
+    };
     let mut equipment_by_tick = BTreeMap::<i32, [Option<i64>; 2]>::new();
     for row in rows {
         let Some(&round) = tick_to_round.get(&row.tick) else {
@@ -164,25 +200,34 @@ fn summarize<'a>(
         if let (Some(side), Some(amount)) = (row.side, equipment) {
             *by_side[side_index(side)].get_or_insert(0) += amount;
         }
-        // The legacy buy vote uses each named roster row, including dead players.
-        let team = row
+        let Some(player) = row
             .name
             .map(clean_name)
             .filter(|name| !name.is_empty())
-            .and_then(|name| teams.get(&name.to_lowercase()));
-        if let (Some(team), Some(buy)) = (team, buy_type(&row, round, halftime)) {
-            let team = usize::from(*team == TeamKey::B);
-            economies.entry(round).or_default().votes_by_team[team][buy as usize] += 1;
+            .and_then(|name| economy.players.get_mut(&name.to_lowercase()))
+        else {
+            continue;
+        };
+        // The average includes repeated freezes, dead players and freezes
+        // outside the displayed rounds. Missing equipment contributes zero.
+        if round != 0 {
+            player.total += row.equipment.unwrap_or_default().max(0);
+            player.observations += 1;
+        }
+        if let Some(buy) = buy_type(&row, round, halftime) {
+            let team = usize::from(player.team_key == TeamKey::B);
+            economy.rounds.entry(round).or_default().votes_by_team[team][buy as usize] += 1;
         }
     }
     for (tick, totals) in equipment_by_tick {
         // The latest observed freeze replaces the sums for that round.
-        economies
+        economy
+            .rounds
             .entry(tick_to_round[&tick])
             .or_default()
             .equipment_by_side = totals;
     }
-    economies
+    economy
 }
 
 fn amount_at(column: Option<&VarVec>, index: usize) -> Option<i64> {
@@ -283,7 +328,7 @@ mod tests {
             (3, [ct, t], [1500, 0], ["pistol", "pistol"]),
         ] {
             let mut round = json!({});
-            actual[&number].write(&mut round, sides);
+            actual.rounds[&number].write(&mut round, sides);
             assert_eq!(
                 round,
                 json!({
@@ -326,7 +371,51 @@ mod tests {
         }];
         let actual = summarize(rows, &BTreeMap::from([(200, 2)]), &players, None);
         let mut round = json!({});
-        actual[&2].write(&mut round, [Side::T, Side::Ct]);
+        actual.rounds[&2].write(&mut round, [Side::T, Side::Ct]);
         assert_eq!(round, json!({"team_b_equipment_value": 0}));
+    }
+
+    #[test]
+    fn average_includes_missing_signed_and_repeated_samples_like_legacy() {
+        let players = [
+            ("Alpha", TeamKey::A, 2),
+            ("Bravo", TeamKey::B, 3),
+            ("Charlie", TeamKey::A, 2),
+            ("Delta", TeamKey::B, 3),
+        ]
+        .map(|(name, team_key, final_group)| Player {
+            name,
+            team_key,
+            final_group,
+            steam_id64: "",
+        });
+        let rows = [
+            (20, "Alpha", true, Some(1000)),
+            (100, "Alpha", true, Some(2)),
+            (100, "Bravo", true, Some(5)),
+            (100, "Charlie", true, Some(7)),
+            (200, "ALPHA", true, None),
+            (220, "Alpha", true, Some(-75)),
+            (220, "Bravo", true, Some(0)),
+            (220, "Charlie", true, Some(0)),
+            (300, "Alpha", false, Some(8)),
+            (350, "Alpha", true, Some(999)),
+            (360, "Alpha", true, Some(999)),
+        ]
+        .map(|(tick, name, alive, equipment)| Row {
+            tick,
+            name: Some(name),
+            side: Some(Side::T),
+            alive: Some(alive),
+            equipment,
+            spent: Some(0),
+            balance: Some(0),
+        });
+        let tick_to_round = BTreeMap::from([(100, 1), (200, 2), (220, 2), (300, 3), (350, 0)]);
+        let actual = summarize(rows, &tick_to_round, &players, None);
+        assert_eq!(
+            players.map(|player| actual.average_equipment(player.name)),
+            [2, 2, 4, 0]
+        );
     }
 }

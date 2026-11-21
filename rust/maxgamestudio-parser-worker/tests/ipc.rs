@@ -204,10 +204,12 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
 
     let stats = facts["player_stats"].as_array().unwrap();
     assert_eq!(stats.len(), 10);
-    for (stat, player) in stats.iter().zip(players) {
+    let averages = [4472, 2561, 3422, 2428, 4206, 4194, 2094, 4167, 2033, 2606];
+    for ((stat, player), average) in stats.iter().zip(players).zip(averages) {
         assert_eq!(stat["steam_id64"], player["steam_id64"]);
         assert_eq!(stat["team_key"], player["team_key"]);
-        for field in ["average_equipment_value", "rating_pro_2", "rating_pro_3"] {
+        assert_eq!(stat["average_equipment_value"], average);
+        for field in ["rating_pro_2", "rating_pro_3"] {
             assert!(
                 stat.get(field).is_none(),
                 "unavailable stat {field} must stay absent"
