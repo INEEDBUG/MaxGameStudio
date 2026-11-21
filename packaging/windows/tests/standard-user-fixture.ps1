@@ -142,7 +142,45 @@ function Assert-StandardProcessOwner([Diagnostics.Process]$Process, $User) {
   }
 }
 
-function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash) {
+function Write-VerifiedNativeIdleSample([Diagnostics.Process]$App, $Product, [string]$IdleDataDir) {
+  # The probe confirmed this exact process rendered Home before the warmup.
+  Start-Sleep -Seconds 10
+  $App.Refresh()
+  if ($App.HasExited) { throw 'The verified app exited before sampling its idle memory.' }
+  $pids = [Collections.Generic.HashSet[int]]::new()
+  [void]$pids.Add($App.Id)
+  $snapshot = @(Get-CimInstance Win32_Process)
+  do {
+    $added = $false
+    foreach ($child in $snapshot) {
+      if ($child.CreationDate -ge $App.StartTime -and $pids.Contains([int]$child.ParentProcessId) -and
+          $pids.Add([int]$child.ProcessId)) { $added = $true }
+    }
+  } while ($added)
+  $processes = @(Get-Process -Id @($pids) -ErrorAction SilentlyContinue)
+  $counters = @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process |
+    Where-Object { $pids.Contains([int]$_.IDProcess) })
+  if ($processes.Count -ne $pids.Count -or $counters.Count -ne $pids.Count) {
+    throw 'The verified idle sample lost a process or its memory counter.'
+  }
+  $appBytes = (Get-ChildItem -LiteralPath $Product.Default -Recurse -File -Force | Measure-Object Length -Sum).Sum
+  $profileBytes = (Get-ChildItem -LiteralPath $IdleDataDir -Recurse -File -Force | Measure-Object Length -Sum).Sum
+  $info = [ordered]@{
+    product = $Product.Name
+    version = $Product.Version
+    scene = 'verified Home, standard user, no game client'
+    processes = $processes.Count
+    privateWorkingSetMiB = [math]::Round(($counters | Measure-Object WorkingSetPrivate -Sum).Sum / 1MB, 2)
+    privateCommitMiB = [math]::Round(($processes | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 2)
+    installedProgramBytes = [long]$appBytes
+    profileBytes = [long]$profileBytes
+    installerBytes = (Get-Item -LiteralPath $Product.Installer).Length
+    packageSha256 = (Get-FileHash -LiteralPath $Product.Installer -Algorithm SHA256).Hash
+  }
+  Write-Host ('NATIVE_HOME_RESOURCE_SAMPLE: ' + ($info | ConvertTo-Json -Compress))
+}
+
+function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash, [string]$IdleProfile) {
   $exe = Join-Path $Product.Default $Product.Exe
   if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ine $ExpectedHash) {
     throw 'The installed executable does not match the exact verified package input.'
@@ -190,7 +228,13 @@ exit $app.ExitCode
       }
       if ('127.0.0.1' -in $listeners.LocalAddress) { return $true }
     } $app
-    & node (Join-Path $PSScriptRoot 'verify-native-updaters.mjs') ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port
+    $probe = Join-Path $PSScriptRoot 'verify-native-updaters.mjs'
+    if ($IdleProfile) {
+      & node $probe ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port idle
+      if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) Home was not ready for an idle resource sample." }
+      Write-VerifiedNativeIdleSample $app $Product $IdleProfile
+    }
+    & node $probe ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port
     if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) installed updater verification failed." }
     if ($app.HasExited) { throw "$($Product.Name) exited during updater verification." }
     if ($Product.Name -eq 'Main') {

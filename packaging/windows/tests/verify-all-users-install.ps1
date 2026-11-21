@@ -657,8 +657,8 @@ try {
     } finally {
       Pop-Location
     }
-    Invoke-NativeUpdaterProbe $main $first $machineMainHash
-    Invoke-NativeUpdaterProbe $league $first $machineLeagueHash
+    Invoke-NativeUpdaterProbe $main $first $machineMainHash -IdleProfile $firstRoots[0]
+    Invoke-NativeUpdaterProbe $league $first $machineLeagueHash -IdleProfile $firstRoots[1]
   }
 } finally {
   foreach ($account in $accounts) { Remove-LocalUser -SID $account }

@@ -164,7 +164,7 @@ function Write-IdleResourceSample(
   $profileBytes = (Get-ChildItem -LiteralPath $Profile -Recurse -File -Force | Measure-Object Length -Sum).Sum
   $sample = [ordered]@{
     product = $Product; version = $Version; role = $Role; packageSha256 = (Get-FileHash -LiteralPath $Package).Hash
-    scene = 'fixture profile, no game client, idle main window'; warmupSeconds = 10; processes = $last.Count
+    scene = 'fixture profile, no game client, main window handle only'; warmupSeconds = 10; processes = $last.Count
     pythonChildren = $pythonChildren
     installerBytes = (Get-Item -LiteralPath $Package).Length; profileBytes = [long]$profileBytes
     installedProgramBytes = [long]$programBytes; installedProgramMiB = [math]::Round($programBytes / 1MB, 2)
@@ -173,7 +173,7 @@ function Write-IdleResourceSample(
     cpuCorePercent = [math]::Round(((($last | Measure-Object CPU -Sum).Sum - $cpu) / $elapsed * 100), 2)
     seconds = [math]::Round($elapsed, 2)
   }
-  Write-Host ('IDLE_RESOURCE_SAMPLE: ' + ($sample | ConvertTo-Json -Compress))
+  Write-Host ('WINDOW_PROCESS_RESOURCE_SAMPLE: ' + ($sample | ConvertTo-Json -Compress))
   $sampledProducts[$sampleKey] = $true
 }
 

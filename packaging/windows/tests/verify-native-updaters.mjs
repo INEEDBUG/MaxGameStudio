@@ -436,10 +436,11 @@ const mainBackendCheck = `(async () => {
   }
 })()`
 
-async function verifyInstalled(role, executable, expectedHash, current, portText) {
+async function verifyInstalled(role, executable, expectedHash, current, portText, mode = 'updates') {
   assert.ok(process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true' &&
     process.env.RUNNER_ENVIRONMENT === 'github-hosted', 'Installed updater verification requires a disposable Windows runner.')
   assert.ok(Object.hasOwn(binaries, role) && isAbsolute(executable) && basename(executable) === binaries[role])
+  assert.ok(['updates', 'idle'].includes(mode), 'Unknown installed app probe mode.')
   assert.match(expectedHash ?? '', /^[a-f0-9]{64}$/)
   const port = Number(portText)
   assert.ok(Number.isInteger(port) && port > 0 && port < 65536 && String(port) === portText)
@@ -450,6 +451,19 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
   assert.equal(createHash('sha256').update(binary).digest('hex'), expectedHash, 'Installed executable changed.')
   assert.ok(binary.includes(identifiers[role]), 'The installed executable lacks the expected product identifier.')
   assert.ok(binary.includes(feed), 'The expected feed is missing from the installed executable.')
+  if (mode === 'idle') {
+    const { socket, cdp } = await connectPage(role, port)
+    try {
+      const home = role === 'main'
+        ? "!!document.querySelector('#home-title')?.getClientRects().length && !!document.querySelector('#home-tools-title')"
+        : "!!document.querySelector('#app[data-v-app] .league-overview')?.getClientRects().length"
+      await waitFor('the actual Home view in the process about to be sampled', 30_000, () => cdp.evaluate(home))
+    } finally {
+      socket.close()
+    }
+    console.log(`NATIVE_IDLE_SCENE_VERIFIED: ${role} ${current}, visible Home layout in the sampled process.`)
+    return
+  }
   const manifest = await readFeed(feed)
   let expected
   if (role === 'main') {
