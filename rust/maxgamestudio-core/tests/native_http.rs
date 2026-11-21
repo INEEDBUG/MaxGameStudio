@@ -799,6 +799,56 @@ fn reports_obs_profile_and_backup_without_launching_or_connecting_to_obs() {
 }
 
 #[test]
+fn round_recording_plan_uses_the_demo_file_end_instead_of_saved_tick_estimates() {
+    let scratch = tempfile::tempdir().unwrap();
+    let demo = scratch.path().join("old fixture.dem");
+    let mut source = b"PBDEMS2\0\0\0\0\0\0\0\0\0".to_vec();
+    source.extend([1, 244, 3, 0, 0, 255, 255, 255, 255, 15, 0]);
+    fs::write(&demo, &source).unwrap();
+    let data = scratch.path().join("data");
+    let settings = scratch.path().join("config.json");
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let path = "/api/recording/plan";
+    let mut request = json!({
+        "request_id":"round probe","request_type":"round_compilation","source_type":"round",
+        "demo":{
+            "demo_path":demo,"demo_filename":"old fixture.dem","map_name":"de_fixture",
+            "tick_rate":64.0,"first_tick":32,"demo_end_tick":2000, "final_round":1,
+            "final_round_start_tick":32,"final_round_end_tick":495,
+        },
+        "target_player":{"name":"Player","steamid64":"76561198000000001","spec_slot":1},
+        "rounds":[{
+            "round":1,"round_start_tick":32,"round_end_tick":495,"freeze_end_tick":160,
+        }],
+    });
+    assert_eq!(
+        profile_request(&server, "POST", path, &request, false).0,
+        401
+    );
+    let (code, plan) = profile_request(&server, "POST", path, &request, true);
+    assert_eq!(code, 200);
+    assert_eq!(plan["summary"]["active_count"], 1);
+    assert_eq!(plan["summary"]["final_round_segments"], 1);
+    let segment = &plan["active_segments"][0];
+    assert_eq!(segment["start_tick"], 32);
+    assert_eq!(segment["end_tick"], 404);
+    assert_eq!(segment["safe_end_tick"], 404);
+    assert_eq!(plan["estimated_duration_sec"], 5.8125);
+    request["demo"]["first_tick"] = json!(500);
+    assert_eq!(
+        profile_request(&server, "POST", path, &request, true).0,
+        422
+    );
+    assert_eq!(fs::read(demo).unwrap(), source);
+    assert!(!settings.exists());
+    server.stop();
+}
+
+#[test]
 fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
     let scratch = tempfile::tempdir().unwrap();
     let database = scratch.path().join("cs2-insight.db");

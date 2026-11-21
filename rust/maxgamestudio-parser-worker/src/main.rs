@@ -2,6 +2,8 @@
 
 #[path = "../../shared/case_fold.rs"]
 mod case_fold;
+#[path = "../../shared/demo_boundary.rs"]
+mod demo_boundary;
 mod demo_inspection;
 mod replay;
 mod replay_effect_rows;

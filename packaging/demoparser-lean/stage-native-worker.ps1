@@ -22,10 +22,11 @@ foreach ($relative in $files) {
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
     Copy-Item -LiteralPath (Join-Path $inputRoot $relative) -Destination $destination -Force
 }
-$shared = "rust/shared/case_fold.rs"
-$folding = Join-Path $source $shared
-[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($folding)) | Out-Null
-Copy-Item -LiteralPath (Join-Path $repo $shared) -Destination $folding -Force
+foreach ($shared in @("rust/shared/case_fold.rs", "rust/shared/demo_boundary.rs")) {
+    $destination = Join-Path $source $shared
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo $shared) -Destination $destination -Force
+}
 
 # The original upstream notice travels beside any distributed worker.
 $notice = Join-Path $stageRoot "LICENSE.upstream.txt"

@@ -228,42 +228,8 @@ fn reason(value: &Variant) -> Option<String> {
 }
 
 pub(crate) fn end_tick(bytes: &[u8]) -> Result<i64, Failure> {
-    let bad_frame = || Failure::replay_parse("invalid Demo frame boundary");
-    let mut frames = bytes
-        .get(16..)
-        .filter(|_| bytes.starts_with(b"PBDEMS2\0"))
-        .ok_or_else(bad_frame)?;
-    let mut end = 0;
-    while !frames.is_empty() {
-        read_varint(&mut frames).ok_or_else(bad_frame)?;
-        let tick = read_varint(&mut frames)
-            .and_then(|tick| u32::try_from(tick).ok())
-            .ok_or_else(bad_frame)?;
-        let size = read_varint(&mut frames)
-            .filter(|len| *len <= 256 * 1024 * 1024)
-            .ok_or_else(bad_frame)?;
-        frames = frames.get(size as usize..).ok_or_else(bad_frame)?;
-        if tick != u32::MAX {
-            end = end.max(i64::from(tick));
-        }
-    }
-    Ok(end)
-}
-
-fn read_varint(bytes: &mut &[u8]) -> Option<u64> {
-    let mut value = 0;
-    for shift in (0..=63).step_by(7) {
-        let (&byte, tail) = bytes.split_first()?;
-        *bytes = tail;
-        if shift == 63 && byte > 1 {
-            return None;
-        }
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte < 0x80 {
-            return Some(value);
-        }
-    }
-    None
+    crate::demo_boundary::end_tick(std::io::Cursor::new(bytes), bytes.len() as u64)
+        .map_err(|_| Failure::replay_parse("invalid Demo frame boundary"))
 }
 
 pub(crate) mod match_summary {

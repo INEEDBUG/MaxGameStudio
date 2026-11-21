@@ -4,6 +4,9 @@ mod case_fold;
 pub mod crosshair;
 pub mod crosshair_storage;
 #[cfg(feature = "native-http")]
+#[path = "../../shared/demo_boundary.rs"]
+mod demo_boundary;
+#[cfg(feature = "native-http")]
 mod demo_library;
 pub mod gsi_ready;
 #[cfg(feature = "native-http")]

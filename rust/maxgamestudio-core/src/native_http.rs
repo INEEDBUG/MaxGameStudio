@@ -11,6 +11,7 @@ mod lite_cut;
 mod media_stream;
 mod obs_setup;
 mod obs_status;
+mod recording_plan;
 mod recordings;
 mod replay_body;
 
@@ -109,7 +110,7 @@ struct ProfileState {
     session: RuntimeSession,
     disk: Arc<Semaphore>,
     parser_worker: Option<ParserWorker>,
-    demo_parser: Semaphore,
+    demo_parser: Arc<Semaphore>,
     obs_writes: Semaphore,
     media_process: Semaphore,
     demo_events: DemoEvents,
@@ -146,7 +147,7 @@ impl NativeHttpServer {
             session: RuntimeSession::default(),
             disk: Arc::new(Semaphore::new(1)),
             parser_worker,
-            demo_parser: Semaphore::new(1),
+            demo_parser: Arc::new(Semaphore::new(1)),
             obs_writes: Semaphore::new(1),
             media_process: Semaphore::new(1),
             demo_events: DemoEvents::new(),
@@ -370,6 +371,7 @@ enum Route {
     LiteCut(lite_cut::Route),
     ObsSetup(obs_setup::Route),
     ObsStatus,
+    RecordingPlan,
 }
 
 impl Route {
@@ -385,6 +387,7 @@ impl Route {
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
             "/api/obs-config/status" if has_profile => Some(Self::ObsStatus),
+            "/api/recording/plan" if has_profile => Some(Self::RecordingPlan),
             "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
             "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
             _ if has_profile => DemoRoute::from_path(path)
@@ -446,6 +449,7 @@ async fn route(
         Route::Gsi
         | Route::ReplayBinary
         | Route::ObsSetup(_)
+        | Route::RecordingPlan
         | Route::LiteCut(lite_cut::Route::Restore { .. })
         | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
         Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
@@ -524,6 +528,14 @@ async fn route(
         }
         Route::ObsStatus => {
             obs_status::respond(state.profile.as_ref().expect("profile route")).await
+        }
+        Route::RecordingPlan => {
+            recording_plan::respond(
+                state.profile.as_ref().expect("profile route"),
+                request,
+                extended_request,
+            )
+            .await
         }
         Route::Demos(route) => {
             demo_response(
