@@ -884,6 +884,96 @@ fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
 }
 
 #[test]
+fn saves_existing_lite_cut_projects_and_restores_a_snapshot_atomically() {
+    let scratch = tempfile::tempdir().unwrap();
+    let db = scratch.path().join("cs2-insight.db");
+    let settings = scratch.path().join("settings.json");
+    let data = scratch.path().join("data");
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         CREATE TABLE lite_cut_projects (
+             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', body_json TEXT NOT NULL,
+             created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         INSERT INTO lite_cut_projects VALUES(1,'Straße','{}','2026-11-18','2026-11-18');
+         CREATE TABLE custom_profile_metadata(value TEXT);
+         INSERT INTO custom_profile_metadata VALUES('keep');",
+    ).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let request = |method: &str, route: &str, body: &Value, auth: bool| {
+        profile_request(&server, method, route, body, auth)
+    };
+    let create = json!({"name":"  STRASSE  "});
+    assert_eq!(
+        request("POST", "/api/lite-cut/projects", &create, false).0,
+        401
+    );
+    let (code, new_project) = request("POST", "/api/lite-cut/projects", &create, true);
+    assert_eq!(code, 200);
+    assert_eq!(new_project["name"], "STRASSE (1)");
+    assert_eq!(new_project["body"]["schema_version"], 2);
+    assert_eq!(new_project["body"]["tracks"].as_array().unwrap().len(), 2);
+    assert_eq!(new_project["created_at"], new_project["updated_at"]);
+
+    let route = "/api/lite-cut/projects/1";
+    let history = "/api/lite-cut/projects/1/snapshots";
+    let save = json!({
+        "name":"保留工程", "body":{"tracks":[{"id":"track-a","type":"video","label":"历史片段",
+        "clips":[{"id":"clip-a","trim_in":2.5,"trim_out":4.0}]}]}
+    });
+    let (code, first) = request("PATCH", route, &save, true);
+    assert_eq!(code, 200);
+    assert_eq!(first["name"], "保留工程");
+    assert_eq!(first["created_at"], "2026-11-18");
+    assert_eq!(first["body"]["tracks"][0]["clips"][0]["trim_in"], 2.5);
+    assert_eq!(request("PATCH", route, &save, true).0, 200);
+    let (_, before_failure) = request("GET", history, &Value::Null, true);
+    assert_eq!(before_failure["items"].as_array().unwrap().len(), 1);
+    let first_snapshot = before_failure["items"][0]["id"].as_i64().unwrap();
+    assert_eq!(
+        request(
+            "PATCH",
+            route,
+            &json!({"body":{"output":{"width":2}}}),
+            true
+        )
+        .0,
+        422
+    );
+    assert_eq!(
+        request("GET", history, &Value::Null, true).1,
+        before_failure
+    );
+
+    let (code, second) = request(
+        "PATCH",
+        route,
+        &json!({"body":{"output":{"width":1280}}}),
+        true,
+    );
+    assert_eq!(code, 200);
+    assert_eq!(second["body"]["output"]["width"], 1280);
+    let target = format!("{history}/{first_snapshot}/restore");
+    let (code, restored) = request("POST", &target, &Value::Null, true);
+    assert_eq!(code, 200);
+    assert_eq!(restored["body"], first["body"]);
+    assert_eq!(restored["name"], "保留工程");
+    assert_eq!(request("GET", route, &Value::Null, true).1, restored);
+    let other_profile: String = connection
+        .query_row("SELECT value FROM custom_profile_metadata", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(other_profile, "keep");
+    server.stop();
+}
+
+#[test]
 fn streams_existing_lite_cut_media_and_its_saved_proxy_from_selected_storage() {
     let scratch = tempfile::tempdir().unwrap();
     let data = scratch.path().join("data");

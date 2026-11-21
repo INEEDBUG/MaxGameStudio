@@ -1,5 +1,6 @@
 //! One request per process. Stdout contains the protocol reply and stderr records failures.
 
+#[path = "../../shared/case_fold.rs"]
 mod case_fold;
 mod demo_inspection;
 mod replay;

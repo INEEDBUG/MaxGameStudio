@@ -1,3 +1,6 @@
+#[cfg(feature = "native-http")]
+#[path = "../../shared/case_fold.rs"]
+mod case_fold;
 pub mod crosshair;
 pub mod crosshair_storage;
 #[cfg(feature = "native-http")]

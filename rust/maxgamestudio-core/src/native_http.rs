@@ -446,6 +446,7 @@ async fn route(
         Route::Gsi
         | Route::ReplayBinary
         | Route::ObsSetup(_)
+        | Route::LiteCut(lite_cut::Route::Restore { .. })
         | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
         Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
         _ => "GET",
@@ -456,16 +457,22 @@ async fn route(
     let cache_clear = matches!(route, Route::ReplayCache) && request.method() == Method::DELETE;
     let storage_update = matches!(route, Route::Recordings(recordings::Route::Storage))
         && request.method() == Method::PATCH;
+    let project_write = match &route {
+        Route::LiteCut(route) => route.permits_write(request.method()),
+        _ => false,
+    };
     if request.method().as_str() != allowed
         && !config_update
         && !demo_rename
         && !cache_clear
         && !storage_update
+        && !project_write
     {
         let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
         let allowed = match route {
             Route::ReplayCache => "GET, DELETE",
             Route::Recordings(recordings::Route::Storage) => "GET, PATCH",
+            Route::LiteCut(route) => route.allow_header(),
             _ => allowed,
         };
         response
