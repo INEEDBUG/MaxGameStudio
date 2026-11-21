@@ -78,7 +78,8 @@ impl RunningServer {
                 )
                 .env("CS2_INSIGHT_BUNDLE_DATA_DIR", bundle)
                 .env("CS2_INSIGHT_TEMP_DIR", data.join("fixture-temp"))
-                .env("CS2_INSIGHT_INSTANCE_ID", " fixture-process ");
+                .env("CS2_INSIGHT_INSTANCE_ID", " fixture-process ")
+                .env("APPDATA", data.join("fixture-appdata"));
         }
         let child = command
             .stdin(Stdio::piped())
@@ -748,6 +749,52 @@ fn checks_obs_preflight_without_starting_an_unconfigured_or_missing_program() {
         422,
     );
     assert_eq!(fs::read_to_string(&settings).unwrap(), config);
+    server.stop();
+}
+
+#[test]
+fn reports_obs_profile_and_backup_without_launching_or_connecting_to_obs() {
+    let scratch = tempfile::tempdir().unwrap();
+    let settings = scratch.path().join("settings.json");
+    let data = scratch.path().join("data");
+    let obs = data.join("fixture-appdata/obs-studio");
+    let backup = data.join(".obs_config_backups/fixture-save");
+    fs::create_dir_all(&obs).unwrap();
+    fs::create_dir_all(&backup).unwrap();
+    let global = "[Basic]\nCurrentProfile=录制配置\nCurrentProfileDir=fixture\nCurrentSceneCollection=桌面\n";
+    fs::write(obs.join("global.ini"), global).unwrap();
+    fs::write(
+        backup.join("manifest.json"),
+        br#"{"created_at":"2026-11-20"}"#,
+    )
+    .unwrap();
+    let config = json!({"obs":{"host":"127.0.0.1","port":1}}).to_string();
+    fs::write(&settings, &config).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let route = "/api/obs-config/status";
+    assert_eq!(
+        profile_request(&server, "GET", route, &Value::Null, false).0,
+        401
+    );
+    let (code, response) = profile_request(&server, "GET", route, &Value::Null, true);
+    assert_eq!(code, 200);
+    assert_eq!(response["obs_connected"], false);
+    #[cfg(windows)]
+    {
+        assert_eq!(response["active_profile"], "录制配置");
+        assert_eq!(response["active_scene_collection"], "桌面");
+    }
+    assert_eq!(
+        response["latest_backup"],
+        json!({"id":"fixture-save","created_at":"2026-11-20"})
+    );
+    assert_eq!(response["video"]["fps"], 0);
+    assert_eq!(fs::read_to_string(&settings).unwrap(), config);
+    assert_eq!(fs::read_to_string(obs.join("global.ini")).unwrap(), global);
     server.stop();
 }
 

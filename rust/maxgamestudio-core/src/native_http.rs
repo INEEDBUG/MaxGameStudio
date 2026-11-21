@@ -10,6 +10,7 @@ mod demo_watch;
 mod lite_cut;
 mod media_stream;
 mod obs_setup;
+mod obs_status;
 mod recordings;
 mod replay_body;
 
@@ -368,6 +369,7 @@ enum Route {
     Recordings(recordings::Route),
     LiteCut(lite_cut::Route),
     ObsSetup(obs_setup::Route),
+    ObsStatus,
 }
 
 impl Route {
@@ -382,6 +384,7 @@ impl Route {
             "/api/config/data-dir-info" if has_profile => Some(Self::DataDirInfo),
             "/api/config-backup/status" if has_profile => Some(Self::BackupStatus),
             "/api/app/runtime-state" if has_profile => Some(Self::RuntimeState),
+            "/api/obs-config/status" if has_profile => Some(Self::ObsStatus),
             "/api/demo/replay/binary" if has_profile => Some(Self::ReplayBinary),
             "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
             _ if has_profile => DemoRoute::from_path(path)
@@ -511,6 +514,9 @@ async fn route(
                 extended_request,
             )
             .await
+        }
+        Route::ObsStatus => {
+            obs_status::respond(state.profile.as_ref().expect("profile route")).await
         }
         Route::Demos(route) => {
             demo_response(
