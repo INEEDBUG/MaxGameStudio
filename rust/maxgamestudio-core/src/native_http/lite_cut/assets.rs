@@ -3,7 +3,7 @@ mod metadata;
 use super::read_table;
 use crate::{
     native_http::{
-        demo_query::{parse_asset_page, parse_path_integer},
+        demo_query::{parse_path_integer, parse_project_page},
         detail, json_reply, media_stream, profile_disk, profile_work, validation_reply,
         HttpResponse, ProfileState,
     },
@@ -60,10 +60,11 @@ pub(super) async fn respond(
 ) -> HttpResponse {
     match route {
         Route::List => {
-            let page = match parse_asset_page(request.uri().query().unwrap_or_default()) {
-                Ok(page) => page,
-                Err(errors) => return validation_reply(errors),
-            };
+            let page =
+                match parse_project_page(request.uri().query().unwrap_or_default(), 500, 1000) {
+                    Ok(page) => page,
+                    Err(errors) => return validation_reply(errors),
+                };
             profile_disk(profile, move |profile| list(profile, page)).await
         }
         Route::Stream(id) => {

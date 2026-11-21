@@ -1,10 +1,11 @@
 mod assets;
+mod exports;
 mod project_schema;
 mod project_store;
 
 use super::{
     demo_body::{model, text},
-    demo_query::{parse_offset_page, parse_path_integer},
+    demo_query::{parse_offset_page, parse_path_integer, parse_project_page},
     detail, json_reply, model_body, profile_disk, validation_reply, HttpResponse, ProfileState,
 };
 use hyper::{body::Incoming, Method, Request, StatusCode};
@@ -20,6 +21,7 @@ use std::{
 };
 
 const PROJECTS_PATH: &str = "/api/lite-cut/projects";
+const EXPORTS_PATH: &str = "/api/lite-cut/exports";
 const PROJECT_COLUMNS: &str = "id, name, body_json, created_at, updated_at";
 
 pub(super) enum Route {
@@ -28,6 +30,8 @@ pub(super) enum Route {
     Snapshots(String),
     Restore { project: String, snapshot: String },
     Assets(assets::Route),
+    ExportList,
+    Export(String),
 }
 
 impl Route {
@@ -38,6 +42,15 @@ impl Route {
         let path = percent_decode_str(path).decode_utf8_lossy();
         if let Some(route) = assets::Route::from_path(&path) {
             return Some(Self::Assets(route));
+        }
+        if path == EXPORTS_PATH {
+            return Some(Self::ExportList);
+        }
+        if let Some(id) = path
+            .strip_prefix(EXPORTS_PATH)
+            .and_then(|tail| tail.strip_prefix('/'))
+        {
+            return (!id.is_empty() && !id.contains('/')).then(|| Self::Export(id.to_owned()));
         }
         let tail = path.strip_prefix(PROJECTS_PATH)?.strip_prefix('/')?;
         let mut parts = tail.split('/');
@@ -112,6 +125,26 @@ pub(super) async fn respond(
         Route::Assets(route) => {
             return assets::respond(profile, route, request, extended_request).await
         }
+        Route::ExportList => {
+            let page = parse_project_page(uri.query().unwrap_or_default(), 20, 100);
+            let (project_id, limit, offset) = match page {
+                Ok(page) => page,
+                Err(errors) => return validation_reply(errors),
+            };
+            return exports::respond(
+                profile,
+                exports::Read::Page {
+                    project_id,
+                    limit,
+                    offset,
+                },
+            )
+            .await;
+        }
+        Route::Export(id) => match parse_path_integer(&id, "export_id") {
+            Ok(id) => return exports::respond(profile, exports::Read::One(id)).await,
+            Err(errors) => return validation_reply(errors),
+        },
     };
     profile_disk(profile, move |profile| {
         match selection.read(&profile.config.database_path()) {

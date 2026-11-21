@@ -936,7 +936,7 @@ fn round_recording_plan_uses_the_demo_file_end_instead_of_saved_tick_estimates()
 }
 
 #[test]
-fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
+fn opens_saved_lite_cut_projects_snapshots_and_exports_in_the_existing_profile() {
     let scratch = tempfile::tempdir().unwrap();
     let database = scratch.path().join("cs2-insight.db");
     let settings = scratch.path().join("settings.json");
@@ -949,11 +949,16 @@ fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
     let list = "/api/lite-cut/projects";
     let detail = "/api/lite-cut/projects/7";
     let snapshots = "/api/lite-cut/projects/7/snapshots";
+    let exports = "/api/lite-cut/exports";
     let get = |path, auth| profile_request(&server, "GET", path, &Value::Null, auth);
     assert_eq!(get(list, false).0, 401);
     assert_eq!(
         get(list, true),
         (200, json!({"items":[],"limit":100,"offset":0}))
+    );
+    assert_eq!(
+        get(exports, true),
+        (200, json!({"items":[],"limit":20,"offset":0}))
     );
     assert!(!database.exists());
 
@@ -999,7 +1004,14 @@ fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
          );
          INSERT INTO lite_cut_project_snapshots VALUES (2,7,'旧工程','{}','save','2026-11-19');
          INSERT INTO lite_cut_project_snapshots VALUES (3,6,'Older','{}','save','2026-11-20');
-         INSERT INTO lite_cut_project_snapshots VALUES (4,7,'旧工程','{}','before_restore','2026-11-20');",
+         INSERT INTO lite_cut_project_snapshots VALUES (4,7,'旧工程','{}','before_restore','2026-11-20');
+         CREATE TABLE lite_cut_exports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, body_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending', error_msg TEXT, output_path TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         INSERT INTO lite_cut_exports VALUES (10,7,'{}','done',NULL,'D:/历史/视频.mp4','2026-11-18','2026-11-20');
+         INSERT INTO lite_cut_exports VALUES (11,6,'{}','error','MONTAGE_EXPORT_FAILED',NULL,'2026-11-20','2026-11-21');",
     ).unwrap();
     let wal = database.with_extension("db-wal");
     let before = [fs::read(&database).unwrap(), fs::read(&wal).unwrap()];
@@ -1012,6 +1024,27 @@ fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
                 {"id":2,"project_id":7,"name":"旧工程","reason":"save","created_at":"2026-11-19"},
             ]})
         ),
+    );
+    let completed = json!({
+        "export_id":10,"project_id":7,"status":"done","progress":1.0,"stage":"done",
+        "output_path":"D:/历史/视频.mp4","error":"","created_at":"2026-11-18","updated_at":"2026-11-20",
+    });
+    assert_eq!(get("/api/lite-cut/exports/10", false).0, 401);
+    assert_eq!(
+        get("/api/lite-cut/exports/10", true),
+        (200, completed.clone())
+    );
+    assert_eq!(
+        get("/api/lite-cut/exports?project_id=7&limit=1", true),
+        (200, json!({"items":[completed],"limit":1,"offset":0})),
+    );
+    assert_eq!(
+        get("/api/lite-cut/exports?limit=1", true).1["items"][0]["error"],
+        "MONTAGE_EXPORT_FAILED"
+    );
+    assert_eq!(
+        get("/api/lite-cut/exports/99", true),
+        (404, json!({"detail":{"code":"LITECUT_EXPORT_NOT_FOUND"}})),
     );
     assert_eq!(
         [fs::read(&database).unwrap(), fs::read(&wal).unwrap()],
