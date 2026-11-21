@@ -538,15 +538,18 @@ try {
   if ($NativePayloads) {
     # Preserve both native first-run profiles for the later ACL assertions.
     $comparisonProfile = $null
+    $comparisonStage = 'fixture-account'
     try {
-      $comparisonUser = New-FixtureUser 'Legacy' $accounts
+      $comparisonUser = New-FixtureUser 'Old' $accounts
+      $comparisonStage = 'fixture-logon'
       Test-StandardUserAccess $comparisonUser @() @()
+      $comparisonStage = 'fixture-profile-root'
       $key = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($comparisonUser.SID)"
       $image = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $key -Name ProfileImagePath))
       $comparisonProfile = Join-Path $image 'AppData\Roaming'
     } catch {
-      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: Main $BaselineVersion stage=fixture-standard-profile comparison=incomparable"
-      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: League $LeagueBaselineVersion stage=fixture-standard-profile comparison=incomparable"
+      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: Main $BaselineVersion stage=$comparisonStage comparison=incomparable"
+      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: League $LeagueBaselineVersion stage=$comparisonStage comparison=incomparable"
     }
     if ($comparisonProfile) {
       Measure-LegacyHome $main $comparisonUser $BaselineVersion $BaselineInstaller $oldMainHash (Join-Path $comparisonProfile 'MaxGameStudioData')
