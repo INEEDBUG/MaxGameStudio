@@ -45,6 +45,12 @@ struct RecordingSegment {
     voice_listen_mask_enemy: Option<u64>,
 }
 
+struct RecordingPlan {
+    request: NormalizedRequest,
+    active: Vec<RecordingSegment>,
+    disabled: Vec<RecordingSegment>,
+}
+
 pub(super) async fn respond(
     profile: &ProfileState,
     request: Request<Incoming>,
@@ -67,7 +73,7 @@ pub(super) async fn respond(
     extended_request.store(true, Ordering::Relaxed);
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        build(dto)
+        build(dto).map(RecordingPlan::preview)
     })
     .await
     {
@@ -77,7 +83,7 @@ pub(super) async fn respond(
     }
 }
 
-fn build(dto: RecordingRequestDto) -> Result<Value, (StatusCode, String)> {
+fn build(dto: RecordingRequestDto) -> Result<RecordingPlan, (StatusCode, String)> {
     let end = actual_end_tick(Path::new(&dto.demo.demo_path)).map_err(|_| {
         (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -110,11 +116,25 @@ fn build(dto: RecordingRequestDto) -> Result<Value, (StatusCode, String)> {
     req.warnings.extend(warnings);
     let (active, disabled, guard_warnings) = postprocess::finish(&req, segments);
     req.warnings.extend(guard_warnings);
-    let estimates = active
-        .iter()
-        .map(|segment| i128::from(segment.end_tick) - i128::from(segment.start_tick))
-        .sum::<i128>();
-    Ok(json!({
+    Ok(RecordingPlan {
+        request: req,
+        active,
+        disabled,
+    })
+}
+
+impl RecordingPlan {
+    fn preview(self) -> Value {
+        let Self {
+            request: req,
+            active,
+            disabled,
+        } = self;
+        let estimates = active
+            .iter()
+            .map(|segment| i128::from(segment.end_tick) - i128::from(segment.start_tick))
+            .sum::<i128>();
+        json!({
         "request_id":req.request_id, "request_type":req.request_type, "demo_path":req.demo.demo_path,
         "tick_rate":req.demo.tick_rate, "estimated_duration_sec":estimates as f64 / req.demo.tick_rate,
         "summary":{
@@ -126,7 +146,8 @@ fn build(dto: RecordingRequestDto) -> Result<Value, (StatusCode, String)> {
         "warnings":req.warnings,
         "active_segments":active.into_iter().map(segment_debug).collect::<Vec<_>>(),
         "disabled_segments":disabled.into_iter().map(segment_debug).collect::<Vec<_>>(),
-    }))
+        })
+    }
 }
 
 fn event_segment(
