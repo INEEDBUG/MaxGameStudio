@@ -24,7 +24,7 @@ use crate::{
     profile_config::{ConfigUpdateError, ProfileConfig},
     profile_platform::{backup_status, data_dir_info, path_text, resolved_path},
     replay_cache::{
-        cache_summary, clear_cache, load_packet, ReplayCacheError, ReplayRepair,
+        cache_summary, clear_cache, load_packet, ColdReplay, ReplayCacheError, ReplayRepair,
         REQUIRED_PARSER_VERSION,
     },
     runtime_session::RuntimeSession,
@@ -601,12 +601,27 @@ async fn replay_response(
     if existing.status() != StatusCode::CONFLICT {
         return existing;
     }
-    let Ok(_permit) = profile.demo_parser.try_acquire() else {
+    extended_request.store(true, Ordering::Relaxed);
+    let Ok(Ok(_permit)) = timeout(Duration::from_secs(360), profile.demo_parser.acquire()).await
+    else {
         return detail(
             StatusCode::SERVICE_UNAVAILABLE,
             "Another Demo replay is being rebuilt",
         );
     };
+    // A request waiting for the same Demo still reads its own round from the published cache.
+    let waiting_request = request.clone();
+    let ready = profile_disk(profile, move |profile| {
+        replay_packet_response(load_packet(
+            profile.config.data_dir(),
+            &profile.upload_dir,
+            &waiting_request,
+        ))
+    })
+    .await;
+    if ready.status() != StatusCode::CONFLICT {
+        return ready;
+    }
     let prepare_request = request.clone();
     let repair = match profile_work(profile, move |profile| {
         ReplayRepair::prepare(
@@ -617,27 +632,41 @@ async fn replay_response(
     })
     .await
     {
-        Ok(Ok(Some(repair))) => repair,
-        Ok(Ok(None)) => {
-            return profile_disk(profile, move |profile| {
-                replay_packet_response(load_packet(
-                    profile.config.data_dir(),
-                    &profile.upload_dir,
-                    &request,
-                ))
-            })
-            .await;
-        }
+        Ok(Ok(repair)) => repair,
         Ok(Err(error)) => return replay_packet_response(Err(error)),
         Err(error) => return profile_io_error(&error),
     };
-    extended_request.store(true, Ordering::Relaxed);
-    let generated = match repair.generate(worker).await {
-        Ok(generated) => generated,
+    if let Some(repair) = repair {
+        let generated = match repair.generate(worker).await {
+            Ok(generated) => generated,
+            Err(error) => return replay_packet_response(Err(error)),
+        };
+        return profile_disk(profile, move |_| {
+            replay_packet_response(repair.finish(&generated))
+        })
+        .await;
+    }
+    let mut cold = match profile_work(profile, move |profile| {
+        ColdReplay::prepare(
+            profile.config.data_dir(),
+            &profile.upload_dir,
+            profile.config.database_path(),
+            request,
+        )
+    })
+    .await
+    {
+        Ok(Ok(Some(cold))) => cold,
+        Ok(Ok(None)) => return ready,
+        Ok(Err(error)) => return replay_packet_response(Err(error)),
+        Err(error) => return profile_io_error(&error),
+    };
+    let metadata = match cold.generate(worker).await {
+        Ok(metadata) => metadata,
         Err(error) => return replay_packet_response(Err(error)),
     };
     profile_disk(profile, move |_| {
-        replay_packet_response(repair.finish(&generated))
+        replay_packet_response(cold.finish(metadata))
     })
     .await
 }
@@ -652,7 +681,7 @@ fn replay_packet_response(packet: Result<Option<Vec<u8>>, ReplayCacheError>) -> 
                 .expect("valid binary replay response"),
         Ok(None) => detail(
                 StatusCode::CONFLICT,
-                "Binary replay cache is missing and cold repair is unavailable in the native runtime; analyze the demo again in the compatible backend",
+                "Binary replay cache is missing and no persisted analysis workspace can rebuild it; analyze the demo again",
             ),
         Err(ReplayCacheError::EmptyPath) => detail(StatusCode::BAD_REQUEST, "Demo 路径为空"),
         Err(ReplayCacheError::MissingDemo(path)) => detail(StatusCode::NOT_FOUND, &format!("未找到 Demo 文件: {path}")),

@@ -51,6 +51,7 @@ enum Action {
     ExtractReplayEffectRows(replay_effect_rows::ExtractReplayEffectRowsRequest),
     InspectInfernoTracks(replay_effect_rows::EffectTracksRequest),
     InspectEffectTracks(replay_effect_rows::EffectTracksRequest),
+    InspectProjectileTrajectories(replay_effect_rows::EffectTracksRequest),
     InspectDemo {
         path: PathBuf,
     },
@@ -180,7 +181,7 @@ fn run(input: impl Read) -> Result<Value, Failure> {
     }
     match request.action {
         Action::Probe => Ok(json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows", "inspect_match_timeline", "inspect_inferno_tracks", "inspect_effect_tracks"],
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows", "inspect_match_timeline", "inspect_inferno_tracks", "inspect_effect_tracks", "inspect_projectile_trajectories"],
             "upstream_tag": "v0.41.4"
         })),
         Action::InspectHeader { path } => inspect_header(&path),
@@ -191,6 +192,9 @@ fn run(input: impl Read) -> Result<Value, Failure> {
         }
         Action::InspectEffectTracks(request) => {
             replay_effect_rows::inspect_effect_tracks(request, true)
+        }
+        Action::InspectProjectileTrajectories(request) => {
+            replay_effect_rows::inspect_projectiles(request)
         }
         Action::InspectDemo { path } => demo_inspection::inspect(&path),
         Action::InspectRoster { path } => demo_inspection::inspect_roster(&path),

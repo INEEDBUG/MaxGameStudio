@@ -1,10 +1,14 @@
-//! Read whole-match replay caches and repair missing frames from complete legacy metadata.
+//! Read whole-match replay caches and rebuild missing data with the installed parser.
+
+mod cold;
+pub(crate) use cold::ColdReplay;
 
 use crate::{
     parser_worker::ParserWorker,
     profile_platform::{path_text, resolved_path},
     replay_packet::{replay_parquet_binary_packet, MAX_SAMPLE_TICKS},
 };
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -452,19 +456,37 @@ fn resolve_demo(upload_dir: &Path, path: &str) -> Result<PathBuf, ReplayCacheErr
 }
 
 fn cache_key(path: &Path, fps: f64, tick_rate: f64) -> Option<String> {
+    Some(cache_key_for(&fingerprint(path)?, fps, tick_rate))
+}
+
+#[derive(Serialize)]
+struct Fingerprint {
+    path: String,
+    size: u64,
+    mtime_ns: i128,
+}
+
+fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let stat = fs::metadata(path).ok()?;
     let modified = stat.modified().ok()?;
     let mtime_ns = match modified.duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_nanos() as i128,
         Err(error) => -(error.duration().as_nanos() as i128),
     };
+    Some(Fingerprint {
+        path: path_text(path),
+        size: stat.len(),
+        mtime_ns,
+    })
+}
+
+fn cache_key_for(source: &Fingerprint, fps: f64, tick_rate: f64) -> String {
     let identity = format!(
-        "{REPLAY_MATCH_CACHE_VERSION}|{REQUIRED_PARSER_VERSION}|{}|{}|{mtime_ns}|{fps:.6}|{tick_rate:.6}",
-        path_text(path),
-        stat.len(),
+        "{REPLAY_MATCH_CACHE_VERSION}|{REQUIRED_PARSER_VERSION}|{}|{}|{}|{fps:.6}|{tick_rate:.6}",
+        source.path, source.size, source.mtime_ns,
     );
     let hash = format!("{:x}", Sha256::digest(identity.as_bytes()));
-    Some(hash[..40].to_owned())
+    hash[..40].to_owned()
 }
 
 fn read_metadata(path: &Path) -> Result<Option<Value>, ReplayCacheError> {

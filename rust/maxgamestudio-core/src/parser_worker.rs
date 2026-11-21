@@ -14,6 +14,7 @@ const EXECUTABLE: &str = "maxgamestudio-parser-worker.exe";
 const PARSER_COMMIT: &str = "db3ba5f7a1b02b8cb27d0063d52649883a98469c";
 const INPUT_LIMIT: usize = 64 * 1024;
 const OUTPUT_LIMIT: u64 = 4 * 1024 * 1024;
+const EFFECT_OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
 
 pub(crate) struct ParserWorker {
     executable: PathBuf,
@@ -47,6 +48,7 @@ impl ParserWorker {
                 "output_path": staged_parquet, "tick_rate": tick_rate, "fps": fps, "rounds": rounds,
             }),
             Duration::from_secs(240),
+            OUTPUT_LIMIT,
         )
         .await
     }
@@ -55,6 +57,7 @@ impl ParserWorker {
         self.run(
             json!({"protocol": 1, "action": "inspect_demo", "path": path}),
             Duration::from_secs(30),
+            OUTPUT_LIMIT,
         )
         .await
     }
@@ -63,11 +66,46 @@ impl ParserWorker {
         self.run(
             json!({"protocol": 1, "action": "inspect_roster", "path": path}),
             Duration::from_secs(90),
+            OUTPUT_LIMIT,
         )
         .await
     }
 
-    async fn run(&self, input: Value, limit: Duration) -> io::Result<Value> {
+    pub(crate) async fn replay_effects(
+        &self,
+        path: &Path,
+        tick_rate: f64,
+        end: i64,
+    ) -> io::Result<Value> {
+        self.run(
+            json!({
+                "protocol":1, "action":"inspect_effect_tracks", "path":path,
+                "tick_rate":tick_rate, "start_tick":0, "end_tick":end,
+            }),
+            Duration::from_secs(180),
+            EFFECT_OUTPUT_LIMIT,
+        )
+        .await
+    }
+
+    pub(crate) async fn replay_trajectories(
+        &self,
+        path: &Path,
+        tick_rate: f64,
+        end: i64,
+    ) -> io::Result<Value> {
+        self.run(
+            json!({
+                "protocol":1, "action":"inspect_projectile_trajectories", "path":path,
+                "tick_rate":tick_rate, "start_tick":0, "end_tick":end,
+            }),
+            Duration::from_secs(120),
+            OUTPUT_LIMIT,
+        )
+        .await
+    }
+
+    async fn run(&self, input: Value, limit: Duration, max_output: u64) -> io::Result<Value> {
         let request = serde_json::to_vec(&input)?;
         if request.len() > INPUT_LIMIT {
             return Err(io::Error::new(
@@ -95,10 +133,10 @@ impl ParserWorker {
                 .stdout
                 .take()
                 .expect("parser stdout was piped")
-                .take(OUTPUT_LIMIT + 1)
+                .take(max_output + 1)
                 .read_to_end(&mut output)
                 .await?;
-            if output.len() as u64 > OUTPUT_LIMIT {
+            if output.len() as u64 > max_output {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Parser worker output exceeded its size limit",

@@ -2,6 +2,7 @@ mod inferno_tracks;
 #[path = "replay_effect_rows/smoke_projection.generated.rs"]
 mod smoke_projection;
 mod smoke_tracks;
+mod trajectory_paths;
 
 use crate::{parser_inputs, replay_io, Failure};
 use parser::{
@@ -155,9 +156,9 @@ pub(crate) fn inspect_effect_tracks(
     request: EffectTracksRequest,
     include_smoke: bool,
 ) -> Result<Value, Failure> {
-    request.window.validate()?;
-    if !request.tick_rate.is_finite() || !(1.0..=256.0).contains(&request.tick_rate) {
-        return Err(Failure::request("unsupported Demo tick rate"));
+    request.validate_source()?;
+    if !include_smoke {
+        request.window.validate()?;
     }
     replay_io::with_demo_bytes(&request.path, |bytes| {
         let huffman = create_huffman_lookup_table();
@@ -183,6 +184,30 @@ pub(crate) fn inspect_effect_tracks(
             );
         }
         Ok(json!({"effect_tracks":tracks}))
+    })
+}
+
+impl EffectTracksRequest {
+    fn validate_source(&self) -> Result<(), Failure> {
+        if !self.tick_rate.is_finite() || !(1.0..=256.0).contains(&self.tick_rate) {
+            return Err(Failure::request("unsupported Demo tick rate"));
+        }
+        if self.window.start_tick < 0 || self.window.end_tick < self.window.start_tick {
+            return Err(Failure::request(
+                "expected a nonnegative replay source window",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn inspect_projectiles(request: EffectTracksRequest) -> Result<Value, Failure> {
+    request.validate_source()?;
+    replay_io::with_demo_bytes(&request.path, |bytes| {
+        let huffman = create_huffman_lookup_table();
+        let parsed = parse(bytes, &huffman, Pass::Trajectories)?;
+        let trajectories = trajectory_paths::build(&parsed, request.window, request.tick_rate)?;
+        Ok(json!({"trajectories":trajectories}))
     })
 }
 

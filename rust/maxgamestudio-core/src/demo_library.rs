@@ -173,6 +173,26 @@ impl DemoLibrary {
         })
     }
 
+    pub(crate) fn replay_workspace(&self, demo: &Path) -> DemoResult<Option<Value>> {
+        let path = crate::profile_platform::path_text(demo);
+        read_library(&self.path, |connection| {
+            let Some(connection) = connection else {
+                return Ok(None);
+            };
+            let mut statement = connection.prepare(
+                "SELECT result_json FROM match_results WHERE demo_path = ?1 ORDER BY id DESC LIMIT 1",
+            )?;
+            let mut rows = statement.query([path])?;
+            let Some(row) = rows.next()? else {
+                return Ok(None);
+            };
+            let mut result =
+                decode_result(row.get_ref(0)?).map_err(|_| DemoReadError::InvalidFullResult)?;
+            let workspace = result["analysis_workspace"].take();
+            Ok(workspace.is_object().then_some(workspace))
+        })
+    }
+
     pub(crate) fn edit(&self, id: i64, edit: DemoEdit) -> DemoResult<Option<Value>> {
         let Some(mut connection) = open_library(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?
         else {
