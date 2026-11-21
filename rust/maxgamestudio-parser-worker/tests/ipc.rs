@@ -54,7 +54,7 @@ fn exposes_its_pin_and_parses_a_real_source2_header() {
     assert_eq!(
         result(&probe)["result"],
         json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows", "inspect_match_timeline", "inspect_inferno_tracks"], "upstream_tag": "v0.41.4"
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows", "inspect_match_timeline", "inspect_inferno_tracks", "inspect_effect_tracks"], "upstream_tag": "v0.41.4"
         })
     );
 

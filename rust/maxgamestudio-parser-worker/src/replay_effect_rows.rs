@@ -1,4 +1,7 @@
 mod inferno_tracks;
+#[path = "replay_effect_rows/smoke_projection.generated.rs"]
+mod smoke_projection;
+mod smoke_tracks;
 
 use crate::{parser_inputs, replay_io, Failure};
 use parser::{
@@ -141,14 +144,17 @@ pub(crate) fn extract(request: ExtractReplayEffectRowsRequest) -> Result<Value, 
 }
 
 #[derive(Deserialize)]
-pub(crate) struct InfernoTracksRequest {
+pub(crate) struct EffectTracksRequest {
     path: PathBuf,
     tick_rate: f64,
     #[serde(flatten)]
     window: TickWindow,
 }
 
-pub(crate) fn inspect_infernos(request: InfernoTracksRequest) -> Result<Value, Failure> {
+pub(crate) fn inspect_effect_tracks(
+    request: EffectTracksRequest,
+    include_smoke: bool,
+) -> Result<Value, Failure> {
     request.window.validate()?;
     if !request.tick_rate.is_finite() || !(1.0..=256.0).contains(&request.tick_rate) {
         return Err(Failure::request("unsupported Demo tick rate"));
@@ -156,7 +162,26 @@ pub(crate) fn inspect_infernos(request: InfernoTracksRequest) -> Result<Value, F
     replay_io::with_demo_bytes(&request.path, |bytes| {
         let huffman = create_huffman_lookup_table();
         let parsed = parse(bytes, &huffman, Pass::Utility)?;
-        let tracks = inferno_tracks::build(&parsed, request.window, request.tick_rate)?;
+        let mut tracks = inferno_tracks::build(&parsed, request.window, request.tick_rate)?;
+        if include_smoke {
+            let (smoke, warnings) =
+                smoke_tracks::build(&parsed, request.window, request.tick_rate)?;
+            let has_inferno = !tracks.is_empty();
+            let has_smoke = !smoke.is_empty();
+            tracks.extend(smoke);
+            tracks.sort_by(|left, right| {
+                left["start_tick"]
+                    .as_i64()
+                    .cmp(&right["start_tick"].as_i64())
+                    .then_with(|| left["type"].as_str().cmp(&right["type"].as_str()))
+            });
+            return Ok(
+                json!({"effect_tracks":tracks,"warnings":warnings,"capabilities":{
+                    "inferno_cells":has_inferno,"smoke_voxels":has_smoke,
+                    "smoke_mode":if has_smoke {"voxel_cells"} else {"legacy_circle"},
+                }}),
+            );
+        }
         Ok(json!({"effect_tracks":tracks}))
     })
 }
@@ -304,6 +329,50 @@ struct RawRow<'a, 'values> {
     kind: RowKind,
     columns: &'a BTreeMap<&'values str, (usize, &'values VarVec)>,
     index: usize,
+}
+
+impl<'a> RawRow<'_, 'a> {
+    fn field(&self, name: &str) -> Option<&'a VarVec> {
+        self.columns.get(name).map(|(_, values)| *values)
+    }
+
+    fn integer(&self, name: &str) -> Option<i64> {
+        match self.field(name)? {
+            VarVec::I32(values) => values[self.index].map(i64::from),
+            VarVec::U32(values) => values[self.index].map(i64::from),
+            VarVec::U64(values) => i64::try_from(values[self.index]?).ok(),
+            VarVec::F32(values) => values[self.index]
+                .filter(|value| value.is_finite())
+                .map(|value| value as i64),
+            _ => None,
+        }
+    }
+
+    fn entity(&self) -> Option<i64> {
+        self.integer("grenade_entity_id")
+            .or_else(|| self.integer("entity_id"))
+    }
+
+    fn thrower(&self) -> (Option<&'a str>, Option<u64>) {
+        let name = |column| match self.field(column) {
+            Some(VarVec::String(names)) => names[self.index]
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty()),
+            _ => None,
+        };
+        let id = |column| match self.field(column) {
+            Some(VarVec::U64(ids)) => ids[self.index].filter(|id| *id != 0),
+            _ => self
+                .integer(column)
+                .and_then(|id| u64::try_from(id).ok())
+                .filter(|id| *id != 0),
+        };
+        (
+            name("name").or_else(|| name("thrower_name")),
+            id("steamid").or_else(|| id("thrower_steamid")),
+        )
+    }
 }
 
 impl Serialize for RawRow<'_, '_> {

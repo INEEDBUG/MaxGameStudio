@@ -13,9 +13,8 @@ pub(super) fn build(
     let mut entities = BTreeMap::<Option<i64>, Vec<FireRow<'_>>>::new();
     visit_rows(parsed, Pass::Utility, window, |tick, row| {
         if matches!(row.kind, RowKind::Inferno) {
-            let id = integer(&row, "grenade_entity_id").or_else(|| integer(&row, "entity_id"));
             entities
-                .entry(id)
+                .entry(row.entity())
                 .or_default()
                 .push(FireRow::read(tick, row));
         }
@@ -51,40 +50,28 @@ struct FireRow<'a> {
 
 impl<'a> FireRow<'a> {
     fn read(tick: i32, row: RawRow<'_, 'a>) -> Self {
-        let positions = match field(&row, "m_firePositions") {
+        let positions = match row.field("m_firePositions") {
             Some(VarVec::VecXYZList(points)) => points[row.index].as_deref().unwrap_or_default(),
             _ => &[],
         };
-        let burning = match field(&row, "m_bFireIsBurning") {
+        let burning = match row.field("m_bFireIsBurning") {
             Some(VarVec::BoolVec(flags)) => flags[row.index].as_deref().unwrap_or_default(),
             _ => &[],
         };
-        let name = |column| match field(&row, column) {
-            Some(VarVec::String(names)) => names[row.index]
-                .as_deref()
-                .map(str::trim)
-                .filter(|name| !name.is_empty()),
-            _ => None,
-        };
-        let steam_id = |column| match field(&row, column) {
-            Some(VarVec::U64(ids)) => ids[row.index].filter(|id| *id != 0),
-            _ => integer(&row, column)
-                .and_then(|id| u64::try_from(id).ok())
-                .filter(|id| *id != 0),
-        };
-        let lifetime = match field(&row, "m_nFireLifetime") {
+        let (name, steam_id) = row.thrower();
+        let lifetime = match row.field("m_nFireLifetime") {
             Some(VarVec::F32(values)) => values[row.index].map(f64::from),
-            _ => integer(&row, "m_nFireLifetime").map(|value| value as f64),
+            _ => row.integer("m_nFireLifetime").map(|value| value as f64),
         };
         Self {
             tick,
             positions,
             burning,
             lifetime,
-            begin: integer(&row, "m_nFireEffectTickBegin"),
-            count: integer(&row, "m_fireCount"),
-            name: name("name").or_else(|| name("thrower_name")),
-            steam_id: steam_id("steamid").or_else(|| steam_id("thrower_steamid")),
+            begin: row.integer("m_nFireEffectTickBegin"),
+            count: row.integer("m_fireCount"),
+            name,
+            steam_id,
         }
     }
 
@@ -176,20 +163,4 @@ fn track(
         }
     }
     Some(((start, id_text.to_owned()), effect))
-}
-
-fn field<'a>(row: &RawRow<'_, 'a>, name: &str) -> Option<&'a VarVec> {
-    row.columns.get(name).map(|(_, values)| *values)
-}
-
-fn integer(row: &RawRow<'_, '_>, name: &str) -> Option<i64> {
-    match field(row, name)? {
-        VarVec::I32(values) => values[row.index].map(i64::from),
-        VarVec::U32(values) => values[row.index].map(i64::from),
-        VarVec::U64(values) => i64::try_from(values[row.index]?).ok(),
-        VarVec::F32(values) => values[row.index]
-            .filter(|value| value.is_finite())
-            .map(|value| value as i64),
-        _ => None,
-    }
 }
