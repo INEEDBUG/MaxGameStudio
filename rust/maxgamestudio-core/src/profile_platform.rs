@@ -142,9 +142,11 @@ fn system_locale_name() -> String {
 }
 
 pub(crate) fn ffmpeg_on_path() -> bool {
-    let Some(path) = env::var_os("PATH") else {
-        return false;
-    };
+    ffmpeg_from_path().is_some()
+}
+
+pub(crate) fn ffmpeg_from_path() -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
     #[cfg(windows)]
     let names = env::var("PATHEXT")
         .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned())
@@ -154,10 +156,11 @@ pub(crate) fn ffmpeg_on_path() -> bool {
         .collect::<Vec<_>>();
     #[cfg(not(windows))]
     let names = ["ffmpeg"];
-    env::split_paths(&path).any(|directory| {
+    env::split_paths(&path).find_map(|directory| {
         names
             .iter()
-            .any(|name| is_executable(&directory.join(name)))
+            .map(|name| directory.join(name))
+            .find(|file| is_executable(file))
     })
 }
 

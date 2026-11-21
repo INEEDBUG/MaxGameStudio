@@ -136,6 +136,40 @@ impl ProfileConfig {
         Ok(result)
     }
 
+    pub(crate) fn ffmpeg_executable(&self) -> io::Result<PathBuf> {
+        let stored = self.load()?;
+        let configured = stored
+            .known
+            .get("ffmpeg_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        let path = if configured.is_empty() {
+            let bundled = self
+                .data_dir
+                .parent()
+                .map(|root| root.join("third_party/ffmpeg/ffmpeg.exe"));
+            bundled
+                .filter(|path| path.is_file())
+                .or_else(crate::profile_platform::ffmpeg_from_path)
+        } else {
+            Some(expand_user(configured)?)
+        };
+        let path = path.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到 FFmpeg"))?;
+        #[cfg(windows)]
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("exe"))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "请选择 FFmpeg 的 .exe 文件",
+            ));
+        }
+        path.canonicalize()
+    }
+
     pub(crate) fn update(&self, input: Value) -> Result<(), ConfigUpdateError> {
         let patch = validate_patch(input).map_err(ConfigUpdateError::Validation)?;
         let mut stored = self.load().map_err(ConfigUpdateError::Storage)?;

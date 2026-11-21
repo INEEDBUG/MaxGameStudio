@@ -1,13 +1,13 @@
 use super::{
     demo_body::{bounded_float, field_issue, model, text},
-    demo_query::{parse_clip_page, parse_path_integer},
+    demo_query::{parse_clip_page, parse_path_integer, parse_waveform},
     detail, json_reply, model_body, profile_disk, profile_work, validation_reply, HttpResponse,
     ProfileState,
 };
 use crate::{
     obs_wire::ObsRpc,
     profile_platform::{expand_user, path_text},
-    recorded_clips,
+    recorded_clips, recording_waveform,
 };
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, header::RANGE, Method, Request, StatusCode};
@@ -31,6 +31,7 @@ pub(super) enum Route {
     Storage,
     Stream,
     Duration,
+    Waveform,
 }
 
 impl Route {
@@ -43,6 +44,7 @@ impl Route {
                 clip_id(&path, "/stream")
                     .map(|_| Self::Stream)
                     .or_else(|| clip_id(&path, "/duration").map(|_| Self::Duration))
+                    .or_else(|| clip_id(&path, "/waveform").map(|_| Self::Waveform))
             }
         }
     }
@@ -110,7 +112,77 @@ pub(super) async fn respond(
         }
         Route::Stream => stream(profile, request, extended_request).await,
         Route::Duration => save_duration(profile, request).await,
+        Route::Waveform => waveform(profile, request, extended_request).await,
     }
+}
+
+async fn waveform(
+    profile: &Arc<ProfileState>,
+    request: Request<Incoming>,
+    extended_request: &AtomicBool,
+) -> HttpResponse {
+    let decoded = percent_decode_str(request.uri().path()).decode_utf8_lossy();
+    let id = match parse_path_integer(
+        clip_id(&decoded, "/waveform").expect("clip route"),
+        "clip_id",
+    ) {
+        Ok(id) => id,
+        Err(errors) => return validation_reply(errors),
+    };
+    let query = match parse_waveform(request.uri().query().unwrap_or_default()) {
+        Ok(query) => query,
+        Err(errors) => return validation_reply(errors),
+    };
+    let clip = profile_work(profile, move |profile| {
+        recorded_clips::get(&profile.config.database_path(), id)
+    })
+    .await;
+    let clip = match clip {
+        Ok(Ok(Some(clip))) => clip,
+        Ok(Ok(None)) => return missing_clip(id),
+        _ => return read_error(),
+    };
+    let path = clip["output_path"].as_str().unwrap_or_default().to_owned();
+    if path.trim().is_empty() {
+        return detail(StatusCode::BAD_REQUEST, "clip output_path is empty");
+    }
+    let source = profile_work(profile, move |_| {
+        let file = canonical_media(&path)?;
+        let source = recording_waveform::WaveformSource::open(file).ok()?;
+        let cached = source.cached();
+        Some((source, cached))
+    })
+    .await;
+    let (source, cache) = match source {
+        Ok(Some(source)) => source,
+        Ok(None) => return detail(StatusCode::NOT_FOUND, "clip file not found"),
+        Err(_) => return read_error(),
+    };
+    if let Some(cache) = cache {
+        return json_reply(StatusCode::OK, cache.view(query, true));
+    }
+    let Ok(_permit) = profile.audio_decode.try_acquire() else {
+        return detail(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "正在生成其他素材的波形，请稍后重试",
+        );
+    };
+    let ffmpeg = match profile_work(profile, |profile| profile.config.ffmpeg_executable()).await {
+        Ok(Ok(path)) => path,
+        Ok(Err(error)) => return detail(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string()),
+        Err(_) => return read_error(),
+    };
+    extended_request.store(true, Ordering::Relaxed);
+    let pcm = match recording_waveform::decode(&ffmpeg, &source.path).await {
+        Ok(pcm) => pcm,
+        Err(error) => return detail(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string()),
+    };
+    let duration = clip["duration_sec"].as_f64();
+    profile_disk(profile, move |_| match source.publish(pcm, duration) {
+        Ok(cache) => json_reply(StatusCode::OK, cache.view(query, false)),
+        Err(error) => detail(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string()),
+    })
+    .await
 }
 
 async fn save_duration(profile: &Arc<ProfileState>, request: Request<Incoming>) -> HttpResponse {

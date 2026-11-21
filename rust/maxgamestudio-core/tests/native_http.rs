@@ -647,6 +647,35 @@ fn saves_recorded_media_duration_in_pre_upgrade_database() {
     assert_eq!(status, 200);
     assert_eq!(rows["items"][0]["duration_sec"], 99.0);
     assert_eq!(rows["items"][1]["duration_sec"], 17.5);
+    let media = fs::metadata(&clip).unwrap();
+    let modified = media
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as i64;
+    let cache_path = clip.with_extension("waveform-v1.json");
+    let cache_bytes = serde_json::to_vec(&json!({
+        "version":1, "source_size":media.len(), "source_mtime_ns":modified,
+        "duration_sec":17.5, "peaks":[0.0,0.25,0.5,1.0],
+    }))
+    .unwrap();
+    fs::write(&cache_path, &cache_bytes).unwrap();
+    let waveform = "/api/recorded-clips/1/waveform?buckets=8";
+    assert_eq!(
+        profile_request(&server, "GET", waveform, &Value::Null, false).0,
+        401
+    );
+    let (status, wave) = profile_request(&server, "GET", waveform, &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(
+        wave,
+        json!({
+            "cached":true, "duration_sec":17.5, "start_sec":0.0, "end_sec":17.5, "buckets":8,
+            "peaks":[0.04,0.04,0.25,0.25,0.5,0.5,1.0,1.0],
+        })
+    );
+    assert_eq!(fs::read(cache_path).unwrap(), cache_bytes);
     let missing = profile_request(
         &server,
         "PATCH",

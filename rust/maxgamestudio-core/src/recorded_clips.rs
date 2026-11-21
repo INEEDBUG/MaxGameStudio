@@ -42,10 +42,11 @@ pub(crate) fn list(path: &Path, limit: i64, offset: i64) -> Result<Vec<Value>, R
 }
 
 pub(crate) fn output_path(path: &Path, id: i64) -> Result<Option<String>, RecordedClipsError> {
-    Ok(read(path, "WHERE id = ?1", [id])?
-        .into_iter()
-        .next()
-        .map(|item| item["output_path"].as_str().unwrap_or_default().to_owned()))
+    Ok(get(path, id)?.map(|item| item["output_path"].as_str().unwrap_or_default().to_owned()))
+}
+
+pub(crate) fn get(path: &Path, id: i64) -> Result<Option<Value>, RecordedClipsError> {
+    Ok(read(path, "WHERE id = ?1", [id])?.into_iter().next())
 }
 
 pub(crate) fn update_duration(

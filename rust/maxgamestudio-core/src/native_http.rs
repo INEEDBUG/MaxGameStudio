@@ -107,6 +107,7 @@ struct ProfileState {
     parser_worker: Option<ParserWorker>,
     demo_parser: Semaphore,
     obs_writes: Semaphore,
+    audio_decode: Semaphore,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
 }
@@ -143,6 +144,7 @@ impl NativeHttpServer {
             parser_worker,
             demo_parser: Semaphore::new(1),
             obs_writes: Semaphore::new(1),
+            audio_decode: Semaphore::new(1),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir

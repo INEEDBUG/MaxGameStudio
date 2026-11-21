@@ -171,6 +171,23 @@ pub(super) fn parse_clip_page(query: &str) -> Result<(i64, i64), Vec<Value>> {
     }
 }
 
+pub(super) fn parse_waveform(
+    query: &str,
+) -> Result<crate::recording_waveform::WaveformSlice, Vec<Value>> {
+    let mut query = Query::new(query);
+    let buckets = query.integer("buckets", 8, Some(512)).unwrap_or(72) as usize;
+    let start = query.nonnegative_float("start_sec").unwrap_or(0.0);
+    let end = query.nonnegative_float("end_sec");
+    if query.errors.is_empty() {
+        Ok(crate::recording_waveform::WaveformSlice {
+            buckets,
+            start,
+            end,
+        })
+    } else {
+        Err(query.errors)
+    }
+}
 struct Query<'a> {
     values: HashMap<Cow<'a, str>, Cow<'a, str>>,
     errors: Vec<Value>,

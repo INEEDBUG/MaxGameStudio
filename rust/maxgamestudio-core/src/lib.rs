@@ -8,15 +8,17 @@ pub mod native_http;
 #[cfg(feature = "native-http")]
 mod obs_wire;
 #[cfg(feature = "native-http")]
+mod parser_worker;
+#[cfg(feature = "native-http")]
 mod profile_config;
 #[cfg(feature = "native-http")]
 mod profile_platform;
 #[cfg(feature = "native-http")]
 mod recorded_clips;
 #[cfg(feature = "native-http")]
-mod replay_cache;
+mod recording_waveform;
 #[cfg(feature = "native-http")]
-mod parser_worker;
+mod replay_cache;
 #[cfg(feature = "native-http")]
 mod replay_packet;
 pub mod runtime_session;
