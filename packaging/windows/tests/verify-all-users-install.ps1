@@ -400,6 +400,28 @@ function Write-InstalledSize($Product, [string]$Directory = $Product.Default, [s
   }
 }
 
+function Measure-LegacyHome($Product, $User, [string]$Version, [string]$Installer, [string]$ExeHash, [string]$Profile) {
+  $baseline = @{ Name = $Product.Name; Version = $Version; Installer = $Installer; Default = $Product.Old; Exe = $Product.Exe }
+  $originalAcl = $null
+  try {
+    # The programs came from the pinned installers into this fixture. Give just
+    # its measurement user read/execute access before the existing scope upgrade.
+    $originalAcl = Get-Acl -LiteralPath $baseline.Default
+    $readAcl = Get-Acl -LiteralPath $baseline.Default
+    $readAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.SecurityIdentifier]$User.SID, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    Set-Acl -LiteralPath $baseline.Default -AclObject $readAcl
+  } catch {
+    Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: $($Product.Name) $Version stage=fixture-program-access comparison=incomparable"
+    return
+  }
+  try {
+    Invoke-NativeUpdaterProbe $baseline $User $ExeHash -IdleProfile $Profile -LegacyIdle
+  } finally {
+    Set-Acl -LiteralPath $baseline.Default -AclObject $originalAcl
+  }
+}
+
 $mainProfile = Join-Path $root 'Main synthetic profile'
 $mainData = Join-Path $mainProfile 'data'
 $leagueProfile = Join-Path $root 'League synthetic profile'
@@ -512,6 +534,25 @@ try {
   Test-StandardUserAccess $first @() @()
   Test-StandardUserAccess $second @() @()
   Test-StandardScopePages $first
+
+  if ($NativePayloads) {
+    # Preserve both native first-run profiles for the later ACL assertions.
+    $comparisonProfile = $null
+    try {
+      $comparisonUser = New-FixtureUser 'Legacy' $accounts
+      Test-StandardUserAccess $comparisonUser @() @()
+      $key = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($comparisonUser.SID)"
+      $image = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $key -Name ProfileImagePath))
+      $comparisonProfile = Join-Path $image 'AppData\Roaming'
+    } catch {
+      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: Main $BaselineVersion stage=fixture-standard-profile comparison=incomparable"
+      Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: League $LeagueBaselineVersion stage=fixture-standard-profile comparison=incomparable"
+    }
+    if ($comparisonProfile) {
+      Measure-LegacyHome $main $comparisonUser $BaselineVersion $BaselineInstaller $oldMainHash (Join-Path $comparisonProfile 'MaxGameStudioData')
+      Measure-LegacyHome $league $comparisonUser $LeagueBaselineVersion $LeagueBaselineInstaller $oldLeagueExeHash (Join-Path $comparisonProfile 'MaxGameStudioLeague\Profile')
+    }
+  }
 
   # Use the actual Explorer token only when the existing runner policy permits
   # unattended UAC. Preserve runner security settings and report its limits.

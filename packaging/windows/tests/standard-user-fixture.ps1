@@ -125,8 +125,8 @@ exit 0
   }
 }
 
-function Wait-Fixture([string]$Failure, [scriptblock]$Condition, [Diagnostics.Process]$Process) {
-  $until = [DateTime]::UtcNow.AddSeconds(45)
+function Wait-Fixture([string]$Failure, [scriptblock]$Condition, [Diagnostics.Process]$Process, [int]$Seconds = 45) {
+  $until = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
     if ($Process.HasExited) { throw "$Failure Process exited early." }
     $result = & $Condition
@@ -142,7 +142,7 @@ function Assert-StandardProcessOwner([Diagnostics.Process]$Process, $User) {
   }
 }
 
-function Write-VerifiedNativeIdleSample([Diagnostics.Process]$App, $Product, [string]$IdleDataDir) {
+function Write-VerifiedHomeIdleSample([Diagnostics.Process]$App, $Product, [string]$IdleDataDir, [string]$Role) {
   # The probe confirmed this exact process rendered Home before the warmup.
   Start-Sleep -Seconds 10
   $App.Refresh()
@@ -168,7 +168,10 @@ function Write-VerifiedNativeIdleSample([Diagnostics.Process]$App, $Product, [st
   $info = [ordered]@{
     product = $Product.Name
     version = $Product.Version
+    role = $Role
     scene = 'verified Home, standard user, no game client'
+    warmupSeconds = 10
+    pid = $App.Id
     processes = $processes.Count
     privateWorkingSetMiB = [math]::Round(($counters | Measure-Object WorkingSetPrivate -Sum).Sum / 1MB, 2)
     privateCommitMiB = [math]::Round(($processes | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 2)
@@ -177,10 +180,11 @@ function Write-VerifiedNativeIdleSample([Diagnostics.Process]$App, $Product, [st
     installerBytes = (Get-Item -LiteralPath $Product.Installer).Length
     packageSha256 = (Get-FileHash -LiteralPath $Product.Installer -Algorithm SHA256).Hash
   }
-  Write-Host ('NATIVE_HOME_RESOURCE_SAMPLE: ' + ($info | ConvertTo-Json -Compress))
+  $kind = if ($Role -eq 'baseline') { 'BASELINE' } else { 'NATIVE' }
+  Write-Host ("${kind}_HOME_RESOURCE_SAMPLE: " + ($info | ConvertTo-Json -Compress))
 }
 
-function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash, [string]$IdleProfile) {
+function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash, [string]$IdleProfile, [switch]$LegacyIdle) {
   $exe = Join-Path $Product.Default $Product.Exe
   if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ine $ExpectedHash) {
     throw 'The installed executable does not match the exact verified package input.'
@@ -196,23 +200,45 @@ function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash, [stri
   New-Item -ItemType Directory -Path $folder | Out-Null
   $launchScript = Join-Path $folder 'launch.ps1'
   $launcher = $null
+  $stage = 'app-launch'
   try {
     [IO.File]::WriteAllText($launchScript, @'
-param([string]$Executable, [int]$Port)
+param([string]$Executable, [int]$Port, [string]$LegacyProduct)
 $ErrorActionPreference = 'Stop'
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
-$app = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path -Parent $Executable) -Wait -PassThru
+$launch = @{ FilePath = $Executable; WorkingDirectory = (Split-Path -Parent $Executable); Wait = $true; PassThru = $true }
+if ($LegacyProduct -eq 'League') {
+  $control = Join-Path $env:APPDATA 'MaxGameStudioLeague'
+  [void][IO.Directory]::CreateDirectory($control)
+  [IO.File]::WriteAllText((Join-Path $control 'installer-data-location.txt'), (Join-Path $control 'Profile'), [Text.Encoding]::Unicode)
+  $launch.ArgumentList = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+} else {
+  if ($LegacyProduct -eq 'Main') {
+    # The repair release can suggest a shared fixed disk when the account has no locator.
+    $profilePath = Join-Path $env:APPDATA 'MaxGameStudioData'
+    $data = Join-Path $profilePath 'data'
+    [void][IO.Directory]::CreateDirectory($data)
+    $storage = 'HKCU:\Software\MaxGameStudio\Storage'
+    New-Item -Path $storage -Force | Out-Null
+    $locator = @{ root = $profilePath; mode = 'unified'; required_paths = @($data) } | ConvertTo-Json -Compress
+    Set-ItemProperty -LiteralPath $storage -Name LocationV1 -Value $locator
+  }
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+}
+$app = Start-Process @launch
 exit $app.ExitCode
 '@)
     $windowsPowerShell = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
     $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Executable "{1}" -Port {2}' -f $launchScript, $exe, $port
+    if ($LegacyIdle) { $arguments += " -LegacyProduct $($Product.Name)" }
+    $timeout = if ($LegacyIdle) { 20 } else { 45 }
     $launcher = Start-StandardProcess $User $windowsPowerShell $Product.Default $arguments -Stage 'native-updater-launch'
     $app = Wait-Fixture 'Installed updater app did not start' {
       $child = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($launcher.Id)" |
         Where-Object { $_.ExecutablePath -ieq $exe } | Select-Object -First 1
       if ($child) { Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue }
-    } $launcher
+    } $launcher $timeout
     Assert-StandardProcessOwner $app $User
+    $stage = 'loopback-debugger'
     $null = Wait-Fixture 'Installed app did not expose a loopback WebView2 debugger' {
       $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
       if (!$listeners.Count) { return }
@@ -227,12 +253,23 @@ exit $app.ExitCode
         if ($id -ne $app.Id) { throw 'Debugger is not owned by the installed app process tree.' }
       }
       if ('127.0.0.1' -in $listeners.LocalAddress) { return $true }
-    } $app
+    } $app $timeout
     $probe = Join-Path $PSScriptRoot 'verify-native-updaters.mjs'
+    if ($LegacyIdle) {
+      $stage = 'rendered-home'
+      $probeArgs = @($probe, $Product.Name.ToLowerInvariant(), $exe, $ExpectedHash.ToLowerInvariant(), $Product.Version, $port, 'legacy-idle')
+      # The exit code conveys absence of qualified Home. The harness records only the stage.
+      $PSNativeCommandUseErrorActionPreference = $false
+      & node @probeArgs 2>$null | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'The baseline Home probe did not complete.' }
+      $stage = 'idle-memory-counters'
+      Write-VerifiedHomeIdleSample $app $Product $IdleProfile 'baseline'
+      return
+    }
     if ($IdleProfile) {
       & node $probe ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port idle
       if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) Home was not ready for an idle resource sample." }
-      Write-VerifiedNativeIdleSample $app $Product $IdleProfile
+      Write-VerifiedHomeIdleSample $app $Product $IdleProfile 'candidate'
     }
     & node $probe ($Product.Name.ToLowerInvariant()) $exe ($ExpectedHash.ToLowerInvariant()) $Product.Version $port
     if ($LASTEXITCODE -ne 0) { throw "$($Product.Name) installed updater verification failed." }
@@ -251,6 +288,9 @@ exit $app.ExitCode
       }
       Write-Host 'MAIN_NATIVE_RUNTIME_VERIFIED: installed PID served the expected health and authenticated config.'
     }
+  } catch {
+    if (!$LegacyIdle) { throw }
+    Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: $($Product.Name) $($Product.Version) stage=$stage comparison=incomparable"
   } finally {
     try {
       if ($launcher) { Stop-CiFixtureProcess $launcher }

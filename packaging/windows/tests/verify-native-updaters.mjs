@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { basename, isAbsolute } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { MAIN_UPDATE_PRODUCT, mainInstallerNames, mainUpdateChannel } from '../../../frontend/src/utils/mainUpdateIdentity.mjs'
 import { leagueUpdate, leagueUpdateFeed } from '../league-standalone/league-update.ts'
 
@@ -142,17 +143,26 @@ export function createCdpSession(socket) {
   return { send, evaluate }
 }
 
-async function connectPage(role, port) {
+export function matchesInstalledPage(page, role, electronExe) {
+  if (page?.type !== 'page' || typeof page.url !== 'string') return false
+  const url = URL.parse(page.url)
+  if (!url) return false
+  if (electronExe) {
+    if (role !== 'league' || url.protocol !== 'file:' || url.hostname || url.search) return false
+    const entry = join(dirname(electronExe), 'resources', 'app.asar', 'out', 'renderer', 'main-window.html')
+    try { return fileURLToPath(url).toLowerCase() === entry.toLowerCase() } catch { return false }
+  }
   const paths = role === 'main' ? mainPages : leaguePages
-  const target = await waitFor('the installed app WebView2 page', 45_000, async () => {
+  return url.origin === 'http://tauri.localhost' && paths.includes(url.pathname)
+}
+
+async function connectPage(role, port, electronExe, timeout = 45_000) {
+  const target = await waitFor('the installed app debugger page', timeout, async () => {
     const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
       redirect: 'error', signal: AbortSignal.timeout(1000),
     }).catch(() => null)
     if (!response?.ok) return null
-    const pages = (await response.json()).filter(page => {
-      const url = new URL(page.url)
-      return page.type === 'page' && url.origin === 'http://tauri.localhost' && paths.includes(url.pathname)
-    })
+    const pages = (await response.json()).filter(page => matchesInstalledPage(page, role, electronExe))
     assert.ok(pages.length <= 1, 'The local debugger exposed ambiguous app pages.')
     return pages[0]
   })
@@ -162,7 +172,7 @@ async function connectPage(role, port) {
   assert.equal(debuggerUrl.search + debuggerUrl.hash + debuggerUrl.username + debuggerUrl.password, '')
   const socket = new WebSocket(debuggerUrl)
   try {
-    await waitFor('the loopback WebView2 debugger', 5_000, () => {
+    await waitFor('the loopback app debugger', 5_000, () => {
       assert.ok(socket.readyState !== WebSocket.CLOSED, 'The local debugger disconnected.')
       return socket.readyState === WebSocket.OPEN
     })
@@ -171,6 +181,12 @@ async function connectPage(role, port) {
     socket.close()
     throw error
   }
+}
+
+export function homeReadiness(role, legacy) {
+  if (role === 'league') return "!!document.querySelector('#app[data-v-app] .league-overview')?.getClientRects().length"
+  const section = legacy ? '#home-release-title' : '#home-tools-title'
+  return `!!document.querySelector('#home-title')?.getClientRects().length && !!document.querySelector('${section}')?.getClientRects().length`
 }
 
 const identityCheck = `(async () => {
@@ -464,7 +480,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
   assert.ok(process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true' &&
     process.env.RUNNER_ENVIRONMENT === 'github-hosted', 'Installed updater verification requires a disposable Windows runner.')
   assert.ok(Object.hasOwn(binaries, role) && isAbsolute(executable) && basename(executable) === binaries[role])
-  assert.ok(['updates', 'idle'].includes(mode), 'Unknown installed app probe mode.')
+  assert.ok(['updates', 'idle', 'legacy-idle'].includes(mode), 'Unknown installed app probe mode.')
   assert.match(expectedHash ?? '', /^[a-f0-9]{64}$/)
   const port = Number(portText)
   assert.ok(Number.isInteger(port) && port > 0 && port < 65536 && String(port) === portText)
@@ -473,19 +489,22 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
   const feed = role === 'main' ? `${rawFeeds}/${channel === 'beta' ? 'beta' : 'latest'}.json` : leagueUpdateFeed(current)
   const binary = await readFile(executable)
   assert.equal(createHash('sha256').update(binary).digest('hex'), expectedHash, 'Installed executable changed.')
-  assert.ok(binary.includes(identifiers[role]), 'The installed executable lacks the expected product identifier.')
-  assert.ok(binary.includes(feed), 'The expected feed is missing from the installed executable.')
-  if (mode === 'idle') {
-    const { socket, cdp } = await connectPage(role, port)
+  const legacy = mode === 'legacy-idle'
+  if (!legacy) {
+    assert.ok(binary.includes(identifiers[role]), 'The installed executable lacks the expected product identifier.')
+    assert.ok(binary.includes(feed), 'The expected feed is missing from the installed executable.')
+  }
+  if (mode !== 'updates') {
+    const { socket, cdp } = await connectPage(role, port, legacy && role === 'league' ? executable : undefined,
+      legacy ? 10_000 : undefined)
     try {
-      const home = role === 'main'
-        ? "!!document.querySelector('#home-title')?.getClientRects().length && !!document.querySelector('#home-tools-title')"
-        : "!!document.querySelector('#app[data-v-app] .league-overview')?.getClientRects().length"
-      await waitFor('the actual Home view in the process about to be sampled', 30_000, () => cdp.evaluate(home))
+      const home = homeReadiness(role, legacy)
+      await waitFor('the actual Home view in the process about to be sampled', legacy ? 15_000 : 30_000,
+        () => cdp.evaluate(home, legacy ? 3000 : undefined))
     } finally {
       socket.close()
     }
-    console.log(`NATIVE_IDLE_SCENE_VERIFIED: ${role} ${current}, visible Home layout in the sampled process.`)
+    console.log(`${legacy ? 'BASELINE' : 'NATIVE'}_IDLE_SCENE_VERIFIED: ${role} ${current}, visible Home layout in the sampled process.`)
     return
   }
   const manifest = await readFeed(feed)
