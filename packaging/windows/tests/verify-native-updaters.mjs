@@ -343,6 +343,37 @@ export async function readLeagueUpdater(evaluate, current, readinessTimeout = 15
   })
 }
 
+export async function verifyLeagueNavigation(evaluate) {
+  await waitFor('the installed League Overview and both game icons', 15_000, () => evaluate(`(() => {
+    const overview = document.querySelector('.league-overview')
+    const sidebarIcon = document.querySelector('img.league-sidebar-mark')
+    return !!overview?.querySelector('img.league-game-mark')?.naturalWidth &&
+      !!sidebarIcon?.naturalWidth
+  })()`))
+
+  const click = async selector => {
+    const clicked = await evaluate(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)})
+      if (!element) return false
+      element.click()
+      return true
+    })()`)
+    assert.equal(clicked, true, 'An installed League navigation action was unavailable.')
+  }
+
+  const expectPlayerLookup = () => waitFor('the installed League player lookup view', 10_000,
+    () => evaluate(`window.location.hash === '#/player-search' &&
+      !!document.querySelector('.league-player-search [role="status"]')?.textContent.trim()`))
+
+  await click('.league-overview [aria-labelledby="league-lookup"] button')
+  await expectPlayerLookup()
+  await click('[data-key="league-overview"]')
+  await waitFor('the installed League Overview', 10_000,
+    () => evaluate("window.location.hash === '#/overview' && !!document.querySelector('.league-overview')"))
+  await click('[data-key="league-lookup"]')
+  await expectPlayerLookup()
+}
+
 const mainBackendCheck = `(async () => {
   const invoke = (command) => window.__TAURI_INTERNALS__.invoke(command)
   await invoke('ensure_backend')
@@ -412,6 +443,8 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
       assert.ok(isDeepStrictEqual(result, {
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
       }), 'League returned unexpected update feed metadata.')
+      await verifyLeagueNavigation(evaluate)
+      console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: both bundled game icons and both player lookup entries.')
     }
   } finally {
     socket.close()
