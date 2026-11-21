@@ -671,6 +671,50 @@ fn demo_players_reuses_only_a_matching_legacy_roster_snapshot() {
             "duration_mins": 24.5, "match_date": "2025-03-18T23:59:59Z",
         })
     );
+    let summary_route = "/api/demos/batch-summary";
+    let ids = json!({"ids":[1,441,1]});
+    assert_eq!(
+        profile_request(&server, "POST", summary_route, &ids, false).0,
+        401
+    );
+    let (status, batch) = profile_request(&server, "POST", summary_route, &ids, true);
+    assert_eq!(status, 200);
+    assert_eq!(batch["items"].as_array().unwrap().len(), 2);
+    assert_eq!(batch["items"][0]["players"], data["players"]);
+    assert_eq!(batch["items"][0]["match_meta"], data["match_meta"]);
+    assert_eq!(batch["items"][0], batch["items"][1]);
+    let missing = json!({"filename":"441","id":441,"code":"DEMO_FILE_NOT_FOUND"});
+    assert_eq!(batch["failed"], json!([missing]));
+    let names = json!({
+        "demo_ids":[1,441],"mode":"manual","manual_lines":[" q ' uote % _ 玩家 ", "Q'uote"]
+    });
+    assert_eq!(
+        profile_request(
+            &server,
+            "POST",
+            "/api/demos/batch-resolve-players",
+            &names,
+            true
+        ),
+        (
+            200,
+            json!({"resolved":{"1":["Q'uote%_玩家"],"441":[]},"failed":[missing]})
+        ),
+    );
+    let saved_settings = br#"{"expected_parse_players":["q'uote","q'uote",""]}"#;
+    fs::write(&config, saved_settings).unwrap();
+    let saved = json!({"demo_ids":[1],"mode":"config_expected"});
+    assert_eq!(
+        profile_request(
+            &server,
+            "POST",
+            "/api/demos/batch-resolve-players",
+            &saved,
+            true
+        ),
+        (200, json!({"resolved":{"1":["Q'uote%_玩家"]},"failed":[]})),
+    );
+    assert_eq!(fs::read(&config).unwrap(), saved_settings);
     assert_eq!(fs::read(&database).unwrap(), before);
     assert_eq!(fs::read(&wal).unwrap(), wal_before);
     assert_eq!(

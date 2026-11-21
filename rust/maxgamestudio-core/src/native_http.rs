@@ -1,6 +1,7 @@
 //! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
 mod config_backup;
+mod demo_batch;
 mod demo_body;
 mod demo_events;
 mod demo_open;
@@ -456,7 +457,12 @@ async fn route(
         | Route::RecordingPlan
         | Route::LiteCut(lite_cut::Route::Restore { .. })
         | Route::LiteCut(lite_cut::Route::ValidateAssets)
-        | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
+        | Route::Demos(
+            DemoRoute::InspectPath
+            | DemoRoute::OpenLocal
+            | DemoRoute::BatchSummary
+            | DemoRoute::BatchResolve,
+        ) => "POST",
         Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
         _ => "GET",
     };
@@ -666,6 +672,15 @@ async fn demo_response(
 ) -> HttpResponse {
     match route {
         DemoRoute::OpenLocal => demo_open::open(profile, request, extended_request).await,
+        DemoRoute::BatchSummary | DemoRoute::BatchResolve => {
+            demo_batch::respond(
+                profile,
+                request,
+                matches!(route, DemoRoute::BatchSummary),
+                extended_request,
+            )
+            .await
+        }
         DemoRoute::Players => {
             demo_roster::players(profile, request.uri().path(), extended_request).await
         }

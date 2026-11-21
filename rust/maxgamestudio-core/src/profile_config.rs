@@ -72,6 +72,17 @@ impl ProfileConfig {
         self.path.with_file_name("cs2-insight.db")
     }
 
+    pub(crate) fn expected_demo_players(&self) -> io::Result<Vec<String>> {
+        let config = self.load()?;
+        Ok(config.known["expected_parse_players"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect())
+    }
+
     pub(crate) fn lite_cut_assets_dir(&self) -> io::Result<PathBuf> {
         let stored = self.load()?;
         let configured = stored.known["lite_cut_assets_dir"]

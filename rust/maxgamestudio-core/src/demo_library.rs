@@ -1,7 +1,7 @@
 //! Read and edit metadata in the deployed Demo library schema.
 
 mod roster;
-pub(crate) use roster::{normalize_players, RosterCache, RosterSource};
+pub(crate) use roster::{normalize_players, BatchRosterSource, RosterCache, RosterSource};
 
 use crate::wire_json::json_decode_error;
 use rusqlite::{

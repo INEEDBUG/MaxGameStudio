@@ -1,8 +1,12 @@
-use super::{read_library, select_objects, DemoLibrary, DemoResult, PLAYER_STATS_COLUMNS};
+use super::{
+    full_row, read_library, row_fields, select_objects, DemoLibrary, DemoResult, Object,
+    DEMO_COLUMNS, PLAYER_STATS_COLUMNS, RESULT_COLUMNS, RESULT_JOIN,
+};
 use crate::profile_platform::path_text;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
@@ -20,6 +24,11 @@ pub(crate) struct RosterSource {
     pub cache: RosterCache,
 }
 
+pub(crate) struct BatchRosterSource {
+    pub row: Value,
+    pub roster: RosterSource,
+}
+
 impl DemoLibrary {
     pub(crate) fn roster(&self, id: i64) -> DemoResult<Option<RosterSource>> {
         read_library(&self.path, |connection| {
@@ -32,23 +41,70 @@ impl DemoLibrary {
                     team_b_score, duration_mins, match_date FROM demo_files WHERE id = ?",
                 [id],
             )?;
-            let Some(mut demo) = demos.pop() else {
+            let Some(demo) = demos.pop() else {
                 return Ok(None);
             };
-            let path = PathBuf::from(
-                demo.remove("path")
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                    .unwrap_or_default(),
-            );
-            let md5 = demo.remove("content_md5").unwrap_or(Value::Null);
-            let cache = read_cache(connection, id, &path, md5.as_str())?;
-            Ok(Some(RosterSource {
-                path,
-                match_meta: Value::Object(demo),
-                cache,
-            }))
+            Ok(Some(roster_source(connection, id, &demo)?))
         })
     }
+
+    pub(crate) fn batch_rosters(
+        &self,
+        ids: &[i64],
+        summary: bool,
+    ) -> DemoResult<HashMap<i64, BatchRosterSource>> {
+        read_library(&self.path, |connection| {
+            let Some(connection) = connection else {
+                return Ok(HashMap::new());
+            };
+            let mut query = if summary {
+                format!("SELECT {DEMO_COLUMNS}, {RESULT_COLUMNS} FROM demo_files d {RESULT_JOIN}")
+            } else {
+                format!("SELECT {DEMO_COLUMNS} FROM demo_files d")
+            };
+            query.push_str(" WHERE d.id IN (SELECT value FROM json_each(?1))");
+            let mut statement = connection.prepare(&query)?;
+            let mut rows = statement.query([json!(ids).to_string()])?;
+            let mut items = HashMap::new();
+            while let Some(row) = rows.next()? {
+                let item = if summary {
+                    full_row(row, true)?
+                } else {
+                    row_fields(row, &[])?
+                };
+                let id = item["id"].as_i64().expect("SQLite demo ID");
+                items.insert(id, item);
+            }
+            items
+                .into_iter()
+                .map(|(id, row)| {
+                    let roster = roster_source(connection, id, &row)?;
+                    Ok((
+                        id,
+                        BatchRosterSource {
+                            row: Value::Object(row),
+                            roster,
+                        },
+                    ))
+                })
+                .collect()
+        })
+    }
+}
+
+fn roster_source(connection: &Connection, id: i64, demo: &Object) -> DemoResult<RosterSource> {
+    let path = PathBuf::from(demo["path"].as_str().unwrap_or_default());
+    let cache = read_cache(connection, id, &path, demo["content_md5"].as_str())?;
+    let match_meta = json!({
+        "map_name":demo["map_name"], "total_rounds":demo["total_rounds"],
+        "team_a_score":demo["team_a_score"], "team_b_score":demo["team_b_score"],
+        "duration_mins":demo["duration_mins"], "match_date":demo["match_date"],
+    });
+    Ok(RosterSource {
+        path,
+        match_meta,
+        cache,
+    })
 }
 
 fn read_cache(

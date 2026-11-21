@@ -16,6 +16,8 @@ pub(super) enum DemoRoute {
     Stream,
     InspectPath,
     OpenLocal,
+    BatchSummary,
+    BatchResolve,
     RadarMap,
     UtilityMask,
     Detail,
@@ -35,6 +37,8 @@ impl DemoRoute {
             "/api/demos/stream" => Some(Self::Stream),
             "/api/demos/watch-path/inspect" => Some(Self::InspectPath),
             "/api/demo/open-local" => Some(Self::OpenLocal),
+            "/api/demos/batch-summary" => Some(Self::BatchSummary),
+            "/api/demos/batch-resolve-players" => Some(Self::BatchResolve),
             _ => {
                 for (prefix, route) in [
                     ("/api/demo/radar-map/", Self::RadarMap),
@@ -48,14 +52,7 @@ impl DemoRoute {
                     }
                 }
                 let rest = path.strip_prefix("/api/demos/")?;
-                if matches!(
-                    rest,
-                    "" | "scan"
-                        | "sync-match-times"
-                        | "batch-resolve-players"
-                        | "batch-summary"
-                        | "batch-ingest"
-                ) {
+                if matches!(rest, "" | "scan" | "sync-match-times" | "batch-ingest") {
                     return None;
                 }
                 match rest.split_once('/') {
