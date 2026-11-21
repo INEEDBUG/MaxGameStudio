@@ -453,19 +453,25 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
     let parallel = tracks[..base].iter().any(|track| {
         track["hidden"] == false && track["type"] == "video" && !list(&track["clips"]).is_empty()
     });
+    let outer_transition = |transition: &Value| {
+        transition["type"]
+            .as_str()
+            .is_some_and(|kind| !matches!(kind, "none" | "cut"))
+            && transition["duration_sec"].as_f64().unwrap_or_default() > 0.0
+    };
+    let background_transition = clips
+        .first()
+        .is_some_and(|clip| outer_transition(&clip["transition_in"]))
+        || clips
+            .last()
+            .is_some_and(|clip| outer_transition(&clip["transition_out"]));
     let effects = clips.iter().any(|clip| {
-        ["transition_in", "transition_out"].iter().any(|key| {
-            let effect = &clip[*key];
-            effect["type"]
-                .as_str()
-                .is_some_and(|kind| !matches!(kind, "none" | "cut"))
-                && effect["duration_sec"].as_f64().unwrap_or_default() > 0.0
-        }) || !clip["transform"].is_null()
+        !clip["transform"].is_null()
             || ["keyframes", "speed_keyframes", "audio_keyframes"]
                 .iter()
                 .any(|key| !list(&clip[*key]).is_empty())
     });
-    if parallel || effects {
+    if parallel || background_transition || effects {
         return Err(unavailable_effect());
     }
     Ok(())
@@ -722,7 +728,7 @@ async fn execute(
         })
         .collect();
     let base = settings
-        .render_base(&media, &clips, stage.path(), |progress, name| {
+        .render_base(&media, &clips, &stage, |progress, name| {
             job.update(progress, name)
         })
         .await?;

@@ -162,6 +162,10 @@ impl Plan {
 
         const GRAPH: &str = "audio-mix.ffgraph";
         const OUTPUT: &str = "audio-mix.mp4";
+        match stage.path().join(OUTPUT).symlink_metadata() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err(FAILED),
+        }
         OpenOptions::new()
             .write(true)
             .create_new(true)

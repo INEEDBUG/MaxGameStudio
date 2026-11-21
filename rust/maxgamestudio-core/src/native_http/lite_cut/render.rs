@@ -1,4 +1,5 @@
 pub(super) mod overlay;
+mod transition;
 
 use super::ffmpeg::{command, inspect};
 use super::project_schema::list;
@@ -9,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use tempfile::TempDir;
 use tokio::{process::Command, sync::watch, time::timeout};
 
 pub(super) const CLIP_FAILED: &str = "MONTAGE_CLIP_NORMALIZE_FAILED";
@@ -219,7 +221,7 @@ impl<'a> Timeline<'a> {
         &self,
         media: &Media<'_>,
         clips: &[Segment<'_>],
-        stage: &Path,
+        stage: &TempDir,
         mut progress: impl FnMut(f64, &'static str),
     ) -> Result<PathBuf, &'static str> {
         let mut files = Vec::new();
@@ -228,14 +230,33 @@ impl<'a> Timeline<'a> {
             let start = number(&segment.clip["timeline_start"]);
             if start > cursor + 0.001 {
                 let name = format!("gap_{index}.ts");
-                self.write_segment(media, None, start - cursor, &stage.join(&name))
+                self.write_segment(media, None, start - cursor, &stage.path().join(&name))
                     .await?;
                 files.push(name);
             }
-            let name = format!("clip_{index}.ts");
+            let mut name = format!("clip_{index}.ts");
+            let incoming = stage.path().join(&name);
             let duration = length(segment.clip);
-            self.write_segment(media, Some(segment), duration, &stage.join(&name))
+            self.write_segment(media, Some(segment), duration, &incoming)
                 .await?;
+            if let Some(boundary) = index.checked_sub(1).and_then(|previous| {
+                transition::Boundary::between(clips[previous].clip, segment.clip, self.fps)
+            }) {
+                let previous = stage
+                    .path()
+                    .join(files.last().expect("normalized previous clip"));
+                let transitioned = boundary
+                    .render(media, stage, index, &previous, &incoming, self.fast)
+                    .await?;
+                if transitioned != incoming {
+                    fs::remove_file(&incoming).map_err(|_| EXPORT_FAILED)?;
+                    name = transitioned
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .expect("generated transition filename")
+                        .to_owned();
+                }
+            }
             cursor = start + duration;
             files.push(name);
             progress(
@@ -243,6 +264,7 @@ impl<'a> Timeline<'a> {
                 "normalizing",
             );
         }
+        let stage = stage.path();
         let playlist: String = files
             .iter()
             .map(|name| format!("file '{name}'\n"))
