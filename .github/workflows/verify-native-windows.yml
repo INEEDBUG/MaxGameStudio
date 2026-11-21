@@ -123,12 +123,11 @@ jobs:
           git -c core.longpaths=true -C $source checkout --quiet --detach FETCH_HEAD
           Push-Location $source
           try { node .yarn/releases/yarn-4.9.1.cjs install --immutable } finally { Pop-Location }
-          $dist = Join-Path $env:RUNNER_TEMP 'league-renderer'
+          # Tauri reads a drive-letter path in frontendDist as a URL and skips embedding.
+          $dist = Join-Path (Get-Location).Path 'rust/league-desktop/dist'
           $renderer = @{ SourceDir=$source; Standalone=$true; Build=$true; NativeRendererOnly=$true; StandaloneVersion=$env:LEAGUE_VERSION; OutputDir=$dist }
           ./packaging/windows/stage-league-runtime.ps1 @renderer
-          $env:TAURI_CONFIG = @{
-            version=$env:LEAGUE_VERSION; build=@{frontendDist=$dist}; bundle=@{icon=@((Join-Path $dist 'league.ico'))}
-          } | ConvertTo-Json -Depth 5 -Compress
+          $env:TAURI_CONFIG = @{ version=$env:LEAGUE_VERSION } | ConvertTo-Json -Compress
           cargo build --release --locked --manifest-path rust/league-desktop/Cargo.toml --target x86_64-pc-windows-msvc
           $cargoRelease = 'rust/league-desktop/target/x86_64-pc-windows-msvc/release'
           $payload = Join-Path $env:RUNNER_TEMP 'league-native-payload'

@@ -836,3 +836,42 @@ pub(crate) fn run() -> tauri::Result<()> {
         })
         .run(tauri::generate_context!())
 }
+
+#[cfg(test)]
+mod packaged_assets {
+    use tauri::utils::{assets::AssetKey, config::FrontendDist};
+
+    #[test]
+    fn all_league_windows_embed_their_vue_entry_scripts() {
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+        assert!(
+            matches!(
+                context.config().build.frontend_dist,
+                Some(FrontendDist::Directory(_))
+            ),
+            "League must load a bundled renderer directory",
+        );
+        for page in ["main-window.html", "aux-window.html", "opgg-window.html"] {
+            let html = context
+                .assets()
+                .get(&AssetKey::from(page))
+                .unwrap_or_else(|| panic!("Missing bundled renderer page: {page}"));
+            let html = std::str::from_utf8(&html).expect("UTF-8 renderer HTML");
+            assert!(html.contains("id=\"app\""), "Missing Vue root in {page}");
+            let script = html
+                .split(" src=\"./assets/")
+                .find_map(|part| {
+                    let name = part.split_once('"')?.0;
+                    (name.ends_with(".js") && !name.contains(['<', '>', '/'])).then_some(name)
+                })
+                .unwrap_or_else(|| panic!("Missing bundled module in {page}"));
+            assert!(
+                context
+                    .assets()
+                    .get(&AssetKey::from(format!("assets/{script}")))
+                    .is_some_and(|asset| !asset.is_empty()),
+                "Could not resolve the entry script for {page}",
+            );
+        }
+    }
+}
