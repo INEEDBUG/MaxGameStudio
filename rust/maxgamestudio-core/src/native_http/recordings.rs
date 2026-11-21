@@ -160,7 +160,7 @@ async fn waveform(
     if let Some(cache) = cache {
         return json_reply(StatusCode::OK, cache.view(query, true));
     }
-    let Ok(_permit) = profile.audio_decode.try_acquire() else {
+    let Ok(_permit) = profile.media_process.try_acquire() else {
         return detail(
             StatusCode::SERVICE_UNAVAILABLE,
             "正在生成其他素材的波形，请稍后重试",

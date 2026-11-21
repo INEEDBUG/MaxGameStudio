@@ -1,3 +1,5 @@
+mod metadata;
+
 use super::read_table;
 use crate::{
     native_http::{
@@ -27,6 +29,7 @@ const TABLE: &str = "lite_cut_assets";
 pub(in crate::native_http) enum Route {
     List,
     Stream(String),
+    Metadata(String),
 }
 
 impl Route {
@@ -34,11 +37,18 @@ impl Route {
         if path == ASSET_PATH {
             return Some(Self::List);
         }
-        let id = path
+        let (id, action) = path
             .strip_prefix(ASSET_PATH)?
             .strip_prefix('/')?
-            .strip_suffix("/stream")?;
-        (!id.is_empty() && !id.contains('/')).then(|| Self::Stream(id.to_owned()))
+            .split_once('/')?;
+        if id.is_empty() {
+            return None;
+        }
+        match action {
+            "stream" => Some(Self::Stream(id.to_owned())),
+            "metadata" => Some(Self::Metadata(id.to_owned())),
+            _ => None,
+        }
     }
 }
 
@@ -78,6 +88,10 @@ pub(super) async fn respond(
             }
             response
         }
+        Route::Metadata(id) => match parse_path_integer(&id, "asset_id") {
+            Ok(id) => metadata::respond(profile, id, extended_request).await,
+            Err(errors) => validation_reply(errors),
+        },
     }
 }
 
@@ -116,6 +130,16 @@ fn read_page(
     limit: i64,
     offset: i64,
 ) -> rusqlite::Result<Vec<Value>> {
+    let select = asset_select(connection)?;
+    let mut query = connection.prepare(&format!(
+        "{select} WHERE ?1 IS NULL OR project_id = ?1 OR project_id IS NULL
+         ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
+    ))?;
+    let items = query.query_map(params![project_id, limit, offset], asset_json)?;
+    items.collect()
+}
+
+fn asset_select(connection: &Connection) -> rusqlite::Result<String> {
     let (has_width, has_height): (bool, bool) = connection.query_row(
         "SELECT coalesce(max(lower(name) = 'width'), 0), coalesce(max(lower(name) = 'height'), 0)
          FROM pragma_table_info('lite_cut_assets')",
@@ -124,14 +148,10 @@ fn read_page(
     )?;
     let width = if has_width { "width" } else { "NULL" };
     let height = if has_height { "height" } else { "NULL" };
-    let mut query = connection.prepare(&format!(
+    Ok(format!(
         "SELECT id, project_id, name, kind, mime_type, file_path, duration_sec,
-                {width}, {height}, created_at FROM lite_cut_assets
-         WHERE ?1 IS NULL OR project_id = ?1 OR project_id IS NULL
-         ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
-    ))?;
-    let items = query.query_map(params![project_id, limit, offset], asset_json)?;
-    items.collect()
+                {width}, {height}, created_at FROM lite_cut_assets"
+    ))
 }
 
 fn asset_json(row: &Row<'_>) -> rusqlite::Result<Value> {
@@ -182,11 +202,7 @@ fn load_media(profile: &ProfileState, id: i64) -> Result<(PathBuf, bool), AssetM
         .map_err(|_| AssetMediaError::Read)?
         .flatten()
         .ok_or(AssetMediaError::Missing)?;
-    let root = profile
-        .config
-        .lite_cut_assets_dir()
-        .and_then(|path| resolved_path(&path))
-        .map_err(|_| AssetMediaError::Read)?;
+    let root = asset_root(profile)?;
     let source = asset_path(&root, &raw)
         .map_err(|(status, message)| AssetMediaError::File(status, message))?;
     let font = kind.eq_ignore_ascii_case("font");
@@ -198,6 +214,14 @@ fn load_media(profile: &ProfileState, id: i64) -> Result<(PathBuf, bool), AssetM
         "尚未生成素材预览代理",
     ))?;
     Ok((ready.path, false))
+}
+
+fn asset_root(profile: &ProfileState) -> Result<PathBuf, AssetMediaError> {
+    profile
+        .config
+        .lite_cut_assets_dir()
+        .and_then(|path| resolved_path(&path))
+        .map_err(|_| AssetMediaError::Read)
 }
 
 fn asset_path(root: &Path, raw: &str) -> Result<PathBuf, (StatusCode, &'static str)> {

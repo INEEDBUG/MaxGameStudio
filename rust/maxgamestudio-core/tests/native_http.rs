@@ -984,9 +984,12 @@ fn streams_existing_lite_cut_media_and_its_saved_proxy_from_selected_storage() {
     let outside = scratch.path().join("elsewhere.mp4");
     let original = assets.join("original.mov");
     let proxy = assets.join("original.preview-alpha-v3.webm");
+    let image = assets.join("thumb.png");
+    let header = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\x01\x40\0\0\0\xb4";
     fs::write(&original, b"old motion source").unwrap();
     fs::write(&proxy, b"old preview cache").unwrap();
     fs::write(&outside, b"outside storage").unwrap();
+    fs::write(&image, header).unwrap();
 
     let db = scratch.path().join("cs2-insight.db");
     let connection = rusqlite::Connection::open(&db).unwrap();
@@ -1008,6 +1011,10 @@ fn streams_existing_lite_cut_media_and_its_saved_proxy_from_selected_storage() {
             rusqlite::params![id, project, name, path.to_str().unwrap()],
         ).unwrap();
     }
+    connection.execute(
+        "INSERT INTO lite_cut_assets VALUES(4, 8, '旧图', 'image', 'image/png', ?1, NULL, '2026-11-20')",
+        [image.to_str().unwrap()],
+    ).unwrap();
     let old_db = fs::read(&db).unwrap();
     let old_settings = fs::read(&settings).unwrap();
     let server = RunningServer::launch_with_config(
@@ -1060,10 +1067,39 @@ fn streams_existing_lite_cut_media_and_its_saved_proxy_from_selected_storage() {
     assert_eq!(response.headers["content-type"], "video/webm");
     assert_eq!(response.headers["content-range"], "bytes 4-10/17");
     assert_eq!(response.body, "preview");
+    let metadata = profile_request(
+        &server,
+        "GET",
+        "/api/lite-cut/assets/4/metadata",
+        &Value::Null,
+        true,
+    );
+    assert_eq!(
+        metadata,
+        (
+            200,
+            json!({
+                "id":4,"kind":"image","name":"旧图","extension":"PNG","mime_type":"image/png",
+                "duration_sec":null,"width":320,"height":180,"fps":null,"codec_name":null,"has_audio":null,
+            })
+        )
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "GET",
+            "/api/lite-cut/assets/3/metadata",
+            &Value::Null,
+            true
+        )
+        .0,
+        403,
+    );
     assert_eq!(fs::read(db).unwrap(), old_db);
     assert_eq!(fs::read(settings).unwrap(), old_settings);
     assert_eq!(fs::read(original).unwrap(), b"old motion source");
     assert_eq!(fs::read(proxy).unwrap(), b"old preview cache");
+    assert_eq!(fs::read(image).unwrap(), header);
     server.stop();
 }
 
