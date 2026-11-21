@@ -434,7 +434,7 @@ async fn route(
         Route::Gsi
         | Route::ReplayBinary
         | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
-        Route::Demos(DemoRoute::Remark) => "PATCH",
+        Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
         _ => "GET",
     };
     let config_update = matches!(route, Route::Config) && request.method() == Method::PUT;

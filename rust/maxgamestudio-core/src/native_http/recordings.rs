@@ -1,5 +1,5 @@
 use super::{
-    demo_body::{field_issue, model, text},
+    demo_body::{bounded_float, field_issue, model, text},
     demo_query::{parse_clip_page, parse_path_integer},
     detail, json_reply, model_body, profile_disk, profile_work, validation_reply, HttpResponse,
     ProfileState,
@@ -30,6 +30,7 @@ pub(super) enum Route {
     List,
     Storage,
     Stream,
+    Duration,
 }
 
 impl Route {
@@ -39,7 +40,9 @@ impl Route {
             "/api/recorded-clips/storage" => Some(Self::Storage),
             _ => {
                 let path = percent_decode_str(path).decode_utf8_lossy();
-                stream_id(&path).map(|_| Self::Stream)
+                clip_id(&path, "/stream")
+                    .map(|_| Self::Stream)
+                    .or_else(|| clip_id(&path, "/duration").map(|_| Self::Duration))
             }
         }
     }
@@ -106,7 +109,56 @@ pub(super) async fn respond(
             )
         }
         Route::Stream => stream(profile, request, extended_request).await,
+        Route::Duration => save_duration(profile, request).await,
     }
+}
+
+async fn save_duration(profile: &Arc<ProfileState>, request: Request<Incoming>) -> HttpResponse {
+    let decoded = percent_decode_str(request.uri().path()).decode_utf8_lossy();
+    let id = match parse_path_integer(
+        clip_id(&decoded, "/duration").expect("clip route"),
+        "clip_id",
+    ) {
+        Ok(id) => id,
+        Err(errors) => return validation_reply(errors),
+    };
+    let input = match model_body(request, "Recording duration request is too large").await {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let fields = match model(&input) {
+        Ok(fields) => fields,
+        Err(errors) => return validation_reply(errors),
+    };
+    let Some(seconds) = fields.get("duration_sec") else {
+        return validation_reply(vec![field_issue(
+            "duration_sec",
+            &input,
+            "missing",
+            "Field required",
+            None,
+        )]);
+    };
+    let seconds = match bounded_float(seconds, "duration_sec", 0.05, 86400.0, true) {
+        Ok(seconds) => seconds,
+        Err(issue) => return validation_reply(vec![issue]),
+    };
+    profile_disk(
+        profile,
+        move |profile| match recorded_clips::update_duration(
+            &profile.config.database_path(),
+            id,
+            seconds,
+        ) {
+            Ok(true) => json_reply(StatusCode::OK, json!({"id":id,"duration_sec":seconds})),
+            Ok(false) => missing_clip(id),
+            Err(error) => {
+                eprintln!("Recording duration update failed: {error}");
+                detail(StatusCode::INTERNAL_SERVER_ERROR, "无法保存录制视频时长")
+            }
+        },
+    )
+    .await
 }
 
 enum StorageChangeError {
@@ -238,8 +290,8 @@ fn same_directory(left: &str, right: &str) -> bool {
     }
 }
 
-fn stream_id(path: &str) -> Option<&str> {
-    let id = path.strip_prefix(CLIP_PREFIX)?.strip_suffix("/stream")?;
+fn clip_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+    let id = path.strip_prefix(CLIP_PREFIX)?.strip_suffix(suffix)?;
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
@@ -249,7 +301,8 @@ async fn stream(
     extended_request: &AtomicBool,
 ) -> HttpResponse {
     let decoded = percent_decode_str(request.uri().path()).decode_utf8_lossy();
-    let id = match parse_path_integer(stream_id(&decoded).expect("clip route"), "clip_id") {
+    let id = match parse_path_integer(clip_id(&decoded, "/stream").expect("clip route"), "clip_id")
+    {
         Ok(id) => id,
         Err(errors) => return validation_reply(errors),
     };
@@ -266,14 +319,7 @@ async fn stream(
     let file = match resolved {
         Ok(Ok(Some(Ok(file)))) => file,
         Ok(Ok(Some(Err((status, message))))) => return detail(status, message),
-        Ok(Ok(None)) => {
-            return json_reply(
-                StatusCode::NOT_FOUND,
-                json!({
-                    "detail":{"code":"MONTAGE_CLIP_NOT_FOUND","params":{"id":id.to_string()}},
-                }),
-            )
-        }
+        Ok(Ok(None)) => return missing_clip(id),
         _ => return read_error(),
     };
     // Direct browser seeking sends one range. A multipart request may fetch the
@@ -299,6 +345,13 @@ async fn stream(
 fn canonical_media(raw: &str) -> Option<PathBuf> {
     let path = expand_user(raw).ok()?.canonicalize().ok()?;
     path.is_file().then_some(path)
+}
+
+fn missing_clip(id: i64) -> HttpResponse {
+    json_reply(
+        StatusCode::NOT_FOUND,
+        json!({"detail":{"code":"MONTAGE_CLIP_NOT_FOUND","params":{"id":id.to_string()}}}),
+    )
 }
 
 fn read_error() -> HttpResponse {

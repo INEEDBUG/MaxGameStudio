@@ -598,6 +598,74 @@ fn demo_players_reuses_only_a_matching_legacy_roster_snapshot() {
 }
 
 #[test]
+fn saves_recorded_media_duration_in_pre_upgrade_database() {
+    let scratch = tempfile::tempdir().unwrap();
+    let db = scratch.path().join("cs2-insight.db");
+    let data = scratch.path().join("data");
+    let settings = scratch.path().join("settings.json");
+    let clip = scratch.path().join("old clip.mp4");
+    fs::write(&clip, b"existing recorded clip").unwrap();
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+         CREATE TABLE recorded_clips (id INTEGER PRIMARY KEY, clip_id TEXT, demo_path TEXT,
+           demo_filename TEXT, player_name TEXT, output_path TEXT, duration_sec REAL,
+           status TEXT, created_at TEXT);
+         INSERT INTO recorded_clips VALUES (2, 'other', 'old.dem', NULL, NULL, 'other.mp4',
+           99, 'ready', '2026-11-20');",
+        )
+        .unwrap();
+    connection.execute(
+        "INSERT INTO recorded_clips VALUES (1, 'first', 'old.dem', NULL, NULL, ?, NULL, 'ready', '2026-11-20')",
+        [clip.to_str().unwrap()],
+    ).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let route = "/api/recorded-clips/1/duration";
+    let duration = json!({"duration_sec":"17.5"});
+    assert_eq!(
+        profile_request(&server, "PATCH", route, &duration, false).0,
+        401
+    );
+    for input in [
+        json!({}),
+        json!({"duration_sec":0.05}),
+        json!({"duration_sec":86401}),
+    ] {
+        assert_eq!(
+            profile_request(&server, "PATCH", route, &input, true).0,
+            422
+        );
+    }
+    let (status, values) = profile_request(&server, "PATCH", route, &duration, true);
+    assert_eq!((status, values), (200, json!({"id":1,"duration_sec":17.5})));
+    let (status, rows) = profile_request(&server, "GET", "/api/recorded-clips", &Value::Null, true);
+    assert_eq!(status, 200);
+    assert_eq!(rows["items"][0]["duration_sec"], 99.0);
+    assert_eq!(rows["items"][1]["duration_sec"], 17.5);
+    let missing = profile_request(
+        &server,
+        "PATCH",
+        "/api/recorded-clips/99/duration",
+        &duration,
+        true,
+    );
+    assert_eq!(
+        missing,
+        (
+            404,
+            json!({"detail":{"code":"MONTAGE_CLIP_NOT_FOUND","params":{"id":"99"}}})
+        )
+    );
+    assert_eq!(fs::read(clip).unwrap(), b"existing recorded clip");
+    server.stop();
+}
+
+#[test]
 fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
     let scratch = tempfile::tempdir().unwrap();
     let path = scratch.path().join("cs2-insight.db");

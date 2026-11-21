@@ -1,4 +1,4 @@
-use super::demo_body::{field_issue, model, text};
+use super::demo_body::{bounded_float, field_issue, model, text};
 use crate::{replay_cache::ReplayRequest, wire_json::integer_from_text};
 use serde_json::{json, Map, Value};
 
@@ -134,44 +134,7 @@ impl ReplayFields<'_> {
         let Some(input) = self.object.get(name) else {
             return default;
         };
-        let issue =
-            |kind: &str, message: &str, context| field_issue(name, input, kind, message, context);
-        let parsed = match input {
-            Value::Number(value) => Ok(value.as_f64().unwrap_or(f64::INFINITY)),
-            Value::Bool(value) => Ok(f64::from(u8::from(*value))),
-            Value::String(text) => text.trim().replace('_', "").parse::<f64>().map_err(|_| {
-                issue(
-                    "float_parsing",
-                    "Input should be a valid number, unable to parse string as a number",
-                    None,
-                )
-            }),
-            _ => Err(issue("float_type", "Input should be a valid number", None)),
-        };
-        let result = parsed.and_then(|rate| {
-            if rate.is_nan() || rate > max {
-                Err(issue(
-                    "less_than_equal",
-                    &format!("Input should be less than or equal to {max}"),
-                    Some(json!({"le": max})),
-                ))
-            } else if exclusive && rate <= min {
-                Err(issue(
-                    "greater_than",
-                    &format!("Input should be greater than {min}"),
-                    Some(json!({"gt": min})),
-                ))
-            } else if rate < min {
-                Err(issue(
-                    "greater_than_equal",
-                    &format!("Input should be greater than or equal to {min}"),
-                    Some(json!({"ge": min})),
-                ))
-            } else {
-                Ok(rate)
-            }
-        });
-        match result {
+        match bounded_float(input, name, min, max, exclusive) {
             Ok(value) => value,
             Err(error) => {
                 self.errors.push(error);

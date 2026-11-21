@@ -1,4 +1,4 @@
-//! Read recorded clip records from the existing shared SQLite database.
+//! Read and update recorded clip metadata in the existing shared SQLite database.
 
 use rusqlite::{params, types::ValueRef, Connection, OpenFlags, Params, Row};
 use serde_json::{Map, Number, Value};
@@ -48,28 +48,39 @@ pub(crate) fn output_path(path: &Path, id: i64) -> Result<Option<String>, Record
         .map(|item| item["output_path"].as_str().unwrap_or_default().to_owned()))
 }
 
+pub(crate) fn update_duration(
+    path: &Path,
+    id: i64,
+    seconds: f64,
+) -> Result<bool, RecordedClipsError> {
+    if id <= 0 {
+        return Ok(false);
+    }
+    let Some(connection) = open_existing(path, OpenFlags::SQLITE_OPEN_READ_WRITE)? else {
+        return Ok(false);
+    };
+    let available: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'recorded_clips')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !available {
+        return Ok(false);
+    }
+    Ok(connection.execute(
+        "UPDATE recorded_clips SET duration_sec = ?1 WHERE id = ?2",
+        params![seconds, id],
+    )? > 0)
+}
+
 fn read(
     path: &Path,
     selection: &str,
     bindings: impl Params,
 ) -> Result<Vec<Value>, RecordedClipsError> {
-    match fs::metadata(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(RecordedClipsError::File(error)),
-        Ok(metadata) if !metadata.is_file() => {
-            return Err(RecordedClipsError::File(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "recorded clips database path must be a file",
-            )));
-        }
-        Ok(_) => {}
-    }
-
-    let mut connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    connection.busy_timeout(Duration::from_secs(5))?;
+    let Some(mut connection) = open_existing(path, OpenFlags::SQLITE_OPEN_READ_ONLY)? else {
+        return Ok(Vec::new());
+    };
     let transaction = connection.transaction()?;
     let has_metadata: Option<bool> = transaction.query_row(
         "SELECT max(lower(name) = 'clip_meta') FROM pragma_table_info('recorded_clips')",
@@ -93,6 +104,22 @@ fn read(
     Ok(items)
 }
 
+fn open_existing(path: &Path, mode: OpenFlags) -> Result<Option<Connection>, RecordedClipsError> {
+    match fs::metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(RecordedClipsError::File(error)),
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(RecordedClipsError::File(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "recorded clips database path must be a file",
+            )));
+        }
+        Ok(_) => {}
+    }
+    let connection = Connection::open_with_flags(path, mode | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    connection.busy_timeout(Duration::from_secs(5))?;
+    Ok(Some(connection))
+}
 /// Read a lexical path from the newest expanded record. Recordings can reside on an
 /// unplugged drive, so the directory and recording themselves need no filesystem check.
 pub(crate) fn recent_output_dir(path: &Path) -> Result<String, RecordedClipsError> {

@@ -131,3 +131,48 @@ pub(super) fn field_issue(
     }
     value
 }
+
+pub(super) fn bounded_float(
+    input: &Value,
+    field: &str,
+    min: f64,
+    max: f64,
+    exclusive_min: bool,
+) -> Result<f64, Value> {
+    let issue =
+        |kind: &str, message: &str, context| field_issue(field, input, kind, message, context);
+    let value = match input {
+        Value::Number(number) => number.as_f64().unwrap_or(f64::INFINITY),
+        Value::Bool(value) => f64::from(u8::from(*value)),
+        Value::String(text) => text.trim().replace('_', "").parse::<f64>().map_err(|_| {
+            issue(
+                "float_parsing",
+                "Input should be a valid number, unable to parse string as a number",
+                None,
+            )
+        })?,
+        _ => return Err(issue("float_type", "Input should be a valid number", None)),
+    };
+    if value.is_nan() || value > max {
+        return Err(issue(
+            "less_than_equal",
+            &format!("Input should be less than or equal to {max}"),
+            Some(json!({"le": max})),
+        ));
+    }
+    if exclusive_min && value <= min {
+        return Err(issue(
+            "greater_than",
+            &format!("Input should be greater than {min}"),
+            Some(json!({"gt": min})),
+        ));
+    }
+    if value < min {
+        return Err(issue(
+            "greater_than_equal",
+            &format!("Input should be greater than or equal to {min}"),
+            Some(json!({"ge": min})),
+        ));
+    }
+    Ok(value)
+}
