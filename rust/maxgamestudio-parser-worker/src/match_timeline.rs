@@ -1,5 +1,6 @@
 //! Build the named replay events from a single tick-ordered parser scan.
 
+mod damage_stats;
 mod match_facts;
 mod player_stats;
 mod round_score;
@@ -25,7 +26,7 @@ pub(crate) fn inspect(
     replay_io::with_demo_bytes(path, |bytes| {
         let huffman = create_huffman_lookup_table();
         let demo_end = end_tick(bytes)?;
-        let events = analysis_events::scan(bytes, &huffman)?;
+        let events = analysis_events::scan(bytes, &huffman, include_match_facts)?;
         let (start, freeze_ticks, windows) = windows(&events, tick_rate, demo_end);
         let mut rounds: Vec<_> = (0..windows.len()).map(|_| Timeline::default()).collect();
         for event in &events {

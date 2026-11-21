@@ -207,12 +207,7 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     for (stat, player) in stats.iter().zip(players) {
         assert_eq!(stat["steam_id64"], player["steam_id64"]);
         assert_eq!(stat["team_key"], player["team_key"]);
-        for field in [
-            "adr",
-            "utility_damage",
-            "utility_damage_per_round",
-            "average_equipment_value",
-        ] {
+        for field in ["average_equipment_value", "rating_pro_2", "rating_pro_3"] {
             assert!(
                 stat.get(field).is_none(),
                 "unavailable stat {field} must stay absent"
@@ -229,10 +224,27 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         ("trade_deaths", 9),
         ("clutch_attempts", 9),
         ("clutch_wins", 2),
+        ("utility_damage", 558),
     ] {
         let actual: i64 = stats.iter().map(|row| row[field].as_i64().unwrap()).sum();
         assert_eq!(actual, count, "legacy {field} total");
     }
+    let adr_tenths: i64 = stats
+        .iter()
+        .map(|row| (row["adr"].as_f64().unwrap() * 10.0).round() as i64)
+        .sum();
+    assert_eq!(adr_tenths, 7746);
+    let ranked = facts["ranked_player_ids"].as_array().unwrap();
+    assert_eq!(ranked.len(), stats.len());
+    let rank_ids: std::collections::HashSet<_> =
+        ranked.iter().map(|id| id.as_str().unwrap()).collect();
+    assert_eq!(
+        rank_ids,
+        stats
+            .iter()
+            .map(|row| row["steam_id64"].as_str().unwrap())
+            .collect()
+    );
 
     let mut scores = [0, 0];
     let rows = opt_in["rounds"].as_array_mut().unwrap();

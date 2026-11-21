@@ -1,6 +1,9 @@
 //! Player metrics from the deduplicated visible-round death ledger.
 
-use super::round_score::{RoundOutcome, TeamKey};
+use super::{
+    damage_stats::{self, DamageInput, Tally},
+    round_score::{RoundOutcome, TeamKey},
+};
 use crate::demo_inspection::player_name;
 use serde_json::{json, Value};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -19,6 +22,7 @@ pub(super) fn build(
     roster: &[Player<'_>],
     rounds: &[Value],
     outcomes: &[RoundOutcome],
+    damage: DamageInput<'_>,
 ) -> Vec<Value> {
     debug_assert_eq!(rounds.len(), outcomes.len());
     let mut by_name = HashMap::new();
@@ -53,11 +57,39 @@ pub(super) fn build(
             &mut totals,
         );
     }
+    let damage = damage_stats::accumulate(damage, &players, &by_name);
     players
         .into_iter()
         .zip(totals)
-        .map(|(player, totals)| totals.as_value(player, rounds.len()))
+        .zip(damage)
+        .map(|((player, totals), damage)| totals.as_value(player, damage, rounds.len()))
         .collect()
+}
+
+pub(super) fn ranked_player_ids(stats: &[Value]) -> Vec<&str> {
+    let mut ranked: Vec<_> = stats
+        .iter()
+        .map(|player| {
+            (
+                player["steam_id64"].as_str().expect("stat player identity"),
+                player["kills"].as_u64().expect("player kill count"),
+                player["adr"].as_f64().expect("player ADR"),
+                player["name"]
+                    .as_str()
+                    .expect("stat player name")
+                    .to_lowercase(),
+            )
+        })
+        .collect();
+    ranked.sort_by(
+        |(_, left_kills, left_adr, left_name), (_, right_kills, right_adr, right_name)| {
+            right_kills
+                .cmp(left_kills)
+                .then_with(|| right_adr.total_cmp(left_adr))
+                .then_with(|| left_name.cmp(right_name))
+        },
+    );
+    ranked.into_iter().map(|(id, _, _, _)| id).collect()
 }
 
 struct Death<'a> {
@@ -119,7 +151,7 @@ struct Totals {
 }
 
 impl Totals {
-    fn as_value(&self, player: &Player<'_>, rounds: usize) -> Value {
+    fn as_value(&self, player: &Player<'_>, damage: Tally, rounds: usize) -> Value {
         let percent = |n, d| rounded_ratio(n, d, 100.0, 1);
         let ratio = |n, d| rounded_ratio(n, d, 1.0, 2);
         json!({
@@ -127,6 +159,9 @@ impl Totals {
             "kills": self.kills, "deaths": self.deaths, "assists": self.assists,
             "kd": ratio(self.kills, self.deaths), "kpr": ratio(self.kills, rounds),
             "dpr": ratio(self.deaths, rounds), "kast": percent(self.kast_rounds, rounds),
+            "adr": rounded_ratio(damage.total, rounds, 1.0, 1),
+            "utility_damage": damage.utility,
+            "utility_damage_per_round": rounded_ratio(damage.utility, rounds, 1.0, 1),
             "headshots": self.headshots, "hs_percent": percent(self.headshots, self.kills),
             "first_kills": self.first_kills, "first_deaths": self.first_deaths,
             "opening_duel_win_rate": percent(self.first_kills, self.first_kills + self.first_deaths),
@@ -253,7 +288,7 @@ fn team_index(team: TeamKey) -> usize {
     }
 }
 
-fn clean_name(value: &str) -> &str {
+pub(super) fn clean_name(value: &str) -> &str {
     player_name(value)
         .filter(|name| !name.eq_ignore_ascii_case("nat") && !name.eq_ignore_ascii_case("none"))
         .unwrap_or_default()
@@ -308,7 +343,16 @@ mod tests {
             &[(1, Some(Side::T)), (2, Some(Side::Ct)), (3, None)],
         )
         .rounds;
-        let actual = build(&roster, &rounds, &outcomes);
+        let actual = build(
+            &roster,
+            &rounds,
+            &outcomes,
+            DamageInput {
+                events: &[],
+                match_start_tick: 0,
+                freeze_ticks: &[],
+            },
+        );
         let keys = [
             "kills",
             "deaths",
@@ -338,6 +382,17 @@ mod tests {
             assert_eq!(row["name"], player.name);
             assert_eq!(json!(keys.map(|key| row[key].clone())), expected);
         }
+    }
+
+    #[test]
+    fn ranking_keeps_kills_first_then_adr_then_folded_name() {
+        let stats = [
+            json!({"steam_id64":"1","name":"zion","kills":8,"adr":99.9}),
+            json!({"steam_id64":"2","name":"Bravo","kills":8,"adr":100.0}),
+            json!({"steam_id64":"3","name":"alpha","kills":8,"adr":100.0}),
+            json!({"steam_id64":"4","name":"Delta","kills":9,"adr":55.0}),
+        ];
+        assert_eq!(ranked_player_ids(&stats), ["4", "3", "2", "1"]);
     }
 
     fn death(

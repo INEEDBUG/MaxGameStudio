@@ -32,7 +32,11 @@ const EVENTS: &[&str] = &[
 ];
 
 /// The caller owns the returned events and assigns them to match windows.
-pub(crate) fn scan(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<GameEvent>, Failure> {
+pub(crate) fn scan(
+    bytes: &[u8],
+    huffman: &Vec<(u8, u8)>,
+    include_hurt: bool,
+) -> Result<Vec<GameEvent>, Failure> {
     let player_fields = [
         "X",
         "Y",
@@ -64,6 +68,9 @@ pub(crate) fn scan(bytes: &[u8], huffman: &Vec<(u8, u8)>) -> Result<Vec<GameEven
     inputs.wanted_player_props = player_props;
     inputs.wanted_other_props = other_props;
     inputs.wanted_events = EVENTS.iter().map(|name| (*name).to_owned()).collect();
+    if include_hurt {
+        inputs.wanted_events.push("player_hurt".to_owned());
+    }
 
     let mut events = Parser::new(inputs, ParsingMode::Normal)
         .parse_demo(bytes)
@@ -298,7 +305,7 @@ fn steamid(value: &Variant) -> Option<u64> {
     (value > 0).then_some(value)
 }
 
-fn normalized_weapon(event: &GameEvent) -> String {
+pub(crate) fn normalized_weapon(event: &GameEvent) -> String {
     let mut weapon = field(event, "weapon")
         .and_then(clean_text)
         .unwrap_or_default()
@@ -431,7 +438,7 @@ mod tests {
             std::env::var_os("MGS_ANALYSIS_EVENTS_FIXTURE").expect("public demo fixture path"),
         );
         let huffman = create_huffman_lookup_table();
-        let events = replay_io::with_demo_bytes(&path, |bytes| scan(bytes, &huffman))
+        let events = replay_io::with_demo_bytes(&path, |bytes| scan(bytes, &huffman, false))
             .expect("pinned public demo scan");
         let start = match_start_tick(&events);
         assert_eq!(start, 1761);

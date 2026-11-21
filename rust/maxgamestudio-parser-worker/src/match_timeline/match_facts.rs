@@ -1,13 +1,14 @@
 //! Team and score facts derived from the same selected-tick parser sample.
 
 use super::{
+    damage_stats::DamageInput,
     player_stats::{self, Player},
     round_score::{self, RoundOutcome, Side, TeamKey},
 };
 use crate::{
     demo_inspection::{parse_team_ticks, player_name},
     header_fields,
-    round_windows::{match_summary, RoundWindow},
+    round_windows::{match_start_tick, match_summary, RoundWindow},
     Failure,
 };
 use parser::second_pass::game_events::GameEvent;
@@ -91,7 +92,18 @@ pub(super) fn collect(
             })
         })
         .collect();
-    let player_stats = player_stats::build(&players, rounds, &scores.rounds);
+    let visible_freeze_ticks: Vec<_> = visible.iter().map(|round| round.freeze_end_tick).collect();
+    let player_stats = player_stats::build(
+        &players,
+        rounds,
+        &scores.rounds,
+        DamageInput {
+            events,
+            match_start_tick: match_start_tick(events),
+            freeze_ticks: &visible_freeze_ticks,
+        },
+    );
+    let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);
     let players: Vec<_> = players
         .iter()
         .map(|player| {
@@ -124,6 +136,7 @@ pub(super) fn collect(
         },
         "players": players,
         "player_stats": player_stats,
+        "ranked_player_ids": ranked_player_ids,
     });
     Ok((facts, scores.rounds))
 }
