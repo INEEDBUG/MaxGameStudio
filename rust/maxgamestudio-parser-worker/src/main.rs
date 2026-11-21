@@ -1,10 +1,12 @@
 //! One request per process. Stdout contains the protocol reply and stderr records failures.
 
+mod analysis_events;
 #[path = "../../shared/case_fold.rs"]
 mod case_fold;
 #[path = "../../shared/demo_boundary.rs"]
 mod demo_boundary;
 mod demo_inspection;
+mod match_timeline;
 mod replay;
 mod replay_effect_rows;
 mod replay_io;
@@ -58,6 +60,10 @@ enum Action {
         tick_rate: f64,
         #[serde(default)]
         include_match_summary: bool,
+    },
+    InspectMatchTimeline {
+        path: PathBuf,
+        tick_rate: f64,
     },
 }
 
@@ -172,7 +178,7 @@ fn run(input: impl Read) -> Result<Value, Failure> {
     }
     match request.action {
         Action::Probe => Ok(json!({
-            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows"],
+            "actions": ["probe", "inspect_header", "write_replay_parquet", "extract_replay_effect_rows", "inspect_demo", "inspect_roster", "inspect_round_windows", "inspect_match_timeline"],
             "upstream_tag": "v0.41.4"
         })),
         Action::InspectHeader { path } => inspect_header(&path),
@@ -185,6 +191,9 @@ fn run(input: impl Read) -> Result<Value, Failure> {
             tick_rate,
             include_match_summary,
         } => round_windows::inspect(&path, tick_rate, include_match_summary),
+        Action::InspectMatchTimeline { path, tick_rate } => {
+            match_timeline::inspect(&path, tick_rate)
+        }
     }
 }
 

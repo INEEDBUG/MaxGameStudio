@@ -17,12 +17,12 @@ use std::{
 const ROUNDS_PLAYED: &str = "total_rounds_played";
 
 #[derive(Debug, PartialEq, Serialize)]
-struct RoundWindow {
+pub(crate) struct RoundWindow {
     round_number: i64,
-    start_tick: i64,
-    freeze_end_tick: i64,
+    pub(crate) start_tick: i64,
+    pub(crate) freeze_end_tick: i64,
     round_end_tick: i64,
-    end_tick: i64,
+    pub(crate) end_tick: i64,
     winner_side: Option<i64>,
     end_reason: Option<String>,
     record_end_tick: i64,
@@ -59,7 +59,7 @@ pub(crate) fn inspect(
         if include_match_summary {
             inputs.wanted_events.push("player_death".to_owned());
         }
-        let events = match Parser::new(inputs, ParsingMode::Normal).parse_demo(bytes) {
+        let mut events = match Parser::new(inputs, ParsingMode::Normal).parse_demo(bytes) {
             Ok(output) => output.game_events,
             Err(_) if include_match_summary && demo_end_tick == 0 => Vec::new(),
             Err(_) => return Err(Failure::replay_parse("could not read round events")),
@@ -67,7 +67,8 @@ pub(crate) fn inspect(
         let summary = include_match_summary
             .then(|| match_summary::build(bytes, &huffman, demo_end_tick, &events))
             .transpose()?;
-        let (start, rounds) = windows(events, tick_rate, demo_end_tick);
+        events.sort_by_key(|event| event.tick);
+        let (start, rounds) = windows(&events, tick_rate, demo_end_tick);
         let mut result =
             json!({"match_start_tick":start, "demo_end_tick":demo_end_tick, "rounds":rounds});
         if let Some(summary) = summary {
@@ -77,9 +78,13 @@ pub(crate) fn inspect(
     })
 }
 
-fn windows(mut events: Vec<GameEvent>, tick_rate: f64, demo_end: i64) -> (i64, Vec<RoundWindow>) {
-    events.sort_by_key(|event| event.tick);
-    let start = i64::from(match_start_tick(&events));
+/// Build the playback windows from a tick-ordered match event scan.
+pub(crate) fn windows(
+    events: &[GameEvent],
+    tick_rate: f64,
+    demo_end: i64,
+) -> (i64, Vec<RoundWindow>) {
+    let start = i64::from(match_start_tick(events));
     let mut freezetime = BTreeMap::<i64, i64>::new();
     let mut restarts = BTreeSet::new();
     let mut decisions = BTreeMap::<i64, &GameEvent>::new();
@@ -544,7 +549,7 @@ mod tests {
 
     #[test]
     fn excludes_restarts_and_keeps_visible_round_tails_within_the_demo() {
-        let events = vec![
+        let mut events = vec![
             event("round_announce_match_start", 20, vec![]),
             event("round_announce_match_start", 5, vec![]),
             event("round_freeze_end", 10, vec![]),
@@ -576,7 +581,8 @@ mod tests {
                 ],
             ),
         ];
-        let (start, rounds) = windows(events, 64.0, 150);
+        events.sort_by_key(|event| event.tick);
+        let (start, rounds) = windows(&events, 64.0, 150);
         assert_eq!(start, 20);
         assert_eq!(rounds.len(), 2);
         assert_eq!(
