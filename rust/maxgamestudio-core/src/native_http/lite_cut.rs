@@ -1,8 +1,11 @@
 mod assets;
+mod export_job;
 mod export_sources;
 mod exports;
+mod ffmpeg;
 mod project_schema;
 mod project_store;
+mod render;
 
 use super::{
     demo_body::{model, text},
@@ -20,6 +23,9 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
+use tokio::sync::watch;
+
+pub(super) use export_job::Exports as ActiveExports;
 
 const PROJECTS_PATH: &str = "/api/lite-cut/projects";
 const EXPORTS_PATH: &str = "/api/lite-cut/exports";
@@ -32,8 +38,10 @@ pub(super) enum Route {
     Restore { project: String, snapshot: String },
     Assets(assets::Route),
     ValidateAssets,
+    StartExport { background: bool },
     ExportList,
     Export(String),
+    CancelExport(String),
 }
 
 impl Route {
@@ -43,6 +51,11 @@ impl Route {
         }
         if path == "/api/lite-cut/assets/validate" {
             return Some(Self::ValidateAssets);
+        }
+        if path == "/api/lite-cut/export/start" || path == "/api/lite-cut/export" {
+            return Some(Self::StartExport {
+                background: path.ends_with("/start"),
+            });
         }
         let path = percent_decode_str(path).decode_utf8_lossy();
         if let Some(route) = assets::Route::from_path(&path) {
@@ -55,7 +68,11 @@ impl Route {
             .strip_prefix(EXPORTS_PATH)
             .and_then(|tail| tail.strip_prefix('/'))
         {
-            return (!id.is_empty() && !id.contains('/')).then(|| Self::Export(id.to_owned()));
+            return match id.split_once('/') {
+                Some((id, "cancel")) if !id.is_empty() => Some(Self::CancelExport(id.to_owned())),
+                None if !id.is_empty() => Some(Self::Export(id.to_owned())),
+                _ => None,
+            };
         }
         let tail = path.strip_prefix(PROJECTS_PATH)?.strip_prefix('/')?;
         let mut parts = tail.split('/');
@@ -84,7 +101,10 @@ impl Route {
         match self {
             Self::List => "GET, POST",
             Self::Project(_) => "GET, PATCH",
-            Self::Restore { .. } | Self::ValidateAssets => "POST",
+            Self::Restore { .. }
+            | Self::ValidateAssets
+            | Self::StartExport { .. }
+            | Self::CancelExport(_) => "POST",
             _ => "GET",
         }
     }
@@ -95,6 +115,7 @@ pub(super) async fn respond(
     route: Route,
     request: Request<Incoming>,
     extended_request: &AtomicBool,
+    shutdown: watch::Receiver<bool>,
 ) -> HttpResponse {
     let uri = request.uri();
     let selection = match route {
@@ -131,6 +152,10 @@ pub(super) async fn respond(
             return assets::respond(profile, route, request, extended_request).await
         }
         Route::ValidateAssets => return export_sources::validate(profile, request).await,
+        Route::StartExport { background } => {
+            return export_job::start(profile, request, background, shutdown, extended_request)
+                .await;
+        }
         Route::ExportList => {
             let page = parse_project_page(uri.query().unwrap_or_default(), 20, 100);
             let (project_id, limit, offset) = match page {
@@ -149,6 +174,10 @@ pub(super) async fn respond(
         }
         Route::Export(id) => match parse_path_integer(&id, "export_id") {
             Ok(id) => return exports::respond(profile, exports::Read::One(id)).await,
+            Err(errors) => return validation_reply(errors),
+        },
+        Route::CancelExport(id) => match parse_path_integer(&id, "export_id") {
+            Ok(id) => return export_job::cancel(profile, id).await,
             Err(errors) => return validation_reply(errors),
         },
     };

@@ -19,7 +19,16 @@ pub(super) enum Read {
 pub(super) async fn respond(profile: &Arc<ProfileState>, selection: Read) -> HttpResponse {
     profile_disk(profile, move |profile| {
         match selection.read(&profile.config.database_path()) {
-            Ok(Some(value)) => json_reply(StatusCode::OK, value),
+            Ok(Some(mut value)) => {
+                if let Some(items) = value.get_mut("items").and_then(Value::as_array_mut) {
+                    for item in items {
+                        profile.lite_cut_exports.apply_progress(item);
+                    }
+                } else {
+                    profile.lite_cut_exports.apply_progress(&mut value);
+                }
+                json_reply(StatusCode::OK, value)
+            }
             Ok(None) => json_reply(
                 StatusCode::NOT_FOUND,
                 json!({"detail":{"code":"LITECUT_EXPORT_NOT_FOUND"}}),
@@ -31,7 +40,7 @@ pub(super) async fn respond(profile: &Arc<ProfileState>, selection: Read) -> Htt
 }
 
 impl Read {
-    fn read(self, path: &Path) -> Result<Option<Value>, Box<dyn Error>> {
+    pub(super) fn read(self, path: &Path) -> Result<Option<Value>, Box<dyn Error>> {
         match self {
             Self::One(id) => Ok(read_table(path, TABLE, |db| {
                 db.query_row(

@@ -71,14 +71,7 @@ pub(super) fn get(db: &Connection, id: i64) -> rusqlite::Result<Option<Value>> {
 }
 
 fn create(db: &Connection, name: &str, body: &Value) -> Result<Outcome, Box<dyn Error>> {
-    db.execute_batch(
-        "CREATE TABLE IF NOT EXISTS lite_cut_projects(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '',
-            body_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_lite_cut_projects_updated
-         ON lite_cut_projects(updated_at DESC);",
-    )?;
+    ensure_projects(db)?;
     let name = unique_name(db, name, None)?;
     let now = timestamp(db)?;
     db.execute(
@@ -86,6 +79,17 @@ fn create(db: &Connection, name: &str, body: &Value) -> Result<Outcome, Box<dyn 
         params![name, body.to_string(), now],
     )?;
     updated_project(db, db.last_insert_rowid())
+}
+
+pub(super) fn ensure_projects(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS lite_cut_projects(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '',
+            body_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_lite_cut_projects_updated
+         ON lite_cut_projects(updated_at DESC);",
+    )
 }
 
 fn update(
@@ -177,7 +181,7 @@ fn updated_project(db: &Connection, id: i64) -> Result<Outcome, Box<dyn Error>> 
     Ok(Outcome::Saved(record))
 }
 
-fn snapshot(
+pub(super) fn snapshot(
     db: &Connection,
     id: i64,
     name: &str,
@@ -244,7 +248,7 @@ fn unique_name(db: &Connection, name: &str, exclude: Option<i64>) -> rusqlite::R
     unreachable!("a finite project catalogue always has an available name")
 }
 
-fn timestamp(db: &Connection) -> Result<String, Box<dyn Error>> {
+pub(super) fn timestamp(db: &Connection) -> Result<String, Box<dyn Error>> {
     let elapsed = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let second: String = db.query_row(
         "SELECT strftime('%Y-%m-%dT%H:%M:%S', ?1, 'unixepoch')",

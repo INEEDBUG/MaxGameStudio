@@ -75,9 +75,7 @@ impl<'a> Sources<'a> {
     fn from_project(project: &'a Value) -> Self {
         let mut sources = Self::default();
         let tracks = list(&project["tracks"]);
-        let base = tracks
-            .iter()
-            .rposition(|track| visible_video(track) && list(&track["clips"]).iter().any(main_clip));
+        let base = base_track(tracks);
         if let Some(base) = base {
             let base = &tracks[base];
             let mut clips: Vec<_> = list(&base["clips"])
@@ -189,11 +187,17 @@ impl<'a> Sources<'a> {
     }
 }
 
+pub(super) fn base_track(tracks: &[Value]) -> Option<usize> {
+    tracks
+        .iter()
+        .rposition(|track| visible_video(track) && list(&track["clips"]).iter().any(main_clip))
+}
+
 fn visible_video(track: &Value) -> bool {
     track["type"] == "video" && track["hidden"] == false
 }
 
-fn main_clip(clip: &Value) -> bool {
+pub(super) fn main_clip(clip: &Value) -> bool {
     if clip["source_type"] == "file" {
         has_extension(clip, VIDEO_EXTENSIONS)
     } else {
@@ -216,11 +220,11 @@ fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default().trim()
 }
 
-fn media_path(raw: &str) -> PathBuf {
+pub(super) fn media_path(raw: &str) -> PathBuf {
     expand_user(raw).unwrap_or_else(|_| PathBuf::from(raw))
 }
 
-fn sort_timeline(clips: &mut [&Value]) {
+pub(super) fn sort_timeline(clips: &mut [&Value]) {
     let time = |clip: &Value| {
         clip["timeline_start"]
             .as_f64()

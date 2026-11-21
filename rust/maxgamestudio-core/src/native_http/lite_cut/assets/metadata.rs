@@ -1,3 +1,4 @@
+use super::super::ffmpeg::{find_ffprobe, inspect};
 use super::{
     asset_json, asset_path, asset_root, asset_select, read_error, read_table, AssetMediaError,
     TABLE,
@@ -7,18 +8,14 @@ use hyper::StatusCode;
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use std::{
-    env,
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
 };
-use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 pub(super) async fn respond(
     profile: &Arc<ProfileState>,
@@ -33,9 +30,7 @@ pub(super) async fn respond(
     if let Some(ffprobe) = source.ffprobe {
         if let Ok(_permit) = profile.media_process.try_acquire() {
             extended_request.store(true, Ordering::Relaxed);
-            if let Ok(Ok(info)) =
-                timeout(Duration::from_secs(12), inspect(&ffprobe, &source.file)).await
-            {
+            if let Ok(info) = inspect(&ffprobe, &source.file, None).await {
                 apply_probe(&mut source.response, &info);
             }
         }
@@ -104,68 +99,6 @@ fn load(profile: &ProfileState, id: i64) -> Result<Metadata, AssetMediaError> {
         file,
         ffprobe,
     })
-}
-
-fn find_ffprobe(ffmpeg: &Path) -> Option<PathBuf> {
-    let name = if cfg!(windows) {
-        "ffprobe.exe"
-    } else {
-        "ffprobe"
-    };
-    let adjacent = ffmpeg.with_file_name(name);
-    if adjacent.is_file() {
-        return adjacent.canonicalize().ok();
-    }
-    env::var_os("PATH").and_then(|path| {
-        env::split_paths(&path)
-            .filter(|directory| directory.is_absolute())
-            .map(|directory| directory.join(name))
-            .find(|path| path.is_file())
-            .and_then(|path| path.canonicalize().ok())
-    })
-}
-
-async fn inspect(ffprobe: &Path, file: &Path) -> io::Result<Value> {
-    const MAX_METADATA: u64 = 128 * 1024;
-    let mut command = Command::new(ffprobe);
-    command
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration:stream=codec_type,codec_name,width,height,r_frame_rate",
-            "-of",
-            "json",
-        ])
-        .arg(file)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-    let mut child = command.spawn()?;
-    let mut bytes = Vec::new();
-    child
-        .stdout
-        .take()
-        .expect("FFprobe stdout")
-        .take(MAX_METADATA + 1)
-        .read_to_end(&mut bytes)
-        .await?;
-    if bytes.len() as u64 > MAX_METADATA || !child.wait().await?.success() {
-        return Err(io::Error::other(
-            "FFprobe did not return bounded media metadata",
-        ));
-    }
-    let data: Value = serde_json::from_slice(&bytes)?;
-    if !data.is_object() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "FFprobe returned an invalid document",
-        ));
-    }
-    Ok(data)
 }
 
 fn apply_probe(reply: &mut Value, info: &Value) {

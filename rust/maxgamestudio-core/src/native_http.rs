@@ -114,7 +114,8 @@ struct ProfileState {
     parser_worker: Option<ParserWorker>,
     demo_parser: Arc<Semaphore>,
     obs_writes: Semaphore,
-    media_process: Semaphore,
+    media_process: Arc<Semaphore>,
+    lite_cut_exports: lite_cut::ActiveExports,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
 }
@@ -151,7 +152,8 @@ impl NativeHttpServer {
             parser_worker,
             demo_parser: Arc::new(Semaphore::new(1)),
             obs_writes: Semaphore::new(1),
-            media_process: Semaphore::new(1),
+            media_process: Arc::new(Semaphore::new(1)),
+            lite_cut_exports: lite_cut::ActiveExports::default(),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir
@@ -219,6 +221,9 @@ impl NativeHttpServer {
         let drain = async { while connections.join_next().await.is_some() {} };
         if timeout(DRAIN_LIMIT, drain).await.is_err() {
             connections.shutdown().await;
+        }
+        if let Some(profile) = &self.state.profile {
+            profile.lite_cut_exports.shutdown().await;
         }
         if let Some(publisher) = publisher {
             let _ = publisher.await;
@@ -456,7 +461,11 @@ async fn route(
         | Route::ObsSetup(_)
         | Route::RecordingPlan
         | Route::LiteCut(lite_cut::Route::Restore { .. })
-        | Route::LiteCut(lite_cut::Route::ValidateAssets)
+        | Route::LiteCut(
+            lite_cut::Route::ValidateAssets
+            | lite_cut::Route::StartExport { .. }
+            | lite_cut::Route::CancelExport(_),
+        )
         | Route::Demos(
             DemoRoute::InspectPath
             | DemoRoute::OpenLocal
@@ -533,6 +542,7 @@ async fn route(
                 route,
                 request,
                 extended_request,
+                shutdown,
             )
             .await
         }
