@@ -1,6 +1,9 @@
 //! Team and score facts derived from the same selected-tick parser sample.
 
-use super::round_score::{self, RoundOutcome, Side, TeamKey};
+use super::{
+    player_stats::{self, Player},
+    round_score::{self, RoundOutcome, Side, TeamKey},
+};
 use crate::{
     demo_inspection::{parse_team_ticks, player_name},
     header_fields,
@@ -18,6 +21,7 @@ pub(super) fn collect(
     demo_end_tick: i64,
     freeze_ticks: &BTreeMap<i64, i64>,
     visible: &[RoundWindow],
+    rounds: &[Value],
 ) -> Result<(Value, Vec<RoundOutcome>), Failure> {
     let mut ticks = match_summary::summary_ticks(events, demo_end_tick);
     ticks.extend(freeze_ticks.values().map(|&tick| tick as i32));
@@ -79,12 +83,24 @@ pub(super) fn collect(
     let players: Vec<_> = roster
         .values()
         .filter_map(|(steamid, name, group)| {
-            Some(json!({
-                "steam_id64": steamid,
-                "name": (*name)?,
-                "final_group": group,
-                "team_key": scores.team_key(*group)?.label(),
-            }))
+            Some(Player {
+                steam_id64: steamid,
+                name: (*name)?,
+                final_group: *group,
+                team_key: scores.team_key(*group)?,
+            })
+        })
+        .collect();
+    let player_stats = player_stats::build(&players, rounds, &scores.rounds);
+    let players: Vec<_> = players
+        .iter()
+        .map(|player| {
+            json!({
+                "steam_id64": player.steam_id64,
+                "name": player.name,
+                "final_group": player.final_group,
+                "team_key": player.team_key.label(),
+            })
         })
         .collect();
     let facts = json!({
@@ -107,6 +123,7 @@ pub(super) fn collect(
             "regulation_end_round": scores.regulation_end_round,
         },
         "players": players,
+        "player_stats": player_stats,
     });
     Ok((facts, scores.rounds))
 }

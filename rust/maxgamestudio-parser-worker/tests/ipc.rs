@@ -202,6 +202,38 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
                 .is_some_and(|id| id.starts_with("7656"))
     }));
 
+    let stats = facts["player_stats"].as_array().unwrap();
+    assert_eq!(stats.len(), 10);
+    for (stat, player) in stats.iter().zip(players) {
+        assert_eq!(stat["steam_id64"], player["steam_id64"]);
+        assert_eq!(stat["team_key"], player["team_key"]);
+        for field in [
+            "adr",
+            "utility_damage",
+            "utility_damage_per_round",
+            "average_equipment_value",
+        ] {
+            assert!(
+                stat.get(field).is_none(),
+                "unavailable stat {field} must stay absent"
+            );
+        }
+    }
+    for (field, count) in [
+        ("kills", 64),
+        ("deaths", 64),
+        ("assists", 18),
+        ("first_kills", 8),
+        ("first_deaths", 8),
+        ("trade_kills", 9),
+        ("trade_deaths", 9),
+        ("clutch_attempts", 9),
+        ("clutch_wins", 2),
+    ] {
+        let actual: i64 = stats.iter().map(|row| row[field].as_i64().unwrap()).sum();
+        assert_eq!(actual, count, "legacy {field} total");
+    }
+
     let mut scores = [0, 0];
     let rows = opt_in["rounds"].as_array_mut().unwrap();
     assert_eq!(rows.len(), 9);

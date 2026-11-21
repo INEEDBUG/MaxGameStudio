@@ -1,6 +1,7 @@
 //! Build the named replay events from a single tick-ordered parser scan.
 
 mod match_facts;
+mod player_stats;
 mod round_score;
 
 use crate::{
@@ -49,8 +50,15 @@ pub(crate) fn inspect(
             .collect::<Vec<_>>();
         let mut result = json!({"match_start_tick":start,"demo_end_tick":demo_end});
         if include_match_facts {
-            let (facts, round_scores) =
-                match_facts::collect(bytes, &huffman, &events, demo_end, &freeze_ticks, &windows)?;
+            let (facts, round_scores) = match_facts::collect(
+                bytes,
+                &huffman,
+                &events,
+                demo_end,
+                &freeze_ticks,
+                &windows,
+                &rounds,
+            )?;
             match_facts::add_round_scores(&mut rounds, round_scores);
             result["match_facts"] = facts;
         }
