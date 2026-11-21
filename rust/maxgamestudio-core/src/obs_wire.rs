@@ -11,11 +11,28 @@ use std::{io, net::Ipv6Addr};
 use tokio::net::TcpStream;
 use tokio_websockets::{ClientBuilder, Limits, Message, WebSocketStream};
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq)]
 pub(crate) struct ObsSettings {
     host: String,
     port: u16,
     password: String,
+}
+
+impl ObsSettings {
+    pub(crate) fn with_check_input(&self, host: &str, port: u16, password: &str) -> Self {
+        let host = host.trim();
+        let password = password.trim();
+        Self {
+            host: if host.is_empty() { &self.host } else { host }.to_owned(),
+            port,
+            password: if password.is_empty() || password.starts_with("****") {
+                &self.password
+            } else {
+                password
+            }
+            .to_owned(),
+        }
+    }
 }
 
 pub(crate) struct ObsRpc {

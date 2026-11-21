@@ -347,7 +347,7 @@ fn backup_account(entry: &Value) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn cs2_running() -> bool {
+pub(crate) fn process_is_running(executable: &str) -> bool {
     use std::{
         mem::size_of,
         os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
@@ -378,7 +378,7 @@ fn cs2_running() -> bool {
             .iter()
             .position(|&value| value == 0)
             .unwrap_or(entry.szExeFile.len());
-        if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case("cs2.exe") {
+        if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case(executable) {
             return true;
         }
         found = unsafe { Process32NextW(handle, &mut entry) };
@@ -387,8 +387,12 @@ fn cs2_running() -> bool {
 }
 
 #[cfg(not(windows))]
-fn cs2_running() -> bool {
+pub(crate) fn process_is_running(_: &str) -> bool {
     false
+}
+
+fn cs2_running() -> bool {
+    process_is_running("cs2.exe")
 }
 
 pub(crate) fn data_dir_info(data: &Path) -> io::Result<Value> {

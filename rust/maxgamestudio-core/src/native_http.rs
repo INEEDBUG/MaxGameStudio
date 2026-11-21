@@ -9,6 +9,7 @@ mod demo_roster;
 mod demo_watch;
 mod lite_cut;
 mod media_stream;
+mod obs_setup;
 mod recordings;
 mod replay_body;
 
@@ -366,6 +367,7 @@ enum Route {
     ReplayCache,
     Recordings(recordings::Route),
     LiteCut(lite_cut::Route),
+    ObsSetup(obs_setup::Route),
 }
 
 impl Route {
@@ -385,7 +387,8 @@ impl Route {
             _ if has_profile => DemoRoute::from_path(path)
                 .map(Self::Demos)
                 .or_else(|| recordings::Route::from_path(path).map(Self::Recordings))
-                .or_else(|| lite_cut::Route::from_path(path).map(Self::LiteCut)),
+                .or_else(|| lite_cut::Route::from_path(path).map(Self::LiteCut))
+                .or_else(|| obs_setup::Route::from_path(path).map(Self::ObsSetup)),
             _ => None,
         }
     }
@@ -439,6 +442,7 @@ async fn route(
     let allowed = match route {
         Route::Gsi
         | Route::ReplayBinary
+        | Route::ObsSetup(_)
         | Route::Demos(DemoRoute::InspectPath | DemoRoute::OpenLocal) => "POST",
         Route::Demos(DemoRoute::Remark) | Route::Recordings(recordings::Route::Duration) => "PATCH",
         _ => "GET",
@@ -492,6 +496,15 @@ async fn route(
         }
         Route::LiteCut(route) => {
             lite_cut::respond(
+                state.profile.as_ref().expect("profile route"),
+                route,
+                request,
+                extended_request,
+            )
+            .await
+        }
+        Route::ObsSetup(route) => {
+            obs_setup::respond(
                 state.profile.as_ref().expect("profile route"),
                 route,
                 request,
@@ -868,19 +881,28 @@ async fn model_body(
     request: Request<Incoming>,
     too_large: &str,
 ) -> Result<Value, Box<HttpResponse>> {
+    optional_model_body(request, too_large)
+        .await?
+        .ok_or_else(|| Box::new(missing_model_body()))
+}
+
+async fn optional_model_body(
+    request: Request<Incoming>,
+    too_large: &str,
+) -> Result<Option<Value>, Box<HttpResponse>> {
     let is_json = is_json(request.headers().get(CONTENT_TYPE));
     let bytes = read_body(request.into_body(), too_large).await?;
     if bytes.is_empty() {
-        return Err(Box::new(missing_model_body()));
+        return Ok(None);
     }
     let text = std::str::from_utf8(&bytes).map_err(|_| Box::new(invalid_body()))?;
     if !is_json {
-        return Ok(json!(text));
+        return Ok(Some(json!(text)));
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match serde_json::from_str::<Value>(text) {
-        Ok(Value::Null) => Err(Box::new(missing_model_body())),
-        Ok(value) => Ok(value),
+        Ok(Value::Null) => Ok(None),
+        Ok(value) => Ok(Some(value)),
         Err(error) => Err(Box::new(invalid_json(text, &error))),
     }
 }

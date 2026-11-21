@@ -695,6 +695,63 @@ fn saves_recorded_media_duration_in_pre_upgrade_database() {
 }
 
 #[test]
+fn checks_obs_preflight_without_starting_an_unconfigured_or_missing_program() {
+    let scratch = tempfile::tempdir().unwrap();
+    let settings = scratch.path().join("settings.json");
+    let data = scratch.path().join("data");
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let check = "/api/obs/config-check";
+    assert_eq!(
+        profile_request(&server, "POST", check, &Value::Null, false).0,
+        401
+    );
+    assert_eq!(
+        profile_request(&server, "POST", check, &Value::Null, true),
+        (
+            200,
+            json!({
+                "path_ok":false, "connected":false, "error":"请先配置 OBS 路径，再点击配置检查",
+            })
+        ),
+    );
+    let absent = scratch.path().join("missing OBS.exe");
+    let config = json!({"obs":{"obs_path":absent}});
+    let config = config.to_string();
+    fs::write(&settings, &config).unwrap();
+    assert_eq!(
+        profile_request(&server, "POST", "/api/obs/is-running", &Value::Null, true),
+        (200, json!({"running":false, "obs_path":absent})),
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "POST",
+            check,
+            &json!({"host":"localhost","port":"4455"}),
+            true
+        ),
+        (200, json!({"path_ok":false, "error":"OBS 路径不存在"})),
+    );
+    assert_eq!(
+        profile_request(
+            &server,
+            "POST",
+            check,
+            &json!({"host":"localhost","port":65536}),
+            true
+        )
+        .0,
+        422,
+    );
+    assert_eq!(fs::read_to_string(&settings).unwrap(), config);
+    server.stop();
+}
+
+#[test]
 fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
     let scratch = tempfile::tempdir().unwrap();
     let database = scratch.path().join("cs2-insight.db");

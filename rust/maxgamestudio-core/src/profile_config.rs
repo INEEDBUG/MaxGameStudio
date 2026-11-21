@@ -86,14 +86,34 @@ impl ProfileConfig {
     }
 
     pub(crate) fn obs_settings(&self) -> io::Result<crate::obs_wire::ObsSettings> {
+        self.obs_profile().map(|(settings, _)| settings)
+    }
+
+    pub(crate) fn obs_profile(&self) -> io::Result<(crate::obs_wire::ObsSettings, String)> {
+        let stored = self.load()?;
+        let (settings, program) = obs_fields(&stored.known["obs"])?;
+        Ok((settings, program.to_owned()))
+    }
+
+    pub(crate) fn mark_obs_verified(
+        &self,
+        checked: &crate::obs_wire::ObsSettings,
+        checked_program: &str,
+    ) -> io::Result<()> {
         let mut stored = self.load()?;
-        serde_json::from_value(
-            stored
-                .known
-                .remove("obs")
-                .expect("normalized OBS configuration"),
-        )
-        .map_err(io::Error::from)
+        let obs = stored
+            .known
+            .get_mut("obs")
+            .expect("normalized OBS configuration");
+        let (current, program) = obs_fields(obs)?;
+        if &current == checked && program == checked_program && obs["obs_config_verified"] != true {
+            // PUT /config uses the legacy whole-submodel replacement contract.
+            // Update just this flag so a successful test cannot reset connection settings.
+            obs["obs_config_verified"] = json!(true);
+            stored.write_required = true;
+            self.publish(stored)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn view(&self) -> io::Result<Value> {
@@ -286,6 +306,15 @@ impl ProfileConfig {
         }
         Ok(Value::Object(stored.known))
     }
+}
+
+fn obs_fields(obs: &Value) -> io::Result<(crate::obs_wire::ObsSettings, &str)> {
+    let program = obs["obs_path"]
+        .as_str()
+        .expect("normalized OBS executable")
+        .trim();
+    let settings = serde::Deserialize::deserialize(obs)?;
+    Ok((settings, program))
 }
 
 fn profile_path(path: PathBuf) -> io::Result<PathBuf> {
