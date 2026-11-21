@@ -695,6 +695,91 @@ fn saves_recorded_media_duration_in_pre_upgrade_database() {
 }
 
 #[test]
+fn opens_saved_lite_cut_projects_and_snapshots_in_the_existing_profile() {
+    let scratch = tempfile::tempdir().unwrap();
+    let database = scratch.path().join("cs2-insight.db");
+    let settings = scratch.path().join("settings.json");
+    let data = scratch.path().join("data");
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&data, scratch.path())),
+        Some(&settings),
+    );
+    let list = "/api/lite-cut/projects";
+    let detail = "/api/lite-cut/projects/7";
+    let snapshots = "/api/lite-cut/projects/7/snapshots";
+    let get = |path, auth| profile_request(&server, "GET", path, &Value::Null, auth);
+    assert_eq!(get(list, false).0, 401);
+    assert_eq!(
+        get(list, true),
+        (200, json!({"items":[],"limit":100,"offset":0}))
+    );
+    assert!(!database.exists());
+
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode=WAL;
+         CREATE TABLE lite_cut_projects(
+             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '',
+             body_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         INSERT INTO lite_cut_projects VALUES (6,'Older','{}','2026-11-18','2026-11-18');",
+        )
+        .unwrap();
+    let body = json!({"version":1,"timeline":{"tracks":[]},"future_field":{"preserve":true}});
+    connection
+        .execute(
+            "INSERT INTO lite_cut_projects VALUES (7,'旧工程',?1,'2026-11-19','2026-11-20')",
+            [body.to_string()],
+        )
+        .unwrap();
+    let expected = json!({
+        "id":7,"name":"旧工程","body":body,"created_at":"2026-11-19","updated_at":"2026-11-20",
+    });
+    assert_eq!(get(detail, true), (200, expected.clone()));
+    assert_eq!(
+        get("/api/lite-cut/projects?limit=1&offset=0", true),
+        (200, json!({"items":[expected],"limit":1,"offset":0})),
+    );
+    assert_eq!(get("/api/lite-cut/projects?limit=501", true).0, 422);
+    assert_eq!(get("/api/lite-cut/projects/unknown", true).0, 422);
+    assert_eq!(get(snapshots, true), (200, json!({"items":[]})));
+    assert_eq!(
+        get("/api/lite-cut/projects/8/snapshots", true),
+        (404, json!({"detail":{"code":"LITECUT_PROJECT_NOT_FOUND"}})),
+    );
+
+    connection.execute_batch(
+        "CREATE TABLE lite_cut_project_snapshots(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL,
+            name TEXT NOT NULL, body_json TEXT NOT NULL, reason TEXT NOT NULL DEFAULT 'save',
+            created_at TEXT NOT NULL, FOREIGN KEY(project_id) REFERENCES lite_cut_projects(id)
+         );
+         INSERT INTO lite_cut_project_snapshots VALUES (2,7,'旧工程','{}','save','2026-11-19');
+         INSERT INTO lite_cut_project_snapshots VALUES (3,6,'Older','{}','save','2026-11-20');
+         INSERT INTO lite_cut_project_snapshots VALUES (4,7,'旧工程','{}','before_restore','2026-11-20');",
+    ).unwrap();
+    let wal = database.with_extension("db-wal");
+    let before = [fs::read(&database).unwrap(), fs::read(&wal).unwrap()];
+    assert_eq!(
+        get(snapshots, true),
+        (
+            200,
+            json!({"items":[
+                {"id":4,"project_id":7,"name":"旧工程","reason":"before_restore","created_at":"2026-11-20"},
+                {"id":2,"project_id":7,"name":"旧工程","reason":"save","created_at":"2026-11-19"},
+            ]})
+        ),
+    );
+    assert_eq!(
+        [fs::read(&database).unwrap(), fs::read(&wal).unwrap()],
+        before
+    );
+    server.stop();
+}
+
+#[test]
 fn demo_library_distinguishes_an_empty_profile_from_a_damaged_database() {
     let scratch = tempfile::tempdir().unwrap();
     let path = scratch.path().join("cs2-insight.db");

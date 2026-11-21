@@ -1,6 +1,6 @@
 use super::{
     demo_body::{bounded_float, field_issue, model, text},
-    demo_query::{parse_clip_page, parse_path_integer, parse_waveform},
+    demo_query::{parse_offset_page, parse_path_integer, parse_waveform},
     detail, json_reply, model_body, profile_disk, profile_work, validation_reply, HttpResponse,
     ProfileState,
 };
@@ -58,10 +58,11 @@ pub(super) async fn respond(
 ) -> HttpResponse {
     match route {
         Route::List => {
-            let (limit, offset) = match parse_clip_page(request.uri().query().unwrap_or_default()) {
-                Ok(page) => page,
-                Err(errors) => return validation_reply(errors),
-            };
+            let (limit, offset) =
+                match parse_offset_page(request.uri().query().unwrap_or_default(), 300, 1000) {
+                    Ok(page) => page,
+                    Err(errors) => return validation_reply(errors),
+                };
             profile_disk(profile, move |profile| {
                 match recorded_clips::list(&profile.config.database_path(), limit, offset) {
                     Ok(items) => json_reply(

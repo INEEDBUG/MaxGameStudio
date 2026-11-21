@@ -7,6 +7,7 @@ mod demo_query;
 mod demo_radar;
 mod demo_roster;
 mod demo_watch;
+mod lite_cut;
 mod recordings;
 mod replay_body;
 
@@ -363,6 +364,7 @@ enum Route {
     ReplayBinary,
     ReplayCache,
     Recordings(recordings::Route),
+    LiteCut(lite_cut::Route),
 }
 
 impl Route {
@@ -381,7 +383,8 @@ impl Route {
             "/api/demo/replay/cache" if has_profile => Some(Self::ReplayCache),
             _ if has_profile => DemoRoute::from_path(path)
                 .map(Self::Demos)
-                .or_else(|| recordings::Route::from_path(path).map(Self::Recordings)),
+                .or_else(|| recordings::Route::from_path(path).map(Self::Recordings))
+                .or_else(|| lite_cut::Route::from_path(path).map(Self::LiteCut)),
             _ => None,
         }
     }
@@ -483,6 +486,14 @@ async fn route(
                 route,
                 request,
                 extended_request,
+            )
+            .await
+        }
+        Route::LiteCut(route) => {
+            lite_cut::respond(
+                state.profile.as_ref().expect("profile route"),
+                route,
+                request,
             )
             .await
         }
