@@ -1,4 +1,5 @@
 mod assets;
+mod audio_mix;
 mod export_job;
 mod export_sources;
 mod exports;

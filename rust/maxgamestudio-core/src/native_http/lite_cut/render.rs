@@ -34,7 +34,6 @@ pub(super) struct Timeline<'a> {
     background: String,
     blur: u64,
     fast: bool,
-    master_volume: f64,
 }
 
 impl<'a> Timeline<'a> {
@@ -56,7 +55,6 @@ impl<'a> Timeline<'a> {
                 .expect("normalized blur")
                 .clamp(4, 80),
             fast: output["encoder_tier"] == "fast",
-            master_volume: number(&project["audio"]["master_volume"]).min(2.0),
         }
     }
 
@@ -124,7 +122,7 @@ impl<'a> Timeline<'a> {
         format!("{}[vout]", graph.join(","))
     }
 
-    fn audio(&self, input: &Segment<'_>, has_audio: bool) -> String {
+    fn audio(input: &Segment<'_>, has_audio: bool) -> String {
         let duration = length(input.clip);
         if !has_audio || input.clip["muted"] == true || input.track_gain <= 0.0 {
             return silence(duration);
@@ -149,8 +147,7 @@ impl<'a> Timeline<'a> {
                 }
             }
         }
-        let volume =
-            (number(&input.clip["volume"]) * input.track_gain).min(5.0) * self.master_volume;
+        let volume = (number(&input.clip["volume"]) * input.track_gain).min(5.0);
         graph.push(format!(
             "volume={volume:.6},aformat=sample_rates=48000:channel_layouts=stereo"
         ));
@@ -182,7 +179,7 @@ impl<'a> Timeline<'a> {
             format!(
                 "{};{}",
                 self.video(input.clip),
-                self.audio(input, has_audio)
+                Self::audio(input, has_audio)
             )
         } else {
             format!(
@@ -216,15 +213,14 @@ impl<'a> Timeline<'a> {
         .await
     }
 
-    pub(super) async fn render(
+    pub(super) async fn render_base(
         &self,
         media: &Media<'_>,
         clips: &[Segment<'_>],
-        range: Option<(f64, Option<f64>)>,
         stage: &Path,
         mut progress: impl FnMut(f64, &'static str),
     ) -> Result<PathBuf, &'static str> {
-        let mut files = String::new();
+        let mut files = Vec::new();
         let mut cursor = 0.0;
         for (index, segment) in clips.iter().enumerate() {
             let start = number(&segment.clip["timeline_start"]);
@@ -232,20 +228,24 @@ impl<'a> Timeline<'a> {
                 let name = format!("gap_{index}.ts");
                 self.write_segment(media, None, start - cursor, &stage.join(&name))
                     .await?;
-                files.push_str(&format!("file '{name}'\n"));
+                files.push(name);
             }
             let name = format!("clip_{index}.ts");
             let duration = length(segment.clip);
             self.write_segment(media, Some(segment), duration, &stage.join(&name))
                 .await?;
             cursor = start + duration;
-            files.push_str(&format!("file '{name}'\n"));
+            files.push(name);
             progress(
                 0.10 + 0.55 * (index + 1) as f64 / clips.len() as f64,
                 "normalizing",
             );
         }
-        fs::write(stage.join("concat.txt"), files).map_err(|_| EXPORT_FAILED)?;
+        let playlist: String = files
+            .iter()
+            .map(|name| format!("file '{name}'\n"))
+            .collect();
+        fs::write(stage.join("concat.txt"), playlist).map_err(|_| EXPORT_FAILED)?;
         let joined = stage.join("timeline.mp4");
         let mut process = render_command(media.ffmpeg);
         process
@@ -269,20 +269,24 @@ impl<'a> Timeline<'a> {
             Duration::from_secs(3600),
         )
         .await?;
-        let Some((start, end)) = range else {
-            return Ok(joined);
-        };
-        for part in fs::read_dir(stage).map_err(|_| EXPORT_FAILED)? {
-            let part = part.map_err(|_| EXPORT_FAILED)?.path();
-            if part.extension().is_some_and(|extension| extension == "ts") {
-                fs::remove_file(part).map_err(|_| EXPORT_FAILED)?;
-            }
+        for name in files {
+            fs::remove_file(stage.join(name)).map_err(|_| EXPORT_FAILED)?;
         }
+        Ok(joined)
+    }
+
+    pub(super) async fn trim_range(
+        &self,
+        media: &Media<'_>,
+        input: &Path,
+        (start, end): (f64, Option<f64>),
+        stage: &Path,
+    ) -> Result<PathBuf, &'static str> {
         let result = stage.join("range.mp4");
         let mut process = render_command(media.ffmpeg);
         process
             .args(["-ss", &format!("{start:.6}"), "-i"])
-            .arg(path_text(&joined));
+            .arg(path_text(input));
         if let Some(end) = end {
             process.args(["-t", &format!("{:.6}", end - start)]);
         }
@@ -290,7 +294,6 @@ impl<'a> Timeline<'a> {
             .args(encoder_args(media.encoder, self.fast))
             .args(["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"])
             .arg(path_text(&result));
-        progress(0.90, "range");
         run(
             process,
             media.cancel,
@@ -516,15 +519,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn preserves_the_old_minimum_cut_length_and_master_gain() {
+    fn preserves_the_old_minimum_cut_length() {
         let body = normalize(Some(json!({
             "tracks":[{"id":"v1","type":"video","label":"V1","clips":[
                 {"id":"short","trim_in":0.0,"trim_out":0.1,"speed":4.0,"freeze_frame_sec":0.25}
-            ]}],
-            "audio":{"master_volume":5.0}
+            ]}]
         })))
         .unwrap();
         assert_eq!(length(&body["tracks"][0]["clips"][0]), 0.35);
-        assert_eq!(Timeline::from_project(&body).master_volume, 2.0);
     }
 }

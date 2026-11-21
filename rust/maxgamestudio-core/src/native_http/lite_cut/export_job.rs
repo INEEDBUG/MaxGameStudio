@@ -1,4 +1,5 @@
 use super::{
+    audio_mix,
     export_sources::{base_track, main_clip, media_path, sort_timeline},
     exports::{self, Read},
     ffmpeg::{command, find_ffprobe},
@@ -152,6 +153,7 @@ struct Prepared {
     clips: Vec<Value>,
     paths: Vec<PathBuf>,
     track_gain: f64,
+    audio: audio_mix::Plan,
     range: Option<(f64, Option<f64>)>,
     ffmpeg: PathBuf,
     ffprobe: PathBuf,
@@ -385,14 +387,20 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         .collect();
     let recordings = recorded_clips::output_paths(&database, &source_ids)
         .map_err(|_| Problem(StatusCode::INTERNAL_SERVER_ERROR, FAILED, None))?;
-    let paths = resolve_media(&clips, &recordings)?;
-    let source_bytes: u64 = paths
+    let resolved = resolve_media(&clips, &recordings)?;
+    let audio = audio_mix::Plan::from_project(&body, |id| recordings.get(&id).map(PathBuf::from));
+    let mut source_lengths: HashMap<_, _> = resolved
         .iter()
-        .collect::<HashSet<_>>()
-        .iter()
-        .filter_map(|path| fs::metadata(path).ok())
-        .map(|metadata| metadata.len())
+        .map(|(path, bytes)| (path.clone(), *bytes))
+        .collect();
+    for path in audio.sources() {
+        let (path, bytes) = readable_media(path)?;
+        source_lengths.insert(path, bytes);
+    }
+    let source_bytes = source_lengths
+        .into_values()
         .fold(0_u64, u64::saturating_add);
+    let paths = resolved.into_iter().map(|(path, _)| path).collect();
 
     let output_settings = &body["output"];
     let range = if output_settings["range_mode"] == "custom" {
@@ -428,6 +436,7 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         clips,
         paths,
         track_gain,
+        audio,
         range,
         ffmpeg,
         ffprobe,
@@ -446,21 +455,9 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
         !hidden_overlays.contains(clip["meta"]["overlay_track_id"].as_str().unwrap_or("ot1"))
     });
     let tracks = list(&project["tracks"]);
-    let solo = tracks
-        .iter()
-        .any(|track| track["solo"] == true && track["type"] == "audio");
-    let parallel = tracks.iter().enumerate().any(|(index, track)| {
-        track["hidden"] == false
-            && !list(&track["clips"]).is_empty()
-            && ((track["type"] == "video" && index < base)
-                || (track["type"] == "audio"
-                    && track["muted"] == false
-                    && (!solo || track["solo"] == true)))
+    let parallel = tracks[..base].iter().any(|track| {
+        track["hidden"] == false && track["type"] == "video" && !list(&track["clips"]).is_empty()
     });
-    let music = !solo
-        && project["audio"]["bgm"]["path"]
-            .as_str()
-            .is_some_and(|path| !path.trim().is_empty());
     let effects = clips.iter().any(|clip| {
         ["transition_in", "transition_out"].iter().any(|key| {
             let effect = &clip[*key];
@@ -473,11 +470,13 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
                 .iter()
                 .any(|key| !list(&clip[*key]).is_empty())
     });
-    if overlay || parallel || music || effects {
+    if overlay || parallel || effects {
         return Err(Problem(
             StatusCode::UNPROCESSABLE_ENTITY,
             "LITECUT_EXPORT_EFFECT_UNAVAILABLE",
-            Some(json!({"message":"此 Rust 测试版本暂未支持工程中的叠加、混音、转场或关键帧效果"})),
+            Some(
+                json!({"message":"此 Rust 测试版本暂未支持工程中的画面叠加、转场或视频片段关键帧效果"}),
+            ),
         ));
     }
     Ok(())
@@ -486,7 +485,7 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
 fn resolve_media(
     clips: &[&Value],
     recordings: &HashMap<i64, String>,
-) -> Result<Vec<PathBuf>, Problem> {
+) -> Result<Vec<(PathBuf, u64)>, Problem> {
     clips
         .iter()
         .map(|clip| {
@@ -501,15 +500,34 @@ fn resolve_media(
                     .map(String::as_str)
             }
             .ok_or_else(|| Problem::input("MONTAGE_CLIP_NOT_FOUND"))?;
-            let path = media_path(raw)
-                .canonicalize()
-                .map_err(|_| Problem::input("MONTAGE_CLIP_FILE_MISSING"))?;
-            if !path.is_file() || fs::File::open(&path).is_err() {
-                return Err(Problem::input("MONTAGE_SOURCE_NOT_READABLE"));
-            }
-            Ok(path)
+            readable_media(&media_path(raw))
         })
         .collect()
+}
+
+fn readable_media(input: &Path) -> Result<(PathBuf, u64), Problem> {
+    let problem = |error: io::Error| {
+        let code = if error.kind() == io::ErrorKind::NotFound {
+            "MONTAGE_CLIP_FILE_MISSING"
+        } else {
+            "MONTAGE_SOURCE_NOT_READABLE"
+        };
+        Problem(
+            StatusCode::BAD_REQUEST,
+            code,
+            Some(json!({"params":{"name":input.file_name().map(|name| name.to_string_lossy())}})),
+        )
+    };
+    let path = input.canonicalize().map_err(problem)?;
+    let file = fs::File::open(&path).map_err(problem)?;
+    let metadata = file.metadata().map_err(problem)?;
+    if !metadata.is_file() {
+        return Err(problem(io::Error::new(
+            io::ErrorKind::NotFound,
+            "not a media file",
+        )));
+    }
+    Ok((path, metadata.len()))
 }
 
 fn unique_output(raw: &str) -> Result<PathBuf, Problem> {
@@ -706,15 +724,24 @@ async fn execute(
             track_gain: prepared.track_gain,
         })
         .collect();
-    let path = settings
-        .render(
-            &media,
-            &clips,
-            prepared.range,
-            stage.path(),
-            |progress, name| job.update(progress, name),
-        )
+    let base = settings
+        .render_base(&media, &clips, stage.path(), |progress, name| {
+            job.update(progress, name)
+        })
         .await?;
+    job.update(0.84, "audio");
+    let mixed = prepared.audio.mix(&media, &stage, &base).await?;
+    if mixed != base {
+        fs::remove_file(&base).map_err(|_| FAILED)?;
+    }
+    let path = if let Some(range) = prepared.range {
+        job.update(0.98, "range");
+        settings
+            .trim_range(&media, &mixed, range, stage.path())
+            .await?
+    } else {
+        mixed
+    };
     let probe = render::probe(
         &prepared.ffprobe,
         &path,
