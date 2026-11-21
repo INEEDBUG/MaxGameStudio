@@ -1,6 +1,6 @@
-//! Still stickers use the timeline's canvas and stacking order.
+//! Composite text and still stickers in the timeline's original stacking order.
 
-use super::{number, probe, render_command, run, Media};
+use super::{number, probe, render_command, run, text_overlay::TextOverlay, Media};
 use crate::native_http::lite_cut::{export_sources::media_path, project_schema::list};
 use crate::profile_platform::path_text;
 use serde_json::Value;
@@ -10,10 +10,17 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use tempfile::TempDir;
 
 const FAILED: &str = "MONTAGE_EXPORT_FAILED";
+pub(in crate::native_http::lite_cut) const UNAVAILABLE: &str = "LITECUT_EXPORT_EFFECT_UNAVAILABLE";
 
-pub(in crate::native_http::lite_cut) struct Plan(Vec<Sticker>);
+pub(in crate::native_http::lite_cut) struct Plan(Vec<Layer>);
+
+enum Layer {
+    Sticker(Sticker),
+    Text { start: f64, overlay: TextOverlay },
+}
 
 struct Sticker {
     asset: PathBuf,
@@ -32,13 +39,16 @@ struct Sticker {
 }
 
 impl Plan {
-    pub(in crate::native_http::lite_cut) fn from_project(project: &Value) -> Result<Self, ()> {
+    pub(in crate::native_http::lite_cut) fn from_project(
+        project: &Value,
+        mut resolve_font: impl FnMut(&Value) -> Option<PathBuf>,
+    ) -> Result<Self, &'static str> {
         let hidden: HashSet<_> = list(&project["overlay_tracks"])
             .iter()
             .filter(|track| track["hidden"] == true)
             .filter_map(|track| track["id"].as_str())
             .collect();
-        let mut stickers = Vec::new();
+        let mut layers = Vec::new();
         for clip in list(&project["overlays"]) {
             let track = clip["meta"]["overlay_track_id"]
                 .as_str()
@@ -48,7 +58,13 @@ impl Plan {
                 continue;
             }
             if clip["type"] == "text" {
-                return Err(());
+                let font = resolve_font(&clip["text"]).ok_or(FAILED)?;
+                let overlay = TextOverlay::prepare(clip, &font)?;
+                layers.push(Layer::Text {
+                    start: number(&clip["timeline_start"]),
+                    overlay,
+                });
+                continue;
             }
             let Some(raw_path) = clip["asset_path"]
                 .as_str()
@@ -73,13 +89,13 @@ impl Plan {
                             .is_some_and(|kind| !matches!(kind, "cut" | "none"))
                 })
             {
-                return Err(());
+                return Err(UNAVAILABLE);
             }
             let start = number(&clip["timeline_start"]);
             let duration = number(&clip["duration"]);
             let transform = &clip["transform"];
             let scale = number(&transform["scale"]);
-            stickers.push(Sticker {
+            layers.push(Layer::Sticker(Sticker {
                 asset,
                 start,
                 end: start + duration,
@@ -95,20 +111,23 @@ impl Plan {
                 fade_out: number(&clip["fade_out_sec"]).min(duration),
                 hflip: clip["flip_horizontal"] == true,
                 vflip: clip["flip_vertical"] == true,
-            });
+            }));
         }
-        Ok(Self(stickers))
+        Ok(Self(layers))
     }
 
     pub(in crate::native_http::lite_cut) fn sources(&self) -> impl Iterator<Item = &Path> {
-        self.0.iter().map(|row| row.asset.as_path())
+        self.0.iter().map(|row| match row {
+            Layer::Sticker(sticker) => sticker.asset.as_path(),
+            Layer::Text { overlay, .. } => overlay.font(),
+        })
     }
 
     pub(in crate::native_http::lite_cut) async fn compose(
         &self,
         media: &Media<'_>,
         base: PathBuf,
-        stage: &Path,
+        stage: &TempDir,
         fast: bool,
     ) -> Result<PathBuf, &'static str> {
         if self.0.is_empty() {
@@ -137,7 +156,20 @@ impl Plan {
         let mut previous = base;
         // Each pass retains only the current base and one image in memory.
         // Only the last encoded pass is needed after its successor completes.
-        for (index, sticker) in self.0.iter().enumerate() {
+        for (index, layer) in self.0.iter().enumerate() {
+            let sticker = match layer {
+                Layer::Sticker(sticker) => sticker,
+                Layer::Text { start, overlay } => {
+                    if *start < duration {
+                        let output = overlay
+                            .compose(media, stage, index, &previous, fast)
+                            .await?;
+                        fs::remove_file(&previous).map_err(|_| FAILED)?;
+                        previous = output;
+                    }
+                    continue;
+                }
+            };
             if sticker.start >= duration {
                 continue;
             }
@@ -149,7 +181,7 @@ impl Plan {
                 return Err("MONTAGE_CLIP_FILE_MISSING");
             }
             let graph = sticker.graph(width, height);
-            let output = stage.join(format!("sticker-{index}.mp4"));
+            let output = stage.path().join(format!("sticker-{index}.mp4"));
             let mut process = render_command(media.ffmpeg);
             process
                 .arg("-i")

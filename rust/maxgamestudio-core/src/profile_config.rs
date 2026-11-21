@@ -68,6 +68,10 @@ impl ProfileConfig {
         &self.data_dir
     }
 
+    pub(crate) fn bundle_data_dir(&self) -> &Path {
+        self.example_path.parent().expect("bundled example parent")
+    }
+
     pub(crate) fn database_path(&self) -> PathBuf {
         self.path.with_file_name("cs2-insight.db")
     }

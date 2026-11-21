@@ -4,6 +4,7 @@ mod export_job;
 mod export_sources;
 mod exports;
 mod ffmpeg;
+mod fonts;
 mod project_schema;
 mod project_store;
 mod render;
@@ -39,6 +40,7 @@ pub(super) enum Route {
     Restore { project: String, snapshot: String },
     Assets(assets::Route),
     ValidateAssets,
+    Font(String),
     StartExport { background: bool },
     ExportList,
     Export(String),
@@ -59,6 +61,9 @@ impl Route {
             });
         }
         let path = percent_decode_str(path).decode_utf8_lossy();
+        if let Some(name) = path.strip_prefix("/api/lite-cut/fonts/") {
+            return Some(Self::Font(name.to_owned()));
+        }
         if let Some(route) = assets::Route::from_path(&path) {
             return Some(Self::Assets(route));
         }
@@ -153,6 +158,7 @@ pub(super) async fn respond(
             return assets::respond(profile, route, request, extended_request).await
         }
         Route::ValidateAssets => return export_sources::validate(profile, request).await,
+        Route::Font(name) => return fonts::serve(profile, &name, request, extended_request).await,
         Route::StartExport { background } => {
             return export_job::start(profile, request, background, shutdown, extended_request)
                 .await;

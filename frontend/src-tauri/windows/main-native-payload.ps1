@@ -18,6 +18,9 @@ $exe = 'cs2-insight-agent-desktop.exe'
 $uninstaller = 'uninstall.exe'
 $assets = @('data/basic.ini', 'data/cs2-insight.config.example.json',
   'data/lite_cut_effect_contract.json', 'data/lite_cut_visual_acceptance.json',
+  'backend/assets/fonts/NotoSansSC-Bold.ttf', 'backend/assets/fonts/NotoSansSC-Medium.ttf',
+  'backend/assets/fonts/Rajdhani-Bold.ttf', 'backend/assets/fonts/Rajdhani-SemiBold.ttf',
+  'backend/assets/fonts/OFL.txt',
   'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk')
 $sidecars = @('WebView2Loader.dll', 'libunwind.dll')
 $worker = 'maxgamestudio-parser-worker.exe'

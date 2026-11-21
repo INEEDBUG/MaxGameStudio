@@ -3,7 +3,7 @@ use super::{
     export_sources::{base_track, main_clip, media_path, sort_timeline},
     exports::{self, Read},
     ffmpeg::{command, find_ffprobe},
-    has_table, json_reply, model_body, profile_disk,
+    fonts, has_table, json_reply, model_body, profile_disk,
     project_schema::{list, normalize},
     project_store, read_table, render, HttpResponse, ProfileState,
 };
@@ -390,7 +390,15 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         .map_err(|_| Problem(StatusCode::INTERNAL_SERVER_ERROR, FAILED, None))?;
     let resolved = resolve_media(&clips, &recordings)?;
     let audio = audio_mix::Plan::from_project(&body, |id| recordings.get(&id).map(PathBuf::from));
-    let overlays = render::overlay::Plan::from_project(&body).map_err(|()| unavailable_effect())?;
+    let overlays =
+        render::overlay::Plan::from_project(&body, |text| fonts::for_export(profile, text))
+            .map_err(|code| {
+                if code == render::overlay::UNAVAILABLE {
+                    unavailable_effect()
+                } else {
+                    Problem::input(code)
+                }
+            })?;
     let mut source_lengths: HashMap<_, _> = resolved
         .iter()
         .map(|(path, bytes)| (path.clone(), *bytes))
@@ -735,7 +743,7 @@ async fn execute(
     job.update(0.72, "overlays");
     let base = prepared
         .overlays
-        .compose(&media, base, stage.path(), settings.fast)
+        .compose(&media, base, &stage, settings.fast)
         .await?;
     job.update(0.84, "audio");
     let mixed = prepared.audio.mix(&media, &stage, &base).await?;

@@ -1,4 +1,5 @@
 pub(super) mod overlay;
+mod text_overlay;
 mod transition;
 
 use super::ffmpeg::{command, inspect};
