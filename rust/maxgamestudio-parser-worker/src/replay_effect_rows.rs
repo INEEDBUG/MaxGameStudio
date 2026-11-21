@@ -1,3 +1,5 @@
+mod inferno_tracks;
+
 use crate::{parser_inputs, replay_io, Failure};
 use parser::{
     first_pass::{
@@ -138,6 +140,27 @@ pub(crate) fn extract(request: ExtractReplayEffectRowsRequest) -> Result<Value, 
     }))
 }
 
+#[derive(Deserialize)]
+pub(crate) struct InfernoTracksRequest {
+    path: PathBuf,
+    tick_rate: f64,
+    #[serde(flatten)]
+    window: TickWindow,
+}
+
+pub(crate) fn inspect_infernos(request: InfernoTracksRequest) -> Result<Value, Failure> {
+    request.window.validate()?;
+    if !request.tick_rate.is_finite() || !(1.0..=256.0).contains(&request.tick_rate) {
+        return Err(Failure::request("unsupported Demo tick rate"));
+    }
+    replay_io::with_demo_bytes(&request.path, |bytes| {
+        let huffman = create_huffman_lookup_table();
+        let parsed = parse(bytes, &huffman, Pass::Utility)?;
+        let tracks = inferno_tracks::build(&parsed, request.window, request.tick_rate)?;
+        Ok(json!({"effect_tracks":tracks}))
+    })
+}
+
 fn encode(
     file: &mut File,
     bytes: &[u8],
@@ -213,6 +236,23 @@ fn write_rows(
     window: TickWindow,
     counts: &mut RowCounts,
 ) -> Result<(), Failure> {
+    visit_rows(parsed, pass, window, |_, row| {
+        serde_json::to_writer(&mut output, &row).map_err(|error| match error.io_error_kind() {
+            Some(kind) => write_failure(kind.into()),
+            None => Failure::replay_parse("unsupported replay effect column type"),
+        })?;
+        output.write_all(b"\n").map_err(write_failure)?;
+        counts.add(row.kind);
+        Ok(())
+    })
+}
+
+fn visit_rows<'a>(
+    parsed: &'a DemoOutput,
+    pass: Pass,
+    window: TickWindow,
+    mut visit: impl FnMut(i32, RawRow<'_, 'a>) -> Result<(), Failure>,
+) -> Result<(), Failure> {
     if parsed.df.is_empty() {
         return Ok(());
     }
@@ -242,37 +282,31 @@ fn write_rows(
         ));
     }
     for (index, (tick, class)) in ticks.iter().zip(classes).enumerate() {
-        if !tick.is_some_and(|tick| window.contains(tick)) {
+        let Some(tick) = tick.filter(|tick| window.contains(*tick)) else {
             continue;
-        }
+        };
         let Some(kind) = class.as_deref().and_then(|class| pass.row_kind(class)) else {
             continue;
         };
-        serde_json::to_writer(
-            &mut output,
-            &RawRow {
+        visit(
+            tick,
+            RawRow {
                 kind,
                 columns: &columns,
                 index,
             },
-        )
-        .map_err(|error| match error.io_error_kind() {
-            Some(kind) => write_failure(kind.into()),
-            None => Failure::replay_parse("unsupported replay effect column type"),
-        })?;
-        output.write_all(b"\n").map_err(write_failure)?;
-        counts.add(kind);
+        )?;
     }
     Ok(())
 }
 
-struct RawRow<'a> {
+struct RawRow<'a, 'values> {
     kind: RowKind,
-    columns: &'a BTreeMap<&'a str, (usize, &'a VarVec)>,
+    columns: &'a BTreeMap<&'values str, (usize, &'values VarVec)>,
     index: usize,
 }
 
-impl Serialize for RawRow<'_> {
+impl Serialize for RawRow<'_, '_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(self.columns.len() + 1))?;
         map.serialize_entry("kind", &self.kind)?;
