@@ -1,6 +1,7 @@
 //! Opt-in loopback listener for native health, CS2 readiness and desktop configuration.
 
 mod config_backup;
+mod demo_analysis;
 mod demo_batch;
 mod demo_body;
 mod demo_events;
@@ -498,6 +499,8 @@ async fn route(
         | Route::Demos(
             DemoRoute::InspectPath
             | DemoRoute::OpenLocal
+            | DemoRoute::Analyze
+            | DemoRoute::ParseMulti
             | DemoRoute::BatchSummary
             | DemoRoute::BatchResolve,
         ) => "POST",
@@ -729,20 +732,47 @@ async fn replay_response(
         })
         .await;
     }
-    let mut cold = match profile_work(profile, move |profile| {
+    let from_library = request.clone();
+    let saved = match profile_work(profile, move |profile| {
         ColdReplay::prepare(
             profile.config.data_dir(),
             &profile.upload_dir,
             profile.config.database_path(),
-            request,
+            from_library,
         )
     })
     .await
     {
-        Ok(Ok(Some(cold))) => cold,
-        Ok(Ok(None)) => return ready,
+        Ok(Ok(cold)) => cold,
         Ok(Err(error)) => return replay_packet_response(Err(error)),
         Err(error) => return profile_io_error(&error),
+    };
+    let mut cold = if let Some(saved) = saved {
+        saved
+    } else {
+        // An unsaved manual analysis has no database workspace. Reuse the same
+        // native round source and cache format without adding a library entry.
+        let demo = match crate::replay_cache::resolve_demo(&profile.upload_dir, &request.path) {
+            Ok(demo) => demo,
+            Err(error) => return replay_packet_response(Err(error)),
+        };
+        let Ok(source_file) = demo_analysis::stable_source(&demo) else {
+            return detail(StatusCode::CONFLICT, "Demo 正在写入或无法读取，请稍后重试");
+        };
+        let Ok(native) = worker.inspect_match(&demo, request.tick_rate).await else {
+            return ready;
+        };
+        match profile_work(profile, move |profile| {
+            let _source_file = source_file;
+            ColdReplay::prepare_analyzed(profile.config.data_dir(), demo, request, native)
+        })
+        .await
+        {
+            Ok(Ok(Some(cold))) => cold,
+            Ok(Ok(None)) => return ready,
+            Ok(Err(error)) => return replay_packet_response(Err(error)),
+            Err(error) => return profile_io_error(&error),
+        }
     };
     let metadata = match cold.generate(worker).await {
         Ok(metadata) => metadata,
@@ -783,6 +813,15 @@ async fn demo_response(
     extended_request: &AtomicBool,
 ) -> HttpResponse {
     match route {
+        DemoRoute::Analyze | DemoRoute::ParseMulti => {
+            demo_analysis::respond(
+                profile,
+                request,
+                matches!(route, DemoRoute::Analyze),
+                extended_request,
+            )
+            .await
+        }
         DemoRoute::OpenLocal => demo_open::open(profile, request, extended_request).await,
         DemoRoute::BatchSummary | DemoRoute::BatchResolve => {
             demo_batch::respond(

@@ -1,4 +1,4 @@
-//! Native execution of a previously planned, ordinary Demo clip.
+//! Native execution of a queue of planned Demo clips.
 
 use super::{
     build, execute_single,
@@ -7,6 +7,7 @@ use super::{
     playback_gsi::PlaybackGsi,
     playback_process::PlaybackProcess,
     playback_spec::{self, AspectRatio, GsiTarget, Resolution},
+    playback_stage::SourceStamp,
     RecordingPlan, RecordingRequestDto,
 };
 use crate::{
@@ -46,7 +47,7 @@ pub(in crate::native_http) struct Recorder {
 struct RecorderState {
     closed: bool,
     active: Option<Arc<Signals>>,
-    publishing: bool,
+    publishing_final_clip: bool,
 }
 
 struct Signals {
@@ -87,7 +88,7 @@ impl Recorder {
 
     pub(in crate::native_http) fn abort(&self) -> HttpResponse {
         let state = self.state.lock().expect("recording queue state");
-        if state.publishing {
+        if state.publishing_final_clip {
             return detail(StatusCode::CONFLICT, "录制已结束，正在登记录制素材");
         }
         if let Some(active) = &state.active {
@@ -102,7 +103,7 @@ impl Recorder {
         let active = {
             let mut state = self.state.lock().expect("recording queue state");
             state.closed = true;
-            if let Some(active) = state.active.as_ref().filter(|_| !state.publishing) {
+            if let Some(active) = state.active.as_ref().filter(|_| !state.publishing_final_clip) {
                 active.stop();
             }
             state.active.clone()
@@ -112,10 +113,10 @@ impl Recorder {
         }
     }
 
-    fn begin_publication(&self) -> io::Result<()> {
+    fn begin_publication(&self, last: bool) -> io::Result<()> {
         let mut state = self.state.lock().expect("recording queue state");
         state.active.as_ref().expect("admitted recording").check()?;
-        state.publishing = true;
+        state.publishing_final_clip = last;
         Ok(())
     }
 
@@ -154,7 +155,7 @@ impl Drop for ActiveJob {
             .lock()
             .expect("recording queue state");
         state.active = None;
-        state.publishing = false;
+        state.publishing_final_clip = false;
         self.signals.done.send_replace(true);
     }
 }
@@ -315,10 +316,10 @@ pub(in crate::native_http) async fn respond(
             "请选择需要录制的 Demo 片段",
         );
     }
-    if input.requests.len() != 1 {
+    if input.requests.len() > 100 {
         return detail(
-            StatusCode::NOT_IMPLEMENTED,
-            "当前 Rust 录制路径只支持一个连续片段",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "一次最多可录制 100 个 Demo 片段",
         );
     }
     let Some(signals) = profile.recording.admit() else {
@@ -341,9 +342,8 @@ pub(in crate::native_http) async fn respond(
 
 async fn run(job: &ActiveJob, port: NonZeroU16, mut input: QueueRequest) -> HttpResponse {
     let profile = &job.profile;
-    let mut dto = input.requests.pop().expect("single request admitted");
     let warmup = input.warmup.take().unwrap_or_default();
-    if unsupported(&input, &dto, &warmup) {
+    if input.requests.iter().any(|dto| unsupported(&input, dto, &warmup)) {
         return detail(
             StatusCode::NOT_IMPLEMENTED,
             "当前 Rust 录制路径尚未支持本次选用的叠层、转场或自定义录制参数",
@@ -371,38 +371,82 @@ async fn run(job: &ActiveJob, port: NonZeroU16, mut input: QueueRequest) -> Http
         Ok(false) => {}
         Err(_) => return detail(StatusCode::SERVICE_UNAVAILABLE, "无法确认 CS2 是否已退出"),
     }
-    if job.signals.check().is_err() {
-        return result_error(&dto.request_id, "recording_aborted", true);
+    let requests = std::mem::take(&mut input.requests);
+    let ids: Vec<_> = requests.iter().map(|dto| dto.request_id.clone()).collect();
+    let mut plans = Vec::with_capacity(requests.len());
+    for dto in requests {
+        if job.signals.check().is_err() {
+            let results: Vec<_> = ids
+                .iter()
+                .map(|id| item_error(id, "recording_aborted", true))
+                .collect();
+            return json_reply(StatusCode::OK, json!(results));
+        }
+        match prepare_plan(profile, dto).await {
+            Ok(clip) => plans.push(clip),
+            Err((status, message)) => return detail(status, &message),
+        }
     }
-    let source = match local_demo(&dto, &profile.upload_dir) {
-        Ok(path) => path,
-        Err(_) => return detail(StatusCode::NOT_FOUND, "找不到选中的 Demo 文件"),
-    };
+    let mut results = Vec::with_capacity(plans.len());
+    let mut stopped = None;
+    for (index, clip) in plans.iter().enumerate() {
+        let id = &clip.plan.request.request_id;
+        if let Some(cancelled) = stopped {
+            let message = if cancelled {
+                "recording_aborted"
+            } else {
+                "recording_queue_stopped"
+            };
+            results.push(item_error(id, message, cancelled));
+            continue;
+        }
+        let last = index + 1 == plans.len();
+        let result = if let Err(error) = job.signals.check() {
+            Err(error)
+        } else {
+            capture(job, &lease, port, &session, (clip, last), &input, &warmup).await
+        };
+        match result {
+            Ok(result) => results.push(result),
+            Err(error) => {
+                let cancelled = error.kind() == io::ErrorKind::Interrupted;
+                results.push(item_error(id, &error.to_string(), cancelled));
+                stopped = Some(cancelled);
+            }
+        }
+    }
+    json_reply(StatusCode::OK, json!(results))
+}
+
+struct QueuedClip {
+    plan: RecordingPlan,
+    source: SourceStamp,
+}
+
+async fn prepare_plan(
+    profile: &ProfileState,
+    mut dto: RecordingRequestDto,
+) -> Result<QueuedClip, (StatusCode, String)> {
+    let source = local_demo(&dto, &profile.upload_dir)
+        .map_err(|_| (StatusCode::NOT_FOUND, "找不到选中的 Demo 文件".to_owned()))?;
     dto.demo.demo_path = path_text(&source);
-    let Ok(parser) = Arc::clone(&profile.demo_parser).try_acquire_owned() else {
-        return detail(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "正在处理其他 Demo，请稍后重试",
-        );
-    };
-    let plan = match tokio::task::spawn_blocking(move || {
+    let parser = Arc::clone(&profile.demo_parser)
+        .try_acquire_owned()
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "正在处理其他 Demo，请稍后重试".to_owned(),
+            )
+        })?;
+    tokio::task::spawn_blocking(move || {
         let _parser = parser;
-        build(dto)
+        let (_demo, source) = SourceStamp::open(&source).map_err(|_| {
+            (StatusCode::CONFLICT, "Demo 正在写入或无法读取，请稍后重试".to_owned())
+        })?;
+        Ok(QueuedClip { plan: build(dto)?, source })
     })
     .await
-    {
-        Ok(Ok(plan)) => plan,
-        Ok(Err((status, message))) => return detail(status, &message),
-        Err(_) => return detail(StatusCode::INTERNAL_SERVER_ERROR, "无法生成录制计划"),
-    };
-    match capture(job, &lease, port, &session, &plan, &input, &warmup).await {
-        Ok(result) => json_reply(StatusCode::OK, json!([result])),
-        Err(error) => result_error(
-            &plan.request.request_id,
-            &error.to_string(),
-            error.kind() == io::ErrorKind::Interrupted,
-        ),
-    }
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "无法生成录制计划".to_owned()))?
 }
 
 async fn capture(
@@ -410,12 +454,13 @@ async fn capture(
     lease: &RuntimeLease<'_>,
     port: NonZeroU16,
     session: &str,
-    plan: &RecordingPlan,
+    (clip, last): (&QueuedClip, bool),
     input: &QueueRequest,
     warmup: &Warmup,
 ) -> io::Result<Value> {
     let profile = &job.profile;
     let mut cancel = job.signals.cancel.subscribe();
+    let plan = &clip.plan;
     let request = &plan.request;
     let [planned] = plan.active.as_slice() else {
         return Err(io::Error::other("当前 Rust 录制路径只支持一个连续片段"));
@@ -470,6 +515,7 @@ async fn capture(
             token: &token,
         },
     )?;
+    spec.source_stamp = Some(clip.source);
     let extra = input
         .cs2_extra_launch_args
         .as_deref()
@@ -615,7 +661,7 @@ async fn capture(
         "segment_results":[segment_status],
         "warnings":request.warnings,
     });
-    profile.recording.begin_publication()?;
+    profile.recording.begin_publication(last)?;
     let id = tokio::task::spawn_blocking(move || {
         insert_ready(
             &database,
@@ -716,14 +762,11 @@ fn problem(status: StatusCode, code: &str) -> HttpResponse {
     json_reply(status, json!({"detail":{"code":code}}))
 }
 
-fn result_error(request: &str, error: &str, cancelled: bool) -> HttpResponse {
-    json_reply(
-        StatusCode::OK,
-        json!([{
-            "request_id":request,"success":false,"aborted":cancelled,
-            "error":error,"output_path":null,"segment_results":[],
-        }]),
-    )
+fn item_error(request: &str, error: &str, cancelled: bool) -> Value {
+    json!({
+        "request_id":request,"success":false,"aborted":cancelled,
+        "error":error,"output_path":null,"segment_results":[],
+    })
 }
 
 #[cfg(test)]
@@ -731,20 +774,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_abort_or_clip_publication_but_never_both() {
+    fn cancels_pending_clips_without_interrupting_publication() {
         let cancelled = Recorder::default();
         let signals = cancelled.admit().unwrap();
         assert_eq!(cancelled.abort().status(), StatusCode::OK);
         assert_eq!(
-            cancelled.begin_publication().unwrap_err().kind(),
+            cancelled.begin_publication(true).unwrap_err().kind(),
             io::ErrorKind::Interrupted
         );
         assert!(*signals.cancel.borrow());
 
         let recording = Recorder::default();
         let signals = recording.admit().unwrap();
-        recording.begin_publication().unwrap();
+        recording.begin_publication(true).unwrap();
         assert_eq!(recording.abort().status(), StatusCode::CONFLICT);
         assert!(!*signals.cancel.borrow());
+
+        let batch = Recorder::default();
+        let signals = batch.admit().unwrap();
+        batch.begin_publication(false).unwrap();
+        assert_eq!(batch.abort().status(), StatusCode::OK);
+        assert!(*signals.cancel.borrow());
+        assert_eq!(
+            batch.begin_publication(true).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
     }
 }

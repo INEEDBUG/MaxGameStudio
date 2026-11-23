@@ -46,7 +46,7 @@ impl Bindings {
         after_selection: &[&str],
     ) -> io::Result<Self> {
         let seek = seek_commands(seek_tick)?;
-        if !(1..=64).contains(&slot) {
+        if !(0..=i64::from(i32::MAX)).contains(&slot) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "无效的 Demo 观战槽位",

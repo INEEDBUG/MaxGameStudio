@@ -36,6 +36,7 @@ pub(crate) fn scan(
     bytes: &[u8],
     huffman: &Vec<(u8, u8)>,
     include_hurt: bool,
+    include_recording: bool,
 ) -> Result<Vec<GameEvent>, Failure> {
     let player_fields = [
         "X",
@@ -70,6 +71,9 @@ pub(crate) fn scan(
     inputs.wanted_events = EVENTS.iter().map(|name| (*name).to_owned()).collect();
     if include_hurt {
         inputs.wanted_events.push("player_hurt".to_owned());
+    }
+    if include_recording {
+        inputs.wanted_events.push("player_blind".to_owned());
     }
 
     let mut events = Parser::new(inputs, ParsingMode::Normal)
@@ -438,7 +442,7 @@ mod tests {
             std::env::var_os("MGS_ANALYSIS_EVENTS_FIXTURE").expect("public demo fixture path"),
         );
         let huffman = create_huffman_lookup_table();
-        let events = replay_io::with_demo_bytes(&path, |bytes| scan(bytes, &huffman, false))
+        let events = replay_io::with_demo_bytes(&path, |bytes| scan(bytes, &huffman, false, false))
             .expect("pinned public demo scan");
         let start = match_start_tick(&events);
         assert_eq!(start, 1761);

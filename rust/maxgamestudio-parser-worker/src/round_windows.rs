@@ -211,7 +211,7 @@ pub(crate) fn integer(value: &Variant) -> Option<i64> {
     }
 }
 
-fn winner(value: &Variant) -> Option<i64> {
+pub(crate) fn winner(value: &Variant) -> Option<i64> {
     let side = match value {
         Variant::String(name) => match name.trim().to_ascii_uppercase().as_str() {
             "CT" => 3,

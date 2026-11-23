@@ -1,10 +1,17 @@
 //! Build the named replay events from a single tick-ordered parser scan.
 
 mod damage_stats;
+mod death_compilation;
+mod kill_action_tags;
+mod kill_compilation;
+mod kill_inputs;
 mod match_facts;
 mod player_stats;
+mod rival_compilation;
+mod round_compilation;
 mod round_economy;
 mod round_score;
+mod spec_slots;
 
 use crate::{
     analysis_events::{self, AnalysisRow, BombKind, EventKind, Position},
@@ -13,6 +20,7 @@ use crate::{
     Failure,
 };
 use parser::second_pass::parser_settings::create_huffman_lookup_table;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     cmp::Reverse,
@@ -20,10 +28,17 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct RequestedCompilations {
+    players: Vec<String>,
+    rounds: Option<Vec<i64>>,
+}
+
 pub(crate) fn inspect(
     path: &Path,
     tick_rate: f64,
     include_match_facts: bool,
+    compilations: Option<&RequestedCompilations>,
 ) -> Result<Value, Failure> {
     if !tick_rate.is_finite() || !(1.0..=256.0).contains(&tick_rate) {
         return Err(Failure::request("unsupported Demo tick rate"));
@@ -31,7 +46,8 @@ pub(crate) fn inspect(
     replay_io::with_demo_bytes(path, |bytes| {
         let huffman = create_huffman_lookup_table();
         let demo_end = end_tick(bytes)?;
-        let events = analysis_events::scan(bytes, &huffman, include_match_facts)?;
+        let include_facts = include_match_facts || compilations.is_some();
+        let events = analysis_events::scan(bytes, &huffman, include_facts, compilations.is_some())?;
         let (start, freeze_ticks, windows) = windows(&events, tick_rate, demo_end);
         let mut rounds: Vec<_> = (0..windows.len()).map(|_| Timeline::default()).collect();
         for event in &events {
@@ -55,12 +71,16 @@ pub(crate) fn inspect(
             .map(|(timeline, window)| timeline.finish(window, tick_rate))
             .collect::<Vec<_>>();
         let mut result = json!({"match_start_tick":start,"demo_end_tick":demo_end});
-        if include_match_facts {
+        if include_facts {
             let facts = match_facts::collect(
                 bytes,
                 &huffman,
                 &events,
-                demo_end,
+                match_facts::Timing {
+                    demo_end,
+                    tick_rate,
+                    compilations,
+                },
                 &freeze_ticks,
                 &windows,
                 &mut rounds,

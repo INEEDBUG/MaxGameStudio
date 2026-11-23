@@ -44,18 +44,26 @@ unsafe extern "system" {
     ) -> i32;
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
 struct FileId {
     volume: u64,
     id: [u8; 16],
 }
 
-#[derive(PartialEq, Eq)]
-struct SourceStamp {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct SourceStamp {
     id: FileId,
     length: u64,
     written: u64,
+}
+
+impl SourceStamp {
+    pub(super) fn open(path: &Path) -> io::Result<(File, Self)> {
+        let file = open_source(path)?;
+        let stamp = source_stamp(&file)?;
+        Ok((file, stamp))
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -83,6 +91,11 @@ impl PlaybackStage {
         let _directories = lock_directories(&cfg_dir)?;
         let mut source = open_source(&spec.source_demo)?;
         let before = source_stamp(&source)?;
+        if spec.source_stamp.is_some_and(|expected| expected != before) {
+            return Err(io::Error::other(
+                "排队期间 Demo 文件已变化，请重新选择录制片段",
+            ));
+        }
         verify_space(
             &cfg_dir,
             before
@@ -426,6 +439,22 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn rejects_a_demo_replaced_after_queue_planning() {
+        let root = tempfile::tempdir().unwrap();
+        let mut spec = fixture(root.path());
+        let (locked, stamp) = SourceStamp::open(&spec.source_demo).unwrap();
+        drop(locked);
+        spec.source_stamp = Some(stamp);
+        fs::write(&spec.source_demo, b"a different Demo").unwrap();
+
+        assert!(PlaybackStage::stage(&spec, &AtomicBool::new(false)).is_err());
+        assert!(!spec.staged_demo.exists());
+        assert!(!spec.demo_cfg_path.exists());
+        assert!(!spec.gsi_cfg_path.exists());
+        assert_eq!(fs::read(&spec.source_demo).unwrap(), b"a different Demo");
     }
 
     #[test]

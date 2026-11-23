@@ -1,6 +1,8 @@
 //! Read and edit metadata in the deployed Demo library schema.
 
+mod analysis;
 mod roster;
+pub(crate) use analysis::AnalysisSource;
 pub(crate) use roster::{normalize_players, BatchRosterSource, RosterCache, RosterSource};
 
 use crate::wire_json::json_decode_error;

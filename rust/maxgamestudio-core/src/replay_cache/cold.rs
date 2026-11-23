@@ -18,6 +18,11 @@ use std::{
 
 const MAP_DATA: &str = include_str!("../../../../backend/assets/bundled_radar_maps/map-data.json");
 
+pub(crate) fn map_transform(map: &str) -> Value {
+    let assets: Value = serde_json::from_str(MAP_DATA).expect("bundled radar calibration");
+    assets[map.trim().to_lowercase()].clone()
+}
+
 pub(crate) struct ColdReplay {
     demo: PathBuf,
     source: Fingerprint,
@@ -52,12 +57,39 @@ impl ColdReplay {
         let Some(source) = fingerprint(&demo) else {
             return Ok(None);
         };
-        let Some(mut workspace) = DemoLibrary::new(database)
+        let Some(workspace) = DemoLibrary::new(database)
             .replay_workspace(&demo)
             .map_err(|error| unavailable(error.to_string()))?
         else {
             return Ok(None);
         };
+        Self::prepare_workspace(data, demo, source, request, workspace)
+    }
+
+    pub(crate) fn prepare_analyzed(
+        data: &Path,
+        demo: PathBuf,
+        request: ReplayRequest,
+        mut native: Value,
+    ) -> Result<Option<Self>, ReplayCacheError> {
+        let Some(source) = fingerprint(&demo) else {
+            return Ok(None);
+        };
+        let workspace = json!({
+            "map_name":native["match_facts"]["match_meta"]["map_name"],
+            "players":native["match_facts"]["player_stats"].take(),
+            "rounds":native["rounds"].take(),"tick_rate":request.tick_rate,
+        });
+        Self::prepare_workspace(data, demo, source, request, workspace)
+    }
+
+    fn prepare_workspace(
+        data: &Path,
+        demo: PathBuf,
+        source: Fingerprint,
+        request: ReplayRequest,
+        mut workspace: Value,
+    ) -> Result<Option<Self>, ReplayCacheError> {
         let tick_rate = number_or(&workspace["tick_rate"], 64.0)?.max(0.001);
         if (tick_rate - request.tick_rate).abs() > 0.000_000_5 {
             return Ok(None);
@@ -225,9 +257,7 @@ impl ColdReplay {
         let first_steam = player
             .and_then(|player| text(&player["steam_id64"]).or_else(|| text(&player["steamid64"])));
         let map = text(&self.workspace["map_name"]).unwrap_or("unknown");
-        let map_transform =
-            serde_json::from_str::<Value>(MAP_DATA).expect("bundled radar calibration");
-        let geo = &map_transform[map.trim().to_lowercase()];
+        let geo = map_transform(map);
         let mut capabilities = effects["capabilities"].take();
         if !capabilities.is_object() || !effects["warnings"].is_array() {
             return Err(unavailable("Incomplete native utility effect metadata"));

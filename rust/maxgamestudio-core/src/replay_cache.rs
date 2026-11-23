@@ -1,6 +1,7 @@
 //! Read whole-match replay caches and rebuild missing data with the installed parser.
 
 mod cold;
+pub(crate) use cold::map_transform as analysis_map_transform;
 pub(crate) use cold::ColdReplay;
 
 use crate::{
@@ -437,7 +438,7 @@ fn repair_error(error: io::Error) -> ReplayCacheError {
     ReplayCacheError::Unavailable(error.to_string())
 }
 
-fn resolve_demo(upload_dir: &Path, path: &str) -> Result<PathBuf, ReplayCacheError> {
+pub(crate) fn resolve_demo(upload_dir: &Path, path: &str) -> Result<PathBuf, ReplayCacheError> {
     let requested = path.trim();
     if requested.is_empty() {
         return Err(ReplayCacheError::EmptyPath);

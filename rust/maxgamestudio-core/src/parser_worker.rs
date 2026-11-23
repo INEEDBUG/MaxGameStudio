@@ -71,6 +71,36 @@ impl ParserWorker {
         .await
     }
 
+    pub(crate) async fn analyze(
+        &self,
+        path: &Path,
+        players: &[String],
+        rounds: Option<&[i64]>,
+    ) -> io::Result<Value> {
+        self.run(
+            json!({
+                "protocol":1, "action":"inspect_match_timeline", "path":path, "tick_rate":64.0,
+                "include_match_facts":true,
+                "round_compilations":{"players":players,"rounds":rounds},
+            }),
+            Duration::from_secs(240),
+            16 * 1024 * 1024,
+        )
+        .await
+    }
+
+    pub(crate) async fn inspect_match(&self, path: &Path, tick_rate: f64) -> io::Result<Value> {
+        self.run(
+            json!({
+                "protocol":1,"action":"inspect_match_timeline","path":path,
+                "tick_rate":tick_rate,"include_match_facts":true,
+            }),
+            Duration::from_secs(180),
+            16 * 1024 * 1024,
+        )
+        .await
+    }
+
     pub(crate) async fn replay_effects(
         &self,
         path: &Path,
@@ -148,7 +178,7 @@ impl ParserWorker {
                     "Parser worker failed with exit status {status}"
                 )));
             }
-            let response: Value = serde_json::from_slice(&output)?;
+            let mut response: Value = serde_json::from_slice(&output)?;
             if response["protocol"] != 1
                 || response["parser_commit"] != PARSER_COMMIT
                 || response["ok"] != true
@@ -158,7 +188,7 @@ impl ParserWorker {
                     "Unexpected parser worker protocol or source identity",
                 ));
             }
-            response.get("result").cloned().ok_or_else(|| {
+            response.get_mut("result").map(Value::take).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Parser worker reply is incomplete",

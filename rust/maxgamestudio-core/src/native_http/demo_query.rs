@@ -16,6 +16,8 @@ pub(super) enum DemoRoute {
     Stream,
     InspectPath,
     OpenLocal,
+    Analyze,
+    ParseMulti,
     BatchSummary,
     BatchResolve,
     RadarMap,
@@ -37,6 +39,7 @@ impl DemoRoute {
             "/api/demos/stream" => Some(Self::Stream),
             "/api/demos/watch-path/inspect" => Some(Self::InspectPath),
             "/api/demo/open-local" => Some(Self::OpenLocal),
+            "/api/demo/parse-multi" => Some(Self::ParseMulti),
             "/api/demos/batch-summary" => Some(Self::BatchSummary),
             "/api/demos/batch-resolve-players" => Some(Self::BatchResolve),
             _ => {
@@ -58,6 +61,7 @@ impl DemoRoute {
                 match rest.split_once('/') {
                     Some((id, "player-stats")) if !id.is_empty() => Some(Self::PlayerStats),
                     Some((id, "players")) if !id.is_empty() => Some(Self::Players),
+                    Some((id, "analyze")) if !id.is_empty() => Some(Self::Analyze),
                     Some((id, "remark")) if !id.is_empty() => Some(Self::Remark),
                     Some(_) => None,
                     None => Some(Self::Detail),

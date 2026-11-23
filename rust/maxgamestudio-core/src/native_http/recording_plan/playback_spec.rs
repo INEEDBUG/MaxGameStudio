@@ -1,6 +1,7 @@
 //! Deterministic specifications for the released recording launch. The caller
 //! owns filesystem checks, staging, process lifecycle, and demo readiness.
 
+use super::playback_stage::SourceStamp;
 use std::{
     io,
     num::NonZeroU16,
@@ -53,6 +54,7 @@ pub(super) struct PlaybackSpec {
     pub(super) args: Vec<String>,
     pub(super) working_dir: PathBuf,
     pub(super) source_demo: PathBuf,
+    pub(super) source_stamp: Option<SourceStamp>,
     pub(super) staged_demo: PathBuf,
     pub(super) demo_cfg_path: PathBuf,
     pub(super) demo_cfg: String,
@@ -136,6 +138,7 @@ pub(super) fn build(
         args,
         working_dir,
         source_demo,
+        source_stamp: None,
         staged_demo: csgo.join(demo_name),
         demo_cfg_path: cfg.join(format!("{stem}.cfg")),
         demo_cfg,

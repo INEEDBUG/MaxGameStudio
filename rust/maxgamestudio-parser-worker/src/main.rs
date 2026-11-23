@@ -69,6 +69,7 @@ enum Action {
         tick_rate: f64,
         #[serde(default)]
         include_match_facts: bool,
+        round_compilations: Option<match_timeline::RequestedCompilations>,
     },
 }
 
@@ -209,7 +210,13 @@ fn run(input: impl Read) -> Result<Value, Failure> {
             path,
             tick_rate,
             include_match_facts,
-        } => match_timeline::inspect(&path, tick_rate, include_match_facts),
+            round_compilations,
+        } => match_timeline::inspect(
+            &path,
+            tick_rate,
+            include_match_facts,
+            round_compilations.as_ref(),
+        ),
     }
 }
 

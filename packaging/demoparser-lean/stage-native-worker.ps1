@@ -19,6 +19,11 @@ $files = @(
     "src/analysis_events.rs", "src/match_timeline.rs", "src/match_timeline/match_facts.rs",
     "src/match_timeline/player_stats.rs", "src/match_timeline/damage_stats.rs",
     "src/match_timeline/round_score.rs", "src/match_timeline/round_economy.rs",
+    "src/match_timeline/round_compilation.rs", "src/match_timeline/spec_slots.rs",
+    "src/match_timeline/death_compilation.rs",
+    "src/match_timeline/kill_action_tags.rs", "src/match_timeline/kill_compilation.rs",
+    "src/match_timeline/kill_inputs.rs",
+    "src/match_timeline/rival_compilation.rs",
     "src/replay_effect_rows/inferno_tracks.rs",
     "src/replay_effect_rows/smoke_tracks.rs", "src/replay_effect_rows/smoke_formation.rs",
     "src/replay_effect_rows/trajectory_paths.rs"

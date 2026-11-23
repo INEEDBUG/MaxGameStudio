@@ -2,9 +2,13 @@
 
 use super::{
     damage_stats::DamageInput,
+    kill_inputs,
     player_stats::{self, Player},
+    round_compilation::MatchRounds,
     round_economy::{self, RoundEconomy},
     round_score::{self, RoundOutcome, Side, TeamKey},
+    spec_slots::{SlotLookup, SpecSlots},
+    RequestedCompilations,
 };
 use crate::{
     demo_inspection::{parse_team_ticks, player_name},
@@ -14,28 +18,48 @@ use crate::{
 };
 use parser::second_pass::game_events::GameEvent;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) struct Timing<'a> {
+    pub(super) demo_end: i64,
+    pub(super) tick_rate: f64,
+    pub(super) compilations: Option<&'a RequestedCompilations>,
+}
 
 pub(super) fn collect(
     bytes: &[u8],
     huffman: &Vec<(u8, u8)>,
     events: &[GameEvent],
-    demo_end_tick: i64,
+    timing: Timing<'_>,
     freeze_ticks: &BTreeMap<i64, i64>,
     visible: &[RoundWindow],
     rounds: &mut [Value],
 ) -> Result<Value, Failure> {
+    let demo_end_tick = timing.demo_end;
     let start_tick = match_start_tick(events);
     let economy_ticks = round_economy::freeze_end_rounds(events, start_tick);
+    let compilations = timing.compilations.map(|request| {
+        let requested = request
+            .players
+            .iter()
+            .map(|name| name.trim())
+            .collect::<BTreeSet<_>>();
+        let kills = kill_inputs::Sources::collect(events, start_tick, &requested, freeze_ticks);
+        (request, requested, kills)
+    });
     let mut ticks = match_summary::summary_ticks(events, demo_end_tick);
     ticks.extend(freeze_ticks.values().map(|&tick| tick as i32));
     ticks.extend(economy_ticks.keys().copied());
-    ticks.sort_unstable();
-    ticks.dedup();
     let mut properties = match_summary::PROPERTIES.to_vec();
     if !economy_ticks.is_empty() {
         properties.extend_from_slice(round_economy::PROPERTIES);
     }
+    if let Some((_, _, kills)) = &compilations {
+        ticks.extend(kills.ticks());
+        properties.extend_from_slice(&kill_inputs::PROPERTIES);
+    }
+    ticks.sort_unstable();
+    ticks.dedup();
     // An empty selection asks the parser for every tick.
     let sample = (!ticks.is_empty())
         .then(|| parse_team_ticks(bytes, huffman, ticks, &properties))
@@ -124,6 +148,54 @@ pub(super) fn collect(
     }
     add_round_facts(rounds, &scores.rounds, &economy.rounds);
     let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);
+    let compilation_data = compilations.map(|(request, requested, kills)| {
+        let last_round_tail_ticks = match std::env::var("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC") {
+            Ok(seconds) if !seconds.is_empty() => Some(
+                seconds.trim().parse::<f64>().ok().filter(|value| value.is_finite())
+                    .map(|value| (value * 64.0) as i64)
+                    .ok_or_else(|| Failure::request("invalid last-round recording tail"))?,
+            ),
+            _ => None,
+        };
+        let offset = std::env::var("CS2_SPEC_PLAYER_SLOT_OFFSET").ok();
+        let slots = SpecSlots::from_events(events, start_tick, offset.as_deref());
+        let slots: BTreeMap<_, _> = players
+            .iter()
+            .filter_map(|player| match slots.lookup(player.name) {
+                SlotLookup::Known(slot) => Some((player.name.to_lowercase(), slot)),
+                SlotLookup::Missing | SlotLookup::Ambiguous => None,
+            })
+            .collect();
+        let clip_rounds = MatchRounds::collect(
+            events,
+            freeze_ticks,
+            &scores,
+            i64::from(start_tick),
+            demo_end_tick,
+            timing.tick_rate,
+            &requested,
+        );
+        let map = summary["map_name"].as_str().unwrap_or("unknown");
+        let spatial = kills.snapshots(sample.as_ref());
+        let clips = players
+            .iter()
+            .filter(|player| requested.contains(player.name))
+            .map(|player| {
+                (
+                    player.name,
+                    clip_rounds.clips(
+                        player,
+                        &slots,
+                        map,
+                        request.rounds.as_deref(),
+                        (&kills, &spatial),
+                        last_round_tail_ticks,
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        Ok::<_, Failure>((clips, slots, clip_rounds.timeline_data()))
+    }).transpose()?;
     let players: Vec<_> = players
         .iter()
         .map(|player| {
@@ -135,7 +207,7 @@ pub(super) fn collect(
             })
         })
         .collect();
-    let facts = json!({
+    let mut facts = json!({
         "match_meta": {
             "map_name": summary["map_name"],
             "server_name": summary["server_name"],
@@ -158,6 +230,11 @@ pub(super) fn collect(
         "player_stats": player_stats,
         "ranked_player_ids": ranked_player_ids,
     });
+    if let Some((clips, slots, timeline)) = compilation_data {
+        facts["round_compilations"] = json!(clips);
+        facts["spec_slots"] = json!(slots);
+        facts["recording_timeline"] = timeline;
+    }
     Ok(facts)
 }
 

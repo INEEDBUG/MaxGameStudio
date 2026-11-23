@@ -604,6 +604,44 @@ fn seed_demo_library(connection: &rusqlite::Connection) -> Value {
 }
 
 #[test]
+fn library_analysis_keeps_the_saved_result_when_a_same_name_upload_exists() {
+    let scratch = tempfile::tempdir().unwrap();
+    let database = scratch.path().join("cs2-insight.db");
+    let config = scratch.path().join("settings.json");
+    let missing = scratch.path().join("saved").join("match.dem");
+    let uploads = scratch.path().join("cs2_insight_demos");
+    fs::create_dir(&uploads).unwrap();
+    fs::write(uploads.join("match.dem"), b"a different Demo").unwrap();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    seed_demo_library(&connection);
+    let path = missing.to_str().unwrap();
+    connection.execute(
+        "INSERT INTO demo_files(id,path,filename,status,added_at,remark) VALUES (91,?1,'match.dem','done','fixture','retained')",
+        [path],
+    ).unwrap();
+    connection.execute(
+        "INSERT INTO match_results(demo_path,result_json,created_at) VALUES (?1,'{\"legacy\":true}','fixture')",
+        [path],
+    ).unwrap();
+    drop(connection);
+    let before = fs::read(&database).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture",
+        Some((&scratch.path().join("profile"), scratch.path())),
+        Some(&config),
+    );
+    assert_eq!(
+        profile_request(
+            &server, "POST", "/api/demos/91/analyze", &json!({"target_players":["Fixture"]}), true,
+        ),
+        (404, json!({"detail":{"code":"DEMO_FILE_NOT_FOUND"}}))
+    );
+    assert_eq!(fs::read(&database).unwrap(), before);
+    assert_eq!(fs::read(uploads.join("match.dem")).unwrap(), b"a different Demo");
+    server.stop();
+}
+
+#[test]
 fn demo_players_reuses_only_a_matching_legacy_roster_snapshot() {
     let scratch = tempfile::tempdir().unwrap();
     let demo = scratch.path().join("测试 roster.dem");
@@ -1153,7 +1191,7 @@ fn cancelled_recording_queue_restores_fixture_player_data() {
     .unwrap();
     let server =
         RunningServer::launch_with_config("3.2.0-fixture", Some((&profile, root)), Some(&settings));
-    let payload = json!({"requests":[{
+    let mut payload = json!({"requests":[{
         "request_id":"round abort fixture","request_type":"round_compilation","source_type":"round",
         "demo":{
             "demo_path":demo,"demo_filename":"original.dem","map_name":"de_fixture",
@@ -1163,6 +1201,9 @@ fn cancelled_recording_queue_restores_fixture_player_data() {
         "target_player":{"name":"Fixture","steamid64":"76561198000000001","spec_slot":1},
         "rounds":[{"round":1,"round_start_tick":32,"round_end_tick":495,"freeze_end_tick":160}]
     }]});
+    let mut pending = payload["requests"][0].clone();
+    pending["request_id"] = json!("pending round fixture");
+    payload["requests"].as_array_mut().unwrap().push(pending);
     thread::scope(|scope| {
         let recording = scope
             .spawn(|| profile_request(&server, "POST", "/api/recording/queue", &payload, true));
@@ -1195,7 +1236,11 @@ fn cancelled_recording_queue_restores_fixture_player_data() {
         );
         let (status, reply) = recording.join().unwrap();
         assert_eq!(status, 200);
+        assert_eq!(reply.as_array().unwrap().len(), 2);
         assert_eq!(reply[0]["aborted"], true, "{reply}");
+        assert_eq!(reply[1]["request_id"], "pending round fixture");
+        assert_eq!(reply[1]["aborted"], true);
+        assert_eq!(reply[1]["error"], "recording_aborted");
     });
     assert_eq!(fs::read(&player).unwrap(), original);
     assert_eq!(fs::read(cfg.join("unrelated.cfg")).unwrap(), b"leave alone");

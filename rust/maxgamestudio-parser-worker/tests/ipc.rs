@@ -164,7 +164,7 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     assert!(default.get("match_facts").is_none());
 
     payload["include_match_facts"] = json!(true);
-    let opt_in = request(payload);
+    let opt_in = request(payload.clone());
     assert!(opt_in.status.success());
     let mut opt_in = result(&opt_in)["result"].clone();
     let facts = opt_in
@@ -328,6 +328,37 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         opt_in == default,
         "opt-in fields must preserve the existing timeline"
     );
+
+    let names: Vec<_> = players.iter().map(|player| player["name"].as_str().unwrap()).collect();
+    payload["round_compilations"] = json!({"players":names,"rounds":[2,4,5]});
+    let response = request(payload);
+    assert!(response.status.success());
+    let parsed = result(&response);
+    let clips = &parsed["result"]["match_facts"]["round_compilations"];
+    // Each clip is the released wheel's serialized result, with only its random ID omitted.
+    for (kind, segments, digest) in [
+        ("all_deaths", 64, 0x5ba3407f0eb2cb86),
+        ("all_kills", 64, 0x42075bd89ecb24c9),
+        ("freeze_to_death", 25, 0xf67cb212d57012a2),
+    ] {
+        let clips: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let mut clip = clips[*name]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|clip| clip["compilation_kind"] == kind)
+                    .unwrap()
+                    .clone();
+                clip.as_object_mut().unwrap().remove("clip_id");
+                clip
+            })
+            .collect();
+        let count: usize = clips.iter().map(|clip| clip["source_ticks"].as_array().unwrap().len()).sum();
+        assert_eq!(count, segments, "{kind} source segments");
+        assert_eq!(fixture_checksum(&serde_json::to_vec(&clips).unwrap()), digest, "{kind} legacy parity");
+    }
 }
 
 #[test]
