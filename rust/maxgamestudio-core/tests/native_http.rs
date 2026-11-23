@@ -401,8 +401,10 @@ fn restores_existing_cs2_config_backup_and_preserves_failed_recovery() {
 #[test]
 fn config_startup_uses_bundle_data_and_reports_owned_identity_and_recovery() {
     let scratch = tempfile::tempdir().unwrap();
-    let profile = scratch.path().join("profile");
-    let bundle = scratch.path().join("bundle");
+    let root = resolved_fixture_path(scratch.path());
+    let root = Path::new(&root);
+    let profile = root.join("profile");
+    let bundle = root.join("bundle");
     let backup = profile.join(".cs2_config_backup");
     fs::create_dir_all(&backup).unwrap();
     fs::create_dir(&bundle).unwrap();
