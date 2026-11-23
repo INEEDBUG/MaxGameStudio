@@ -14,7 +14,7 @@ use crate::{
 use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -86,23 +86,54 @@ impl Snapshot {
 
 pub(in crate::native_http) struct ActiveProxies {
     state: Mutex<State>,
-    cancel: watch::Sender<bool>,
     serial: Semaphore,
 }
 
 #[derive(Default)]
 struct State {
     stopping: bool,
-    active: HashMap<PathBuf, Snapshot>,
+    active: HashMap<PathBuf, Active>,
+    deleting: HashSet<PathBuf>,
     failed: VecDeque<(PathBuf, Snapshot)>,
     tasks: JoinSet<()>,
+}
+
+struct Active {
+    source: PathBuf,
+    status: Snapshot,
+    cancel: watch::Sender<bool>,
+    done: watch::Receiver<bool>,
+}
+
+pub(super) struct Deleting {
+    profile: Arc<ProfileState>,
+    key: PathBuf,
+    done: Option<watch::Receiver<bool>>,
+}
+
+impl Deleting {
+    pub(super) async fn wait(&mut self) -> Result<(), &'static str> {
+        if let Some(done) = &mut self.done {
+            match timeout(Duration::from_secs(12), done.wait_for(|done| *done)).await {
+                Ok(Ok(_)) => (),
+                _ => return Err("素材预览仍在停止，请稍后重试"),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Deleting {
+    fn drop(&mut self) {
+        let mut state = self.profile.lite_cut_proxies.state.lock().expect("LiteCut proxy jobs");
+        state.deleting.remove(&self.key);
+    }
 }
 
 impl Default for ActiveProxies {
     fn default() -> Self {
         Self {
             state: Mutex::new(State::default()),
-            cancel: watch::channel(false).0,
             serial: Semaphore::new(1),
         }
     }
@@ -122,8 +153,11 @@ impl ActiveProxies {
         if state.stopping {
             return Snapshot::failed(FAILED);
         }
+        if state.deleting.contains(&key) {
+            return Snapshot::QUEUED;
+        }
         if let Some(active) = state.active.get(&key) {
-            return *active;
+            return active.status;
         }
         if let Some(index) = state.failed.iter().position(|(path, _)| path == &key) {
             if !retry {
@@ -136,26 +170,59 @@ impl ActiveProxies {
             // as running work completes without allocating one task per row.
             return Snapshot::QUEUED;
         }
-        state.active.insert(key.clone(), Snapshot::QUEUED);
+        let (cancel, cancelled) = watch::channel(false);
+        let (done, completion) = watch::channel(false);
+        state.active.insert(key.clone(), Active {
+            source: source.path.clone(),
+            status: Snapshot::QUEUED,
+            cancel,
+            done: completion,
+        });
         let profile = Arc::clone(profile);
-        let cancel = self.cancel.subscribe();
         state.tasks.spawn(async move {
-            let result = generate(&profile, &key, source, cancel).await;
+            let result = generate(&profile, &key, source, cancelled).await;
             let mut state = profile.lite_cut_proxies.state.lock().expect("LiteCut proxy jobs");
-            state.active.remove(&key);
-            if let Err(message) = result {
+            let cancelled = state.active.remove(&key).is_some_and(|job| {
+                let requested = *job.cancel.borrow();
+                requested
+            });
+            if let Some(message) = result.err().filter(|_| !cancelled) {
                 if state.failed.len() >= MAX_FAILURES {
                     state.failed.pop_front();
                 }
                 state.failed.push_back((key, Snapshot::failed(message)));
             }
+            done.send_replace(true);
         });
         Snapshot::QUEUED
     }
 
+    pub(super) fn stop_for_deletion(
+        &self,
+        profile: &Arc<ProfileState>,
+        source: &Path,
+    ) -> Result<Deleting, &'static str> {
+        let key = source.with_extension("preview60.mp4");
+        let mut state = self.state.lock().expect("LiteCut proxy jobs");
+        if state.stopping || !state.deleting.insert(key.clone()) {
+            return Err("素材正在移除，请稍后重试");
+        }
+        let done = state.active.get(&key)
+            .filter(|active| active.source == source)
+            .map(|active| {
+                active.cancel.send_replace(true);
+                active.done.clone()
+            });
+        Ok(Deleting {
+            profile: Arc::clone(profile),
+            key,
+            done,
+        })
+    }
+
     fn running(&self, key: &Path, mode: &'static str, alpha: bool) {
-        if let Some(status) = self.state.lock().expect("LiteCut proxy jobs").active.get_mut(key) {
-            *status = Snapshot::running(mode, alpha);
+        if let Some(job) = self.state.lock().expect("LiteCut proxy jobs").active.get_mut(key) {
+            job.status = Snapshot::running(mode, alpha);
         }
     }
 
@@ -163,9 +230,11 @@ impl ActiveProxies {
         let mut tasks = {
             let mut state = self.state.lock().expect("LiteCut proxy jobs");
             state.stopping = true;
+            for job in state.active.values() {
+                job.cancel.send_replace(true);
+            }
             std::mem::take(&mut state.tasks)
         };
-        self.cancel.send_replace(true);
         if timeout(Duration::from_secs(12), async {
             while tasks.join_next().await.is_some() {}
         })
@@ -185,15 +254,19 @@ async fn generate(
 ) -> Result<(), &'static str> {
     // Only one proxy waits for the shared media lane at a time, so a page
     // of old assets cannot queue ahead of a user's interactive media request.
-    let _serial = profile.lite_cut_proxies.serial.acquire().await.map_err(|_| FAILED)?;
+    let acquire = async {
+        let serial = profile.lite_cut_proxies.serial.acquire().await?;
+        let media = profile.media_process.acquire().await?;
+        Ok::<_, tokio::sync::AcquireError>((serial, media))
+    };
     let mut waiting_cancel = cancel.clone();
-    let _permit = match select(
-        Box::pin(profile.media_process.acquire()),
+    let (_serial, _media) = match select(
+        Box::pin(acquire),
         Box::pin(waiting_cancel.wait_for(|cancel| *cancel)),
     )
     .await
     {
-        Either::Left((Ok(permit), _)) if !*cancel.borrow() => permit,
+        Either::Left((Ok(permits), _)) if !*cancel.borrow() => permits,
         _ => return Err(FAILED),
     };
     profile.lite_cut_proxies.running(key, "probing", false);

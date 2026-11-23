@@ -180,6 +180,34 @@ impl ObsCapture {
         self.stop_owned(false).await
     }
 
+    pub(super) async fn pause(&mut self) -> io::Result<()> {
+        self.change_transport("PauseRecord", RecordState::Recording, RecordState::Paused).await
+    }
+
+    pub(super) async fn resume(&mut self) -> io::Result<()> {
+        self.change_transport("ResumeRecord", RecordState::Paused, RecordState::Recording).await
+    }
+
+    async fn change_transport(
+        &mut self,
+        method: &str,
+        before: RecordState,
+        after: RecordState,
+    ) -> io::Result<()> {
+        self.require_owned()?;
+        if self.status(Instant::now() + REQUEST_TIMEOUT).await? != before {
+            return Err(io::Error::other("OBS 录制状态已变化，无法继续拼接片段"));
+        }
+        if after == RecordState::Recording {
+            if let Some(scene) = self.scene.clone() {
+                self.require_scene(&scene).await?;
+            }
+        }
+        self.require_owned()?;
+        self.request(method, Instant::now() + REQUEST_TIMEOUT).await?;
+        self.wait_for(method, after, STATE_TIMEOUT).await
+    }
+
     /// Stop a confirmed capture still active on this connection. An ambiguous
     /// acknowledgement requires recovery outside this controller.
     pub(super) async fn finish_if_owned(&mut self) -> io::Result<Option<PathBuf>> {
@@ -520,6 +548,29 @@ mod tests {
                 drop(capture);
                 server.await.unwrap();
             }
+        });
+    }
+
+    #[test]
+    fn pauses_and_resumes_one_owned_capture_between_segments() {
+        bounded_test(async {
+            let paused = || Reply::ok("GetRecordStatus", json!({"outputActive":true,"outputPaused":true}));
+            let mut replies = startup(true);
+            let stop = Reply::ok("StopRecord", json!({"outputPath":"C:\\fixture\\joined.mkv"}));
+            replies.extend([
+                Reply::status(true), Reply::ok("PauseRecord", Value::Null), paused(),
+                paused(), Reply::ok("ResumeRecord", Value::Null), Reply::status(true),
+                Reply::status(true), stop, Reply::status(false),
+            ]);
+            let (settings, server) = serve(replies, OUTPUTS_SUBSCRIPTION, false).await;
+            let mut capture = ObsCapture::connect(settings).await.unwrap();
+            assert!(capture.pause().await.is_err());
+            capture.start().await.unwrap();
+            capture.pause().await.unwrap();
+            capture.resume().await.unwrap();
+            assert_eq!(capture.stop().await.unwrap(), Some(PathBuf::from("C:\\fixture\\joined.mkv")));
+            drop(capture);
+            server.await.unwrap();
         });
     }
 

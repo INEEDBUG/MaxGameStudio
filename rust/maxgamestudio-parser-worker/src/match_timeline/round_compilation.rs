@@ -198,6 +198,7 @@ impl<'a> MatchRounds<'a> {
         let tagged = kills.kills_for(player.name, spatial, &self.decisions);
         let kill_events = tagged
             .iter()
+            .filter(|kill| !kill.ending_knife)
             .map(kill_inputs::TaggedKill::as_clip_input)
             .collect::<Vec<_>>();
         let fires = kills.fires_for(player.name);
@@ -239,7 +240,6 @@ impl<'a> MatchRounds<'a> {
             .map(|source| {
                 source.clips(highlight_inputs::ClipInput {
                     player,
-                    kills: &kill_events,
                     tagged: &tagged,
                     fires: &fires,
                     freezes: self.freezes,

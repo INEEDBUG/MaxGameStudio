@@ -1,3 +1,4 @@
+mod delete;
 mod metadata;
 mod proxy;
 mod upload;
@@ -34,6 +35,7 @@ const TABLE: &str = "lite_cut_assets";
 pub(in crate::native_http) enum Route {
     List,
     Upload,
+    Delete(String),
     Stream(String),
     Metadata(String),
     Waveform(String),
@@ -48,10 +50,10 @@ impl Route {
         if path == "/api/lite-cut/assets/upload" {
             return Some(Self::Upload);
         }
-        let (id, action) = path
-            .strip_prefix(ASSET_PATH)?
-            .strip_prefix('/')?
-            .split_once('/')?;
+        let tail = path.strip_prefix(ASSET_PATH)?.strip_prefix('/')?;
+        let Some((id, action)) = tail.split_once('/') else {
+            return (!tail.is_empty()).then(|| Self::Delete(tail.to_owned()));
+        };
         if id.is_empty() {
             return None;
         }
@@ -72,6 +74,16 @@ pub(super) async fn respond(
     extended_request: &AtomicBool,
 ) -> HttpResponse {
     match route {
+        Route::Delete(id) if request.method() == Method::DELETE => {
+            delete::respond(profile, &id).await
+        }
+        Route::Delete(_) => {
+            let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+            response
+                .headers_mut()
+                .insert(ALLOW, HeaderValue::from_static("DELETE"));
+            response
+        }
         Route::Upload if request.method() == Method::POST => {
             upload::respond(profile, request, extended_request).await
         }

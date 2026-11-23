@@ -212,6 +212,8 @@ jobs:
       - name: Verify the native Main backend and owned media fixtures
         if: ${{ !cancelled() && !inputs.league_startup_only && steps.rust.outcome == 'success' }}
         shell: pwsh
+        env:
+          NATIVE_PARSER_VERIFIED: ${{ steps.native-parser.outcome == 'success' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
@@ -252,6 +254,11 @@ jobs:
           cargo test @core --test native_http cancelled_recording_queue_restores_fixture_player_data -- --exact --ignored
           cargo test @core --test native_http lite_cut_generates_preview_and_waveform_for_an_existing_asset -- --exact --ignored
           cargo test @core --lib ffmpeg_upper_video_uses_source_trim_layer_order_fades_and_copies_base_aac -- --ignored
+          if ($env:NATIVE_PARSER_VERIFIED -eq 'true') {
+            $env:MGS_NATIVE_PUBLIC_DEMO = Join-Path $env:RUNNER_TEMP 'mgs-public-test-demo.dem'
+            $env:MGS_NATIVE_PARSER_EXE = Join-Path $env:CARGO_TARGET_DIR 'release/maxgamestudio-parser-worker.exe'
+            cargo test @core --test native_http analyzes_a_real_demo_from_both_entry_points_and_rolls_back_a_failed_save -- --exact --ignored
+          }
 
       - name: Collect the verified beta pair and installed inventories
         if: ${{ inputs.deliver && !inputs.league_startup_only && !inputs.backend_only }}

@@ -649,6 +649,65 @@ fn library_analysis_keeps_the_saved_result_when_a_same_name_upload_exists() {
 }
 
 #[test]
+#[ignore = "requires the pinned native parser and the public Demo"]
+fn analyzes_a_real_demo_from_both_entry_points_and_rolls_back_a_failed_save() {
+    let scratch = tempfile::tempdir().unwrap();
+    let demo = std::path::PathBuf::from(std::env::var_os("MGS_NATIVE_PUBLIC_DEMO").unwrap());
+    let parser = std::path::PathBuf::from(std::env::var_os("MGS_NATIVE_PARSER_EXE").unwrap());
+    let bundle = parser.parent().unwrap().join("data");
+    let original = fs::metadata(&demo).unwrap().modified().unwrap();
+    let connection = rusqlite::Connection::open(scratch.path().join("cs2-insight.db")).unwrap();
+    seed_demo_library(&connection);
+    connection.execute(
+        "INSERT INTO demo_files(id,path,filename,status,added_at,remark) VALUES(91,?1,'public.dem','loaded','fixture','保留备注')",
+        [demo.to_str().unwrap()],
+    ).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture", Some((scratch.path(), &bundle)), Some(&scratch.path().join("cs2-insight.config.json")),
+    );
+    let (status, roster) = profile_request(&server, "GET", "/api/demos/91/players", &Value::Null, true);
+    assert_eq!(status, 200, "{roster}");
+    let names: Vec<_> = roster["players"].as_array().unwrap().iter().take(2)
+        .map(|player| player["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 2);
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", demo.to_str().unwrap()).finish();
+    let dto = json!({"target_players":names,"freeze_to_death_rounds":[2,4,5]});
+    let (status, manual) = profile_request(&server, "POST", &format!("/api/demo/parse-multi?{query}"), &dto, true);
+    assert_eq!(status, 200);
+    assert_eq!(manual["players"].as_object().unwrap().len(), 2);
+    assert_eq!(manual["analysis_workspace"]["rounds"].as_array().unwrap().len(), 9);
+    let saved = || connection.query_row(
+        "SELECT result_json FROM match_results WHERE demo_path=?1", [demo.to_str().unwrap()],
+        |row| row.get::<_, String>(0),
+    );
+    assert!(matches!(saved(), Err(rusqlite::Error::QueryReturnedNoRows)));
+    let library = "/api/demos/91/analyze";
+    let (status, recorded) = profile_request(&server, "POST", library, &dto, true);
+    assert_eq!(status, 200);
+    assert_eq!(recorded["demo_filename"], "public.dem");
+    assert_eq!(recorded["players"], manual["players"]);
+    let snapshot = saved().unwrap();
+    let events = || connection.query_row(
+        "SELECT COUNT(*) FROM demo_timeline_events WHERE demo_path=?1", [demo.to_str().unwrap()],
+        |row| row.get::<_, i64>(0),
+    ).unwrap();
+    let event_count = events();
+    assert!(event_count > 0);
+    connection.execute_batch(
+        "CREATE TRIGGER reject_fixture_timeline BEFORE INSERT ON demo_timeline_events
+         BEGIN SELECT RAISE(ABORT, 'fixture rollback'); END;",
+    ).unwrap();
+    let (status, _) = profile_request(&server, "POST", library, &json!({"target_players":names,"freeze_to_death_rounds":[]}), true);
+    assert_eq!(status, 500);
+    assert_eq!(saved().unwrap(), snapshot);
+    assert_eq!(events(), event_count);
+    assert_eq!(connection.query_row("SELECT remark FROM demo_files WHERE id=91", [], |row| row.get::<_, String>(0)).unwrap(), "保留备注");
+    assert_eq!(fs::metadata(&demo).unwrap().modified().unwrap(), original);
+    server.stop();
+}
+
+#[test]
 fn demo_players_reuses_only_a_matching_legacy_roster_snapshot() {
     let scratch = tempfile::tempdir().unwrap();
     let demo = scratch.path().join("测试 roster.dem");
@@ -1392,6 +1451,21 @@ fn lite_cut_generates_preview_and_waveform_for_an_existing_asset() {
     assert!(source.with_extension("preview60.mp4").is_file());
     assert!(source.with_extension("waveform-v1.json").is_file());
     assert_eq!(fs::read_dir(assets).unwrap().count(), 3);
+    let deletion = "/api/lite-cut/assets/1";
+    let incorrect = profile_response(&server, "GET", deletion, &Value::Null, true);
+    assert_eq!((incorrect.status, incorrect.headers["allow"].as_str()), (405, "DELETE"));
+    assert_eq!(profile_response(&server, "DELETE", deletion, &Value::Null, false).status, 401);
+    let (status, result) = profile_request(&server, "DELETE", deletion, &Value::Null, true);
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["deleted"], true);
+    assert_eq!(result["id"], 1);
+    assert!(!source.exists());
+    let recovery = Path::new(result["recovery_directory"].as_str().unwrap());
+    assert!(recovery.join("manifest.json").is_file());
+    assert!(fs::read_dir(recovery.join("files")).unwrap().any(|entry| {
+        fs::read(entry.unwrap().path()).is_ok_and(|content| content == original)
+    }));
+    assert_eq!(profile_request(&server, "DELETE", deletion, &Value::Null, true).0, 404);
     server.stop();
 }
 

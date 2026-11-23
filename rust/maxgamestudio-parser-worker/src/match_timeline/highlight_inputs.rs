@@ -439,13 +439,18 @@ pub(super) struct Source<'a, 'sample> {
 
 pub(super) struct ClipInput<'a> {
     pub(super) player: &'a Player<'a>,
-    pub(super) kills: &'a [Kill<'a>],
     pub(super) tagged: &'a [TaggedKill<'a>],
     pub(super) fires: &'a [Fire<'a>],
     pub(super) freezes: &'a BTreeMap<i64, i64>,
     pub(super) decisions: &'a BTreeMap<i64, i64>,
     pub(super) scores: &'a RoundScores,
     pub(super) recording: Recording<'a>,
+}
+
+#[derive(Default)]
+struct RoundKills<'a> {
+    retained: Vec<(Kill<'a>, &'a TaggedKill<'a>)>,
+    ending_knives: Vec<(Kill<'a>, &'a TaggedKill<'a>)>,
 }
 
 impl Source<'_, '_> {
@@ -470,12 +475,18 @@ impl Source<'_, '_> {
             ..input.recording
         };
 
-        let mut buckets = BTreeMap::<i64, Vec<(&Kill, &TaggedKill)>>::new();
-        for (kill, tagged) in input.kills.iter().zip(input.tagged) {
-            buckets.entry(kill.round).or_default().push((kill, tagged));
+        let mut buckets = BTreeMap::<i64, RoundKills>::new();
+        for tagged in input.tagged {
+            let kill = tagged.as_clip_input();
+            let round = buckets.entry(kill.round).or_default();
+            if tagged.ending_knife {
+                round.ending_knives.push((kill, tagged));
+            } else {
+                round.retained.push((kill, tagged));
+            }
         }
         let mut clips = Vec::new();
-        for (number, kills) in buckets.into_iter().filter(|(_, kills)| kills.len() >= 2) {
+        for (number, kills) in buckets {
             let score = scores.get(&number).copied();
             if post_match(number, score, completed, final_score) {
                 continue;
@@ -483,24 +494,10 @@ impl Source<'_, '_> {
             if self.defuse_overlay(actor, number) != Some(false) {
                 continue;
             }
-            let labels: Vec<_> = kills
-                .iter()
-                .map(|(kill, _)| display_weapon(kill.weapon))
-                .collect();
-            let contexts: Option<Vec<_>> = kills
-                .iter()
-                .zip(&labels)
-                .map(|(&(kill, tagged), label)| {
-                    self.kill_facts(kill, tagged, label, &input, &teams)
-                })
-                .collect();
-            let Some(contexts) = contexts else {
+            let Some(first) = kills.retained.iter().map(|(kill, _)| kill.tick).min() else {
                 continue;
             };
-            let Some(first) = kills.iter().map(|(kill, _)| kill.tick).min() else {
-                continue;
-            };
-            let Some(last) = kills.iter().map(|(kill, _)| kill.tick).max() else {
+            let Some(last) = kills.retained.iter().map(|(kill, _)| kill.tick).max() else {
                 continue;
             };
             let team = teams.get(&number).copied();
@@ -606,7 +603,31 @@ impl Source<'_, '_> {
                 merged_defuse: false,
                 post_match: false,
             };
-            clips.extend(highlights::build(&round, &contexts, &recording));
+            // A detached ending knife covers the round before the jump, one-tap
+            // and duel checks. It leaves a retained multi-kill or knife intact.
+            let retained = (kills.ending_knives.is_empty()
+                || kills.retained.len() >= 2
+                || highlights::is_knife(kills.retained[0].0.weapon))
+            .then_some(kills.retained.as_slice());
+            for clip_kills in retained
+                .into_iter()
+                .chain(kills.ending_knives.iter().map(std::slice::from_ref))
+            {
+                let labels: Vec<_> = clip_kills
+                    .iter()
+                    .map(|(kill, _)| display_weapon(kill.weapon))
+                    .collect();
+                let contexts: Option<Vec<_>> = clip_kills
+                    .iter()
+                    .zip(&labels)
+                    .map(|((kill, tagged), label)| {
+                        self.kill_facts(kill, tagged, label, &input, &teams, clip_kills.len() > 1)
+                    })
+                    .collect();
+                if let Some(contexts) = contexts {
+                    clips.extend(highlights::build(&round, &contexts, &recording));
+                }
+            }
         }
         clips
     }
@@ -681,6 +702,7 @@ impl Source<'_, '_> {
         label: &'b str,
         input: &ClipInput<'_>,
         teams: &BTreeMap<i64, i32>,
+        needs_pre_sample: bool,
     ) -> Option<KillFacts<'b>> {
         let actor = input.player.name;
         let fires = input.fires;
@@ -730,9 +752,14 @@ impl Source<'_, '_> {
                     })
                     .flatten()
             });
-        // The other legacy pre-kill fallbacks can depend on ticks scheduled by
-        // single-kill/fail processing. Leave that candidate unavailable.
-        let encounter = encounter(pre?, actor);
+        // The later pre-kill fallbacks can depend on ticks scheduled by fail
+        // processing. Never use a guessed alive count for a duel or multi-kill.
+        let encounter = if needs_pre_sample {
+            encounter(pre?, actor)
+        } else {
+            pre.filter(|pawns| pawns.iter().any(|pawn| pawn.alive && pawn.team.is_some()))
+                .and_then(|pawns| encounter(pawns, actor))
+        };
         let awp_window = input
             .freezes
             .get(&kill.round)

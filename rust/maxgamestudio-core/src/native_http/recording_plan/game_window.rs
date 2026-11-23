@@ -1,14 +1,15 @@
-//! Commands are bound in the session's private Demo cfg. Only the window of
-//! the PlayDemo subprocess receives the four keys, including during capture.
+//! Commands are bound in the session's private Demo cfg before it starts.
+//! Only the window of the owned playback process receives these keys.
 
 use super::{
-    execute_single::{DemoControl, GameCommand, View},
+    execute_single::{DemoControl, GameCommand, Segment, View},
     playback_gsi::GameUpdate,
     playback_process::PlaybackProcess,
     playback_spec::{seek_commands, PlaybackSpec},
 };
 use futures_util::future::{select, Either};
 use std::{
+    collections::{btree_map::Entry, BTreeMap},
     fmt::Write,
     io,
     time::{Duration, Instant},
@@ -31,65 +32,80 @@ use windows_sys::Win32::{
     },
 };
 
-#[derive(Clone, Copy)]
 pub(super) struct Bindings {
-    seek_tick: i64,
-    slot: i64,
+    seek: BTreeMap<i64, u16>,
+    select: BTreeMap<i64, u16>,
 }
 
 impl Bindings {
     pub(super) fn configure(
         spec: &mut PlaybackSpec,
-        seek_tick: i64,
-        slot: i64,
+        segments: &[Segment<'_>],
         warmup: &[String],
         after_selection: &[&str],
     ) -> io::Result<Self> {
-        let seek = seek_commands(seek_tick)?;
-        if !(0..=i64::from(i32::MAX)).contains(&slot) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "无效的 Demo 观战槽位",
-            ));
+        let mut bindings = Self {
+            seek: BTreeMap::new(),
+            select: BTreeMap::new(),
+        };
+        // These per-process keys supplement the original four numpad bindings.
+        // Each distinct operation has its own key, even within the same round.
+        let mut additional = (b'A'..=b'Z').chain(b'0'..=b'9').map(|key| {
+            (u16::from(key), char::from(key.to_ascii_lowercase()).to_string())
+        });
+        let mut next_key = || {
+            additional.next().ok_or_else(|| {
+                io::Error::other("本次录制的跳转和观战目标过多，请将片段分成两次录制")
+            })
+        };
+        let mut commands = String::from(
+            "bind \"KP_5\" \"demo_pause\"\r\nbind \"KP_6\" \"demo_resume\"\r\n",
+        );
+        for (index, segment) in segments.iter().enumerate() {
+            if let Entry::Vacant(entry) = bindings.seek.entry(segment.seek_tick) {
+                let (key, name) = if index == 0 {
+                    (VK_NUMPAD7, "KP_7".to_owned())
+                } else {
+                    next_key()?
+                };
+                let seek = seek_commands(segment.seek_tick)?;
+                let commands_to_send = warmup.iter().chain(&seek)
+                    .map(String::as_str).collect::<Vec<_>>().join("; ");
+                write!(commands, "bind \"{name}\" \"{commands_to_send}\"\r\n").expect("append to cfg");
+                entry.insert(key);
+            }
+            let slot = segment.view.slot;
+            if let Entry::Vacant(entry) = bindings.select.entry(slot) {
+                if !(0..=i64::from(i32::MAX)).contains(&slot) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "无效的 Demo 观战槽位",
+                    ));
+                }
+                let (key, name) = if index == 0 {
+                    (VK_NUMPAD8, "KP_8".to_owned())
+                } else {
+                    next_key()?
+                };
+                let select = format!("spec_mode 5; spec_player {slot}");
+                let commands_to_send = std::iter::once(select.as_str())
+                    .chain(after_selection.iter().copied()).collect::<Vec<_>>().join("; ");
+                write!(commands, "bind \"{name}\" \"{commands_to_send}\"\r\n").expect("append to cfg");
+                entry.insert(key);
+            }
         }
-        let select = format!("spec_mode 5; spec_player {slot}");
-        let bindings = [
-            ("KP_5", "demo_pause".to_owned()),
-            ("KP_6", "demo_resume".to_owned()),
-            (
-                "KP_7",
-                warmup
-                    .iter()
-                    .chain(&seek)
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            ),
-            (
-                "KP_8",
-                std::iter::once(select.as_str())
-                    .chain(after_selection.iter().copied())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            ),
-        ];
-        for (key, command) in bindings {
-            write!(spec.demo_cfg, "bind \"{key}\" \"{command}\"\r\n").expect("append to cfg");
-        }
-        Ok(Self { seek_tick, slot })
+        spec.demo_cfg.push_str(&commands);
+        Ok(bindings)
     }
 
-    fn key(self, command: GameCommand) -> io::Result<u16> {
+    fn key(&self, command: GameCommand) -> io::Result<u16> {
         match command {
-            GameCommand::SeekPaused(tick) if tick == self.seek_tick => Ok(VK_NUMPAD7),
-            GameCommand::SelectPlayer(slot) if slot == self.slot => Ok(VK_NUMPAD8),
-            GameCommand::PauseWithoutConsole => Ok(VK_NUMPAD5),
-            GameCommand::ResumeWithoutConsole => Ok(VK_NUMPAD6),
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "本次录制未绑定该 Demo 操作",
-            )),
+            GameCommand::SeekPaused(tick) => self.seek.get(&tick).copied(),
+            GameCommand::SelectPlayer(slot) => self.select.get(&slot).copied(),
+            GameCommand::PauseWithoutConsole => Some(VK_NUMPAD5),
+            GameCommand::ResumeWithoutConsole => Some(VK_NUMPAD6),
         }
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "本次录制未绑定该 Demo 操作"))
     }
 }
 
@@ -237,5 +253,37 @@ fn belongs_to(window: HWND, pid: u32) -> bool {
             && actual == pid
             && IsWindowVisible(window) != 0
             && IsIconic(window) == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::native_http::recording_plan::playback_spec::{build, GsiTarget};
+    use std::{num::NonZeroU16, path::Path};
+
+    #[test]
+    fn binds_distinct_seeks_and_povs_without_a_sequential_console_state() {
+        let mut spec = build(
+            Path::new(r"C:\Fixture Steam\game\bin\win64\cs2.exe"),
+            Path::new(r"D:\Fixture Work\match.dem"),
+            "0123456789abcdef0123456789abcdef", "F10", None,
+            GsiTarget { port: NonZeroU16::new(19871).unwrap(), token: &"1".repeat(64) },
+        ).unwrap();
+        let segment = |seek_tick, slot, round| Segment {
+            seek_tick, pre_roll: Duration::from_secs(2), duration: Duration::from_secs(1),
+            view: View { map: "de_fixture", round, steam_id: 76561198000000000, slot },
+        };
+        let controls = Bindings::configure(&mut spec, &[
+            segment(500, 3, 2), segment(900, 3, 2), segment(1200, 4, 3),
+        ], &[], &["cl_demo_predict 0"]).unwrap();
+        assert_eq!(controls.key(GameCommand::SeekPaused(500)).unwrap(), VK_NUMPAD7);
+        assert_eq!(controls.key(GameCommand::SeekPaused(900)).unwrap(), u16::from(b'A'));
+        assert_eq!(controls.key(GameCommand::SeekPaused(1200)).unwrap(), u16::from(b'B'));
+        assert_eq!(controls.key(GameCommand::SelectPlayer(3)).unwrap(), VK_NUMPAD8);
+        assert_eq!(controls.key(GameCommand::SelectPlayer(4)).unwrap(), u16::from(b'C'));
+        assert!(controls.key(GameCommand::SeekPaused(999)).is_err());
+        assert!(spec.demo_cfg.contains("bind \"a\" \"demo_pause; demo_gototick 900\""));
+        assert!(spec.demo_cfg.contains("bind \"c\" \"spec_mode 5; spec_player 4; cl_demo_predict 0\""));
     }
 }

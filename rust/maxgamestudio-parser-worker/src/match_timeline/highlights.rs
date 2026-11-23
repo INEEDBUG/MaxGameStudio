@@ -1,4 +1,4 @@
-//! Ordinary multi-kill highlight clips from complete recording observations.
+//! Ordinary kill highlights from complete recording observations.
 
 use super::kill_compilation::Kill;
 use serde_json::{json, Value};
@@ -86,7 +86,7 @@ pub(super) fn build(
     kills: &[KillFacts<'_>],
     recording: &Recording<'_>,
 ) -> Option<Value> {
-    if kills.len() < 2 || round.post_match || round.merged_defuse {
+    if kills.is_empty() || round.post_match || round.merged_defuse {
         return None;
     }
     debug_assert!(kills.iter().all(|kill| kill.kill.round == round.number));
@@ -94,28 +94,51 @@ pub(super) fn build(
     kills.sort_by_key(|kill| kill.kill.tick);
     let first = kills[0].kill.tick;
     let last = kills[kills.len() - 1].kill.tick;
-    let mut tags = highlight_tags(round, &kills, first, last);
-    if round.won == Some(false) {
-        tags.retain(|tag| !win_only(tag));
-    }
-    if kills.len() == 2 && tags.iter().all(|tag| boring_double_tag(tag)) {
-        return None;
-    }
+    let single = kills.len() == 1;
+    let tags = if single {
+        single_tags(round, kills[0])?
+    } else {
+        let mut tags = highlight_tags(round, &kills, first, last);
+        if round.won == Some(false) {
+            tags.retain(|tag| !win_only(tag));
+        }
+        if kills.len() == 2 && tags.iter().all(|tag| boring_double_tag(tag)) {
+            return None;
+        }
+        tags
+    };
 
     let mut end = last.saturating_add(TAIL);
-    if round.won == Some(false) && tags.iter().any(|tag| nice_try(tag)) {
+    if !single && round.won == Some(false) && tags.iter().any(|tag| nice_try(tag)) {
         if let Some(death) = round.target_death_tick.filter(|&tick| tick > last) {
             end = end.max(death.saturating_add(TAIL));
         }
     }
     let cap = clip_cap(round, recording, last);
     let [own, opposing] = round.score.map_or([None, None], |score| score.map(Some));
-    let mut seen = HashSet::new();
-    let flash_assisters: Vec<_> = kills
+    let (victim_steamids, flash_assisters) = if single {
+        (Vec::new(), Vec::new())
+    } else {
+        let mut seen = HashSet::new();
+        (
+            kills.iter().map(|kill| kill.kill.victim_steamid).collect(),
+            kills
+                .iter()
+                .filter_map(|kill| kill.flash_assister)
+                .filter(|name| !name.is_empty() && seen.insert(*name))
+                .collect(),
+        )
+    };
+    let victims: Vec<_> = kills
         .iter()
-        .filter_map(|kill| kill.flash_assister)
-        .filter(|name| !name.is_empty() && seen.insert(*name))
+        .map(|kill| kill.kill.victim)
+        .filter(|victim| !single || !victim.is_empty())
         .collect();
+    let death_tick = if single && is_knife(kills[0].kill.weapon) {
+        None
+    } else {
+        round.target_death_tick
+    };
     let mut hash = DefaultHasher::new();
     (
         "highlight",
@@ -135,20 +158,59 @@ pub(super) fn build(
         "end_tick":cap.map_or(end, |cap| end.min(cap)),
         "context_tags":deduplicate_tags(tags),
         "killer_name":null, "killers":[], "killers_steamid64s":[], "killer_steamid64":null,
-        "victims":kills.iter().map(|kill| kill.kill.victim).collect::<Vec<_>>(),
-        "victim_steamid64s":kills.iter().map(|kill| kill.kill.victim_steamid).collect::<Vec<_>>(),
+        "victims":victims,
+        "victim_steamid64s":victim_steamids,
         "kill_ticks":kills.iter().map(|kill| kill.kill.tick).collect::<Vec<_>>(),
         "target_spec_slot":recording.target_slot, "kill_spec_slots":vec![recording.target_slot; kills.len()],
-        "victim_spec_slots":kills.iter().map(|kill| recording.slots.get(&kill.kill.victim.to_lowercase())).collect::<Vec<_>>(),
+        "victim_spec_slots":victims.iter().map(|victim| recording.slots.get(&victim.to_lowercase())).collect::<Vec<_>>(),
         "killer_spec_slot":null, "killers_spec_slots":[],
         "score_own":own, "score_opp":opposing, "round_won":round.won,
-        "clip_min_tick":round.freeze_end_tick, "clip_max_tick":cap, "death_tick":round.target_death_tick,
+        "clip_min_tick":round.freeze_end_tick, "clip_max_tick":cap, "death_tick":death_tick,
         "ai_score":null, "ai_commentary":null, "source_ticks":[], "source_rounds":[],
         "source_round_ends":[], "compilation_kind":null, "fixed_segment_pacing":false,
         "freeze_to_death_round_filter":null, "freeze_to_death_round_windows":null,
         "flash_assisters":flash_assisters, "kill_weapons":[], "kill_headshots":[],
         "kill_tag_lists":[], "shots_to_kill":[],
     }))
+}
+
+fn single_tags(round: &RoundFacts<'_>, facts: &KillFacts<'_>) -> Option<Vec<String>> {
+    let kill = facts.kill;
+    if is_knife(kill.weapon) {
+        return Some(vec!["🔪 刀杀".to_owned()]);
+    }
+    let precise = kill.headshot
+        && precise_weapon(kill.weapon)
+        && (facts.shots_to_kill == 1
+            || (facts.shots_to_kill == 0 && matches!(kill.weapon, "deagle" | "revolver")));
+    if facts.jumped {
+        let mut tags = vec!["🪂 跳杀".to_owned()];
+        tags.extend(kill.tags.iter().filter(|tag| *tag != "爆头").cloned());
+        if kill.headshot {
+            tags.push("爆头".to_owned());
+        }
+        if precise {
+            tags.push("💥 颗秒".to_owned());
+            if facts.victim_awp_facing {
+                tags.push("🔪 手撕大狙".to_owned());
+            }
+        }
+        return Some(tags);
+    }
+    if precise {
+        let mut tags = vec!["💥 颗秒".to_owned(), "爆头".to_owned()];
+        if facts.victim_awp_facing {
+            tags.push("🔪 手撕大狙".to_owned());
+        }
+        tags.extend(kill.tags.iter().cloned());
+        return Some(tags);
+    }
+    (round.won == Some(true)
+        && facts
+            .encounter
+            .as_ref()
+            .is_some_and(|fight| fight.mates == 0 && fight.enemies == 1))
+    .then(|| vec!["🐂 1v1 斗牛".to_owned()])
 }
 
 fn highlight_tags(
@@ -371,20 +433,7 @@ fn add_weapon_tags(tags: &mut Vec<String>, kills: &[&KillFacts<'_>]) {
         .filter(|kill| !matches!(kill.kill.weapon, "awp" | "ssg08" | "scar20" | "g3sg1"))
         .collect();
     let precise = regular.iter().any(|kill| {
-        kill.kill.headshot
-            && kill.shots_to_kill <= 3
-            && matches!(
-                kill.kill.weapon,
-                "ak47"
-                    | "m4a1"
-                    | "m4a1_silencer"
-                    | "sg556"
-                    | "aug"
-                    | "famas"
-                    | "galilar"
-                    | "deagle"
-                    | "revolver"
-            )
+        kill.kill.headshot && kill.shots_to_kill <= 3 && precise_weapon(kill.kill.weapon)
     });
     if precise || (regular.len() >= 2 && regular.iter().all(|kill| kill.kill.headshot)) {
         tags.push("💥 颗秒".to_owned());
@@ -445,7 +494,22 @@ fn within(from: i64, to: i64, max: i64) -> bool {
     (0..=max).contains(&to.saturating_sub(from))
 }
 
-fn is_knife(weapon: &str) -> bool {
+fn precise_weapon(weapon: &str) -> bool {
+    matches!(
+        weapon,
+        "ak47"
+            | "m4a1"
+            | "m4a1_silencer"
+            | "sg556"
+            | "aug"
+            | "famas"
+            | "galilar"
+            | "deagle"
+            | "revolver"
+    )
+}
+
+pub(super) fn is_knife(weapon: &str) -> bool {
     [
         "knife",
         "bayonet",
@@ -607,6 +671,65 @@ mod tests {
             jumped: false,
             teammate_hurt_tick: None,
         }
+    }
+
+    #[test]
+    fn one_tap_thresholds_keep_knife_jump_and_duel_precedence() {
+        let shot_tags = ["🌫️ 混烟".to_owned(), "爆头".to_owned()];
+        let rifle = Kill {
+            round: 4,
+            tick: 1060,
+            victim: "Other",
+            victim_steamid: "32",
+            weapon: "ak47",
+            headshot: true,
+            tags: &shot_tags,
+        };
+        let mut round = round();
+        round.won = Some(true);
+        let mut evidence = detail(&rifle);
+        evidence.shots_to_kill = 1;
+        evidence.jumped = true;
+        evidence.victim_awp_facing = true;
+        evidence.encounter = Some(Encounter {
+            mates: 0,
+            enemies: 1,
+            isolated_enemy_count: None,
+        });
+        let tags = |round: &RoundFacts<'_>, evidence: &KillFacts<'_>| {
+            single_tags(round, evidence).map(deduplicate_tags)
+        };
+        assert_eq!(
+            tags(&round, &evidence).unwrap(),
+            ["🪂 跳杀", "🌫️ 混烟", "💥 颗秒", "🔪 手撕大狙"]
+        );
+        evidence.jumped = false;
+        assert_eq!(
+            tags(&round, &evidence).unwrap(),
+            ["💥 颗秒", "🔪 手撕大狙", "🌫️ 混烟"]
+        );
+        evidence.shots_to_kill = 0;
+        assert_eq!(tags(&round, &evidence).unwrap(), ["🐂 1v1 斗牛"]);
+        round.won = Some(false);
+        assert!(tags(&round, &evidence).is_none());
+
+        let deagle = Kill {
+            weapon: "deagle",
+            ..rifle
+        };
+        let mut evidence = detail(&deagle);
+        evidence.shots_to_kill = 0;
+        assert_eq!(tags(&round, &evidence).unwrap(), ["💥 颗秒", "🌫️ 混烟"]);
+        evidence.shots_to_kill = 2;
+        assert!(tags(&round, &evidence).is_none());
+
+        let knife = Kill {
+            weapon: "knife_m9_bayonet",
+            ..deagle
+        };
+        let mut evidence = detail(&knife);
+        evidence.jumped = true;
+        assert_eq!(tags(&round, &evidence).unwrap(), ["🔪 刀杀"]);
     }
 
     #[test]

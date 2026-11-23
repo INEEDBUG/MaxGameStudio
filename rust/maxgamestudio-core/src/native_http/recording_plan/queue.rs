@@ -8,6 +8,7 @@ use super::{
     playback_process::PlaybackProcess,
     playback_spec::{self, AspectRatio, GsiTarget, Resolution},
     playback_stage::SourceStamp,
+    request::{EventType, RequestType},
     RecordingPlan, RecordingRequestDto,
 };
 use crate::{
@@ -22,6 +23,7 @@ use hyper::{body::Incoming, Request, StatusCode};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeSet,
     fmt::Write,
     io,
     num::NonZeroU16,
@@ -462,40 +464,7 @@ async fn capture(
     let mut cancel = job.signals.cancel.subscribe();
     let plan = &clip.plan;
     let request = &plan.request;
-    let [planned] = plan.active.as_slice() else {
-        return Err(io::Error::other("当前 Rust 录制路径只支持一个连续片段"));
-    };
-    let round = planned
-        .round
-        .filter(|round| *round >= 1)
-        .ok_or_else(|| io::Error::other("无法识别录制回合"))?;
-    let slot = planned
-        .target_spec_slot
-        .ok_or_else(|| io::Error::other("计划未提供可校验的玩家观战槽位"))?;
-    let target = planned
-        .target_steamid64
-        .parse::<u64>()
-        .ok()
-        .filter(|id| *id > 0)
-        .ok_or_else(|| io::Error::other("计划未提供可校验的 Steam 玩家 ID"))?;
-    let seconds = |ticks: i64| {
-        Duration::try_from_secs_f64(ticks.max(0) as f64 / request.demo.tick_rate)
-            .map_err(|_| io::Error::other("录制片段的时间范围无效"))
-    };
-    let segment = execute_single::Segment {
-        seek_tick: planned.safe_seek_tick,
-        pre_roll: seconds(planned.start_tick - planned.safe_seek_tick)?,
-        duration: seconds(planned.end_tick - planned.start_tick)?,
-        view: execute_single::View {
-            map: &request.demo.map_name,
-            round,
-            steam_id: target,
-            slot,
-        },
-    };
-    if request.demo.map_name.is_empty() || segment.duration.is_zero() {
-        return Err(io::Error::other("录制片段缺少有效的地图或时间范围"));
-    }
+    let segments = capture_segments(plan)?;
     let cfg = profile.config.view()?;
     let cs2 = cfg["cs2_path"]
         .as_str()
@@ -558,13 +527,7 @@ async fn capture(
             }
         }
     }
-    let controls = Bindings::configure(
-        &mut spec,
-        planned.safe_seek_tick,
-        slot,
-        &commands,
-        &after_selection,
-    )?;
+    let controls = Bindings::configure(&mut spec, &segments, &commands, &after_selection)?;
     let ffprobe = ffmpeg::find_ffprobe(&profile.config.ffmpeg_executable()?)
         .ok_or_else(|| io::Error::other("请配置与 FFmpeg 配套的 FFprobe"))?;
 
@@ -609,7 +572,7 @@ async fn capture(
                     let mut game =
                         GameWindow::find(&mut process, controls, feed.updates.clone(), &mut cancel)
                             .await?;
-                    execute_single::run(&mut game, &mut capture, segment, &mut cancel).await
+                    execute_single::run(&mut game, &mut capture, &segments, &mut cancel).await
                 };
                 let result = recording.await;
                 let result = after_cleanup(result, capture.finish_if_owned().await.map(|_| ()));
@@ -652,15 +615,11 @@ async fn capture(
         .to_owned();
     let demo_path = request.demo.demo_path.clone();
     let filename = request.demo.demo_filename.clone();
-    let player = planned.target_player_name.clone();
-    let segment_status = json!({"segment_index":planned.segment_index,"status":"ok","error":null,"duration_sec":artifact.elapsed.as_secs_f64()});
-    let metadata = json!({
-        "recording_request_type":request.request_type,
-        "source_rounds":[round],
-        "planned_segments":[planned],
-        "segment_results":[segment_status],
-        "warnings":request.warnings,
-    });
+    let player = request.target_player.name.clone();
+    let segment_status: Vec<_> = plan.active.iter().zip(&artifact.durations).map(|(segment, duration)| {
+        json!({"segment_index":segment.segment_index,"status":"ok","error":null,"duration_sec":duration.as_secs_f64()})
+    }).collect();
+    let metadata = clip_metadata(plan, &segment_status);
     profile.recording.begin_publication(last)?;
     let id = tokio::task::spawn_blocking(move || {
         insert_ready(
@@ -681,13 +640,98 @@ async fn capture(
     Ok(json!({
         "request_id":request.request_id,"success":true,
         "output_path":output_path,"recorded_clip_id":id,"recorded_clip_duration_sec":duration,
-        "warnings":request.warnings,"error":null,"segment_results":[segment_status],
+        "warnings":request.warnings,"error":null,"segment_results":segment_status,
     }))
+}
+
+fn clip_metadata(plan: &RecordingPlan, segment_status: &[Value]) -> Value {
+    let request = &plan.request;
+    let (category, timeline, compilation) = match request.request_type {
+        RequestType::Highlight => ("highlight", None, None),
+        RequestType::Fail => ("fail", None, None),
+        RequestType::TimelineKill => ("timeline", Some("kill"), None),
+        RequestType::TimelineDeath => ("timeline", Some("death"), None),
+        RequestType::TimelineRound => ("timeline_round", Some("round"), None),
+        RequestType::KillCompilation if request.source_ref.group_id.as_deref() == Some("weapon_kills") =>
+            ("compilation", None, Some("weapon_kills")),
+        RequestType::KillCompilation => ("compilation", None, Some("all_kills")),
+        RequestType::DeathCompilation => ("compilation", None, Some("all_deaths")),
+        RequestType::RoundCompilation => ("compilation", None, Some("rounds")),
+    };
+    let source_rounds: BTreeSet<_> = if request.rounds.is_empty() {
+        request.events.iter().map(|event| event.round).filter(|round| *round > 0).collect()
+    } else {
+        request.rounds.iter().map(|round| round.round).collect()
+    };
+    let kills: Vec<_> = request.events.iter().filter(|event| event.event_type == EventType::Kill).collect();
+    let victims: BTreeSet<_> = kills.iter().map(|event| event.victim.name.as_str())
+        .filter(|name| !name.is_empty()).collect();
+    let killers: BTreeSet<_> = request.events.iter().map(|event| event.killer.name.as_str())
+        .filter(|name| !name.is_empty()).collect();
+    let mut meta = json!({
+        "recording_origin":"recording_v3", "recording_request_type":request.request_type,
+        "recording_source_type":request.source_type, "workbench_clip_kind":request.request_type,
+        "category":category, "request_type":request.request_type, "map_name":request.demo.map_name,
+        "round":source_rounds.first(), "source_rounds":source_rounds,
+        "kill_count":kills.len(), "kill_ticks":kills.iter().map(|event| event.tick).collect::<Vec<_>>(),
+        "context_tags":request.source_ref.context_tags, "victims":victims, "killers":killers,
+        "target_player":request.target_player.name, "target_steam_id":request.target_player.steamid64,
+        "steamid":request.target_player.steamid64, "demo_path":request.demo.demo_path,
+        "timeline_event_id":request.source_ref.timeline_event_id, "timeline_record_kind":timeline,
+        "timeline_source":(timeline.is_some() || request.source_ref.timeline_event_id.is_some()).then_some("round_timeline_event"),
+        "compilation_kind":compilation,"planned_segments":plan.active,
+        "segment_results":segment_status, "warnings":request.warnings, "pov_hud_enabled":false,
+    });
+    if let Some(death) = request.events.iter().find(|event| event.event_type == EventType::Death) {
+        meta["death_tick"] = json!(death.tick);
+        if matches!(request.request_type, RequestType::Fail | RequestType::TimelineDeath) {
+            meta["killer_name"] = json!(death.killer.name);
+        }
+    }
+    meta.as_object_mut().expect("clip metadata").retain(|_, value| !value.is_null());
+    meta
+}
+
+fn capture_segments(plan: &RecordingPlan) -> io::Result<Vec<execute_single::Segment<'_>>> {
+    let request = &plan.request;
+    if plan.active.is_empty() || request.demo.map_name.is_empty() {
+        return Err(io::Error::other("没有可录制的片段或地图"));
+    }
+    let seconds = |ticks: i64| {
+        Duration::try_from_secs_f64(ticks.max(0) as f64 / request.demo.tick_rate)
+            .map_err(|_| io::Error::other("录制片段的时间范围无效"))
+    };
+    plan.active.iter().map(|planned| {
+        let round = planned.round.filter(|round| *round >= 1)
+            .ok_or_else(|| io::Error::other("无法识别录制回合"))?;
+        let slot = planned.target_spec_slot
+            .ok_or_else(|| io::Error::other("计划未提供可校验的玩家观战槽位"))?;
+        let target = planned.target_steamid64.parse::<u64>().ok().filter(|id| *id > 0)
+            .ok_or_else(|| io::Error::other("计划未提供可校验的 Steam 玩家 ID"))?;
+        let duration = seconds(planned.end_tick - planned.start_tick)?;
+        if duration.is_zero() {
+            return Err(io::Error::other("录制片段的时间范围无效"));
+        }
+        Ok(execute_single::Segment {
+            seek_tick: planned.safe_seek_tick,
+            pre_roll: seconds(planned.start_tick - planned.safe_seek_tick)?,
+            duration,
+            view: execute_single::View { map: &request.demo.map_name, round, steam_id: target, slot },
+        })
+    }).collect()
 }
 
 impl execute_single::SegmentCapture for ObsCapture {
     async fn start(&mut self) -> io::Result<()> {
         self.start().await
+    }
+
+    async fn pause(&mut self) -> io::Result<()> {
+        self.pause().await
+    }
+
+    async fn resume(&mut self) -> io::Result<()> {
+        self.resume().await
     }
 
     async fn stop(&mut self) -> io::Result<Option<PathBuf>> {

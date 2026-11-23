@@ -108,6 +108,7 @@ impl Route {
         match self {
             Self::List => "GET, POST",
             Self::Project(_) => "GET, PATCH",
+            Self::Assets(assets::Route::Delete(_)) => "DELETE",
             Self::Restore { .. }
             | Self::ValidateAssets
             | Self::Assets(assets::Route::Upload | assets::Route::RetryProxy(_))

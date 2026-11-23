@@ -360,12 +360,17 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         assert_eq!(fixture_checksum(&serde_json::to_vec(&clips).unwrap()), digest, "{kind} legacy parity");
     }
     let mut highlights = Vec::new();
+    let mut single_highlights = Vec::new();
     for name in names {
         for clip in clips[name].as_array().unwrap() {
-            if clip["category"] == "highlight" && clip["kill_count"].as_u64().unwrap_or(0) >= 2 {
+            if clip["category"] == "highlight" {
                 let mut clip = clip.clone();
                 clip.as_object_mut().unwrap().remove("clip_id");
-                highlights.push(clip);
+                match clip["kill_count"].as_u64() {
+                    Some(1) => single_highlights.push(clip),
+                    Some(2..) => highlights.push(clip),
+                    _ => panic!("unexpected kill count in public Demo highlight: {clip}"),
+                }
             }
         }
     }
@@ -378,6 +383,12 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         fixture_checksum(&serde_json::to_vec(&highlights).unwrap()),
         0xd39d7a3e29e405a1,
         "legacy ordinary multi-kill highlight parity"
+    );
+    assert_eq!(single_highlights.len(), 4);
+    assert_eq!(
+        fixture_checksum(&serde_json::to_vec(&single_highlights).unwrap()),
+        0x87a6f668d685286c,
+        "legacy single-kill highlight parity"
     );
 }
 

@@ -1,4 +1,4 @@
-//! Execute the ordinary single-POV segment with an owned OBS capture.
+//! Execute planned POV segments with one owned OBS capture.
 //! GSI verifies the observed map/round/player. Demo tick and pause timing
 //! remain estimates, as in the released recorder.
 
@@ -26,6 +26,8 @@ pub(super) trait DemoControl {
 
 pub(super) trait SegmentCapture {
     async fn start(&mut self) -> io::Result<()>;
+    async fn pause(&mut self) -> io::Result<()>;
+    async fn resume(&mut self) -> io::Result<()>;
     async fn stop(&mut self) -> io::Result<Option<PathBuf>>;
 }
 
@@ -45,15 +47,63 @@ pub(super) struct Segment<'a> {
 
 pub(super) struct Artifact {
     pub(super) file: PathBuf,
-    pub(super) elapsed: Duration,
+    pub(super) durations: Vec<Duration>,
 }
 
 pub(super) async fn run(
     game: &mut impl DemoControl,
     capture: &mut impl SegmentCapture,
-    segment: Segment<'_>,
+    segments: &[Segment<'_>],
     cancel: &mut watch::Receiver<bool>,
 ) -> io::Result<Artifact> {
+    if segments.is_empty() {
+        return Err(io::Error::other("没有可录制的片段"));
+    }
+    let mut durations = Vec::with_capacity(segments.len());
+    let mut started = false;
+    let record = async {
+        for (index, segment) in segments.iter().enumerate() {
+            let overshoot = prepare(game, segment, cancel).await?;
+            // Wait for acknowledgement before allowing cancellation to stop the capture.
+            if index == 0 {
+                capture.start().await?;
+                started = true;
+            } else {
+                capture.resume().await?;
+            }
+            let measuring = Instant::now();
+            capture_segment(game, segment, overshoot, cancel).await?;
+            durations.push(measuring.elapsed());
+            if index + 1 < segments.len() {
+                capture.pause().await?;
+            }
+        }
+        Ok::<_, io::Error>(())
+    }
+    .await;
+    let stopped = if started {
+        capture.stop().await
+    } else {
+        Ok(None)
+    };
+    let file = match (record, stopped) {
+        (Ok(()), Ok(Some(path))) => path,
+        (Ok(()), Ok(None)) => return Err(io::Error::other("OBS did not return a recording path")),
+        (Err(error), Ok(_)) | (Ok(()), Err(error)) => return Err(error),
+        (Err(error), Err(stop)) => {
+            return Err(io::Error::other(format!(
+                "{error}; OBS recording cleanup could not be confirmed: {stop}"
+            )));
+        }
+    };
+    Ok(Artifact { file, durations })
+}
+
+async fn prepare(
+    game: &mut impl DemoControl,
+    segment: &Segment<'_>,
+    cancel: &mut watch::Receiver<bool>,
+) -> io::Result<Duration> {
     if *cancel.borrow() {
         return Err(interrupted());
     }
@@ -82,47 +132,28 @@ pub(super) async fn run(
     sleep_or_cancel(segment.pre_roll.saturating_sub(elapsed), cancel).await?;
     game.command(GameCommand::PauseWithoutConsole).await?;
     sleep_or_cancel(Duration::from_millis(50), cancel).await?;
+    Ok(overshoot)
+}
 
-    // Never cancel the lifecycle call in flight. Exactly one acknowledged
-    // start must precede our stop, even if a stop request arrives meanwhile.
-    capture.start().await?;
-    let started = Instant::now();
-    let recorded = async {
-        if *cancel.borrow() {
-            return Err(interrupted());
-        }
-        game.command(GameCommand::ResumeWithoutConsole).await?;
-        let remaining = segment
-            .duration
-            .saturating_sub(overshoot)
-            .max(Duration::from_millis(100));
-        match select(
-            Box::pin(sleep_or_cancel(remaining, cancel)),
-            Box::pin(game.wait_exit()),
-        )
-        .await
-        {
-            Either::Left((result, _)) | Either::Right((result, _)) => result,
-        }
+async fn capture_segment(
+    game: &mut impl DemoControl,
+    segment: &Segment<'_>,
+    overshoot: Duration,
+    cancel: &mut watch::Receiver<bool>,
+) -> io::Result<()> {
+    if *cancel.borrow() {
+        return Err(interrupted());
     }
-    .await;
-    let elapsed = started.elapsed();
-    let stopped = capture.stop().await;
-    let path = match (recorded, stopped) {
-        (Ok(()), Ok(Some(path))) => path,
-        (Ok(()), Ok(None)) => return Err(io::Error::other("OBS did not return a recording path")),
-        (Err(error), Ok(_)) => return Err(error),
-        (Ok(()), Err(error)) => return Err(error),
-        (Err(error), Err(stop)) => {
-            return Err(io::Error::other(format!(
-                "{error}; OBS recording cleanup could not be confirmed: {stop}"
-            )));
-        }
-    };
-    Ok(Artifact {
-        file: path,
-        elapsed,
-    })
+    game.command(GameCommand::ResumeWithoutConsole).await?;
+    let remaining = segment.duration.saturating_sub(overshoot).max(Duration::from_millis(100));
+    match select(
+        Box::pin(sleep_or_cancel(remaining, cancel)),
+        Box::pin(game.wait_exit()),
+    )
+    .await
+    {
+        Either::Left((result, _)) | Either::Right((result, _)) => result,
+    }
 }
 
 async fn sleep_or_cancel(duration: Duration, cancel: &mut watch::Receiver<bool>) -> io::Result<()> {
@@ -161,6 +192,7 @@ mod tests {
         async fn command(&mut self, command: GameCommand) -> io::Result<()> {
             let label = match command {
                 GameCommand::SeekPaused(500) => "seek",
+                GameCommand::SeekPaused(900) => "second seek",
                 GameCommand::SelectPlayer(3) => "select",
                 GameCommand::PauseWithoutConsole => "pause",
                 GameCommand::ResumeWithoutConsole => "resume",
@@ -201,6 +233,27 @@ mod tests {
             self.trace.borrow_mut().push("obs stop");
             Ok(Some(PathBuf::from("synthetic-video.mp4")))
         }
+
+        async fn pause(&mut self) -> io::Result<()> {
+            self.trace.borrow_mut().push("obs pause");
+            Ok(())
+        }
+
+        async fn resume(&mut self) -> io::Result<()> {
+            self.trace.borrow_mut().push("obs resume");
+            Ok(())
+        }
+    }
+
+    fn fixture_segment(seek_tick: i64) -> Segment<'static> {
+        Segment {
+            seek_tick,
+            pre_roll: Duration::from_millis(20),
+            duration: Duration::from_millis(20),
+            view: View {
+                map: "de_fixture", round: 2, steam_id: 76561198000000000, slot: 3,
+            },
+        }
     }
 
     #[test]
@@ -224,17 +277,7 @@ mod tests {
                 let result = run(
                     &mut game,
                     &mut capture,
-                    Segment {
-                        seek_tick: 500,
-                        pre_roll: Duration::from_millis(20),
-                        duration: Duration::from_millis(20),
-                        view: View {
-                            map: "de_fixture",
-                            round: 2,
-                            steam_id: 76561198000000000,
-                            slot: 3,
-                        },
-                    },
+                    &[fixture_segment(500)],
                     &mut cancel,
                 )
                 .await;
@@ -259,7 +302,7 @@ mod tests {
                 } else {
                     let artifact = result.unwrap();
                     assert_eq!(artifact.file, PathBuf::from("synthetic-video.mp4"));
-                    assert!(artifact.elapsed >= Duration::from_millis(100));
+                    assert!(artifact.durations[0] >= Duration::from_millis(100));
                     assert_eq!(
                         trace.as_slice(),
                         [
@@ -275,6 +318,25 @@ mod tests {
                     );
                 }
             }
+        });
+    }
+
+    #[test]
+    fn pauses_before_seeking_to_another_position_in_the_same_round() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        runtime.block_on(async {
+            let trace = Rc::new(RefCell::new(Vec::new()));
+            let (_send, mut cancel) = watch::channel(false);
+            let mut game = FakeGame { matched: true, trace: Rc::clone(&trace) };
+            let mut capture = FakeCapture { trace: Rc::clone(&trace), on_start: None };
+            let artifact = run(&mut game, &mut capture, &[fixture_segment(500), fixture_segment(900)], &mut cancel)
+                .await.unwrap();
+            assert_eq!(artifact.file, PathBuf::from("synthetic-video.mp4"));
+            assert_eq!(artifact.durations.len(), 2);
+            assert_eq!(trace.borrow().as_slice(), [
+                "seek", "resume", "select", "view", "pause", "obs start", "resume", "obs pause",
+                "second seek", "resume", "select", "view", "pause", "obs resume", "resume", "obs stop",
+            ]);
         });
     }
 }

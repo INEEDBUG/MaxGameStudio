@@ -1,6 +1,6 @@
 //! Read the recording-specific events and only the spatial samples their tags need.
 
-use super::{kill_action_tags as tags, kill_compilation};
+use super::{highlights::is_knife, kill_action_tags as tags, kill_compilation};
 use crate::{
     analysis_events::{self, EventKind},
     demo_inspection::{named_column, player_name},
@@ -37,6 +37,7 @@ struct RawKill<'a> {
 pub(super) struct TaggedKill<'a> {
     kill: &'a RawKill<'a>,
     tags: Vec<String>,
+    pub(super) ending_knife: bool,
 }
 
 impl TaggedKill<'_> {
@@ -158,11 +159,7 @@ impl<'a> Sources<'a> {
     pub(super) fn highlight_ticks(&self) -> BTreeSet<i32> {
         let mut ticks = BTreeSet::new();
         for kills in self.kills.values() {
-            let mut counts = BTreeMap::<i64, usize>::new();
             for kill in kills {
-                *counts.entry(kill.round).or_default() += 1;
-            }
-            for kill in kills.iter().filter(|kill| counts[&kill.round] >= 2) {
                 // The old analyzer schedules -8 and -16 for all kills. The two
                 // older fallbacks are explicitly scheduled only for snipers.
                 let offsets = if matches!(kill.weapon.as_str(), "awp" | "ssg08") {
@@ -234,14 +231,11 @@ impl<'a> Sources<'a> {
         }
         kills
             .iter()
-            .filter_map(|kill| {
+            .map(|kill| {
                 let tick = i64::from(kill.event.tick);
-                if decisions.get(&kill.round) == Some(&tick)
+                let ending_knife = decisions.get(&kill.round) == Some(&tick)
                     && first_tick[&kill.round] < tick
-                    && terminal_knife(&kill.weapon)
-                {
-                    return None;
-                }
+                    && is_knife(&kill.weapon);
                 let at = |tick: i64, name: &str| {
                     let players = rows.get(&i32::try_from(tick).ok()?)?;
                     players
@@ -279,7 +273,7 @@ impl<'a> Sources<'a> {
                     &snapshots,
                     self.blinds.get(kill.victim).map(Vec::as_slice).unwrap_or_default(),
                 );
-                Some(TaggedKill { kill, tags })
+                TaggedKill { kill, tags, ending_knife }
             })
             .collect()
     }
@@ -333,14 +327,4 @@ fn name_field<'a>(event: &'a GameEvent, key: &str) -> Option<&'a str> {
 fn weapon(event: &GameEvent) -> String {
     let name = name_field(event, "weapon").unwrap_or_default().to_lowercase();
     name.strip_prefix("weapon_").map(str::to_owned).unwrap_or(name)
-}
-
-fn terminal_knife(weapon: &str) -> bool {
-    [
-        "knife", "bayonet", "karambit", "butterfly", "stiletto", "falchion", "bowie", "huntsman",
-        "daggers", "shadow", "navaja", "ursus", "nomad", "skeleton", "survival", "paracord", "canis",
-        "cord", "widowmaker", "gypsy", "outdoor", "css", "kukri",
-    ]
-    .iter()
-    .any(|alias| weapon.contains(alias))
 }
