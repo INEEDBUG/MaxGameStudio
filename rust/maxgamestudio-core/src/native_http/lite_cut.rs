@@ -27,6 +27,7 @@ use std::{
 };
 use tokio::sync::watch;
 
+pub(super) use assets::ActiveProxies;
 pub(super) use export_job::Exports as ActiveExports;
 
 const PROJECTS_PATH: &str = "/api/lite-cut/projects";
@@ -109,6 +110,7 @@ impl Route {
             Self::Project(_) => "GET, PATCH",
             Self::Restore { .. }
             | Self::ValidateAssets
+            | Self::Assets(assets::Route::Upload | assets::Route::RetryProxy(_))
             | Self::StartExport { .. }
             | Self::CancelExport(_) => "POST",
             _ => "GET",

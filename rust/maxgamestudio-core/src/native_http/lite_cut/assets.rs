@@ -1,18 +1,23 @@
 mod metadata;
+mod proxy;
+mod upload;
+mod waveform;
+
+pub(in crate::native_http) use proxy::ActiveProxies;
 
 use super::read_table;
 use crate::{
     native_http::{
         demo_query::{parse_path_integer, parse_project_page},
-        detail, json_reply, media_stream, profile_disk, profile_work, validation_reply,
+        detail, json_reply, media_stream, profile_work, validation_reply,
         HttpResponse, ProfileState,
     },
     profile_platform::{expand_user, resolved_path},
 };
 use hyper::{
     body::Incoming,
-    header::{HeaderValue, CACHE_CONTROL},
-    Request, StatusCode,
+    header::{HeaderValue, ALLOW, CACHE_CONTROL, RETRY_AFTER},
+    Method, Request, StatusCode,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::{json, Value};
@@ -28,14 +33,20 @@ const TABLE: &str = "lite_cut_assets";
 
 pub(in crate::native_http) enum Route {
     List,
+    Upload,
     Stream(String),
     Metadata(String),
+    Waveform(String),
+    RetryProxy(String),
 }
 
 impl Route {
     pub(super) fn from_path(path: &str) -> Option<Self> {
         if path == ASSET_PATH {
             return Some(Self::List);
+        }
+        if path == "/api/lite-cut/assets/upload" {
+            return Some(Self::Upload);
         }
         let (id, action) = path
             .strip_prefix(ASSET_PATH)?
@@ -47,6 +58,8 @@ impl Route {
         match action {
             "stream" => Some(Self::Stream(id.to_owned())),
             "metadata" => Some(Self::Metadata(id.to_owned())),
+            "waveform" => Some(Self::Waveform(id.to_owned())),
+            "proxy/retry" => Some(Self::RetryProxy(id.to_owned())),
             _ => None,
         }
     }
@@ -59,13 +72,50 @@ pub(super) async fn respond(
     extended_request: &AtomicBool,
 ) -> HttpResponse {
     match route {
+        Route::Upload if request.method() == Method::POST => {
+            upload::respond(profile, request, extended_request).await
+        }
+        Route::RetryProxy(id) if request.method() == Method::POST => {
+            let id = match parse_path_integer(&id, "asset_id") {
+                Ok(id) => id,
+                Err(errors) => return validation_reply(errors),
+            };
+            match profile_work(profile, move |profile| {
+                let row = load_row(profile, id)?;
+                let root = asset_root(profile)?;
+                let preview = Preview::read(&root, &row);
+                Ok::<_, AssetMediaError>((row, preview))
+            }).await {
+                Ok(Ok((mut row, preview))) => {
+                    preview.apply(profile, &mut row, true);
+                    json_reply(StatusCode::OK, row)
+                }
+                Ok(Err(error)) => error.response(),
+                Err(_) => read_error(),
+            }
+        }
+        Route::Upload | Route::RetryProxy(_) => {
+            let mut response = detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+            response
+                .headers_mut()
+                .insert(ALLOW, HeaderValue::from_static("POST"));
+            response
+        }
         Route::List => {
             let page =
                 match parse_project_page(request.uri().query().unwrap_or_default(), 500, 1000) {
                     Ok(page) => page,
                     Err(errors) => return validation_reply(errors),
                 };
-            profile_disk(profile, move |profile| list(profile, page)).await
+            let Ok(Ok(items)) = profile_work(profile, move |profile| list(profile, page)).await else {
+                return read_error();
+            };
+            let items: Vec<_> = items.into_iter().map(|(mut row, preview)| {
+                preview.apply(profile, &mut row, false);
+                row
+            }).collect();
+            let (_, limit, offset) = page;
+            json_reply(StatusCode::OK, json!({"items":items,"limit":limit,"offset":offset}))
         }
         Route::Stream(id) => {
             let id = match parse_path_integer(&id, "asset_id") {
@@ -74,7 +124,16 @@ pub(super) async fn respond(
             };
             let (file, font) =
                 match profile_work(profile, move |profile| load_media(profile, id)).await {
-                    Ok(Ok(media)) => media,
+                    Ok(Ok(Media::File { path, font })) => (path, font),
+                    Ok(Ok(Media::Pending(source))) => {
+                        let status = profile.lite_cut_proxies.schedule(profile, source, false);
+                        if status.status == "failed" {
+                            return detail(StatusCode::UNPROCESSABLE_ENTITY, status.message);
+                        }
+                        let mut response = detail(StatusCode::TOO_EARLY, "预览代理正在后台生成");
+                        response.headers_mut().insert(RETRY_AFTER, HeaderValue::from_static("1"));
+                        return response;
+                    }
                     Ok(Err(error)) => return error.response(),
                     Err(_) => return read_error(),
                 };
@@ -93,36 +152,28 @@ pub(super) async fn respond(
             Ok(id) => metadata::respond(profile, id, extended_request).await,
             Err(errors) => validation_reply(errors),
         },
+        Route::Waveform(id) => {
+            let query = request.uri().query().unwrap_or_default();
+            waveform::respond(profile, &id, query, extended_request).await
+        }
     }
 }
 
 fn list(
     profile: &ProfileState,
     (project_id, limit, offset): (Option<i64>, i64, i64),
-) -> HttpResponse {
-    let rows = read_table(&profile.config.database_path(), TABLE, |connection| {
+) -> Result<Vec<(Value, Preview)>, AssetMediaError> {
+    let items = read_table(&profile.config.database_path(), TABLE, |connection| {
         read_page(connection, project_id, limit, offset)
-    });
-    let Ok(rows) = rows else {
-        return read_error();
-    };
-    let mut items = rows.unwrap_or_default();
-    if !items.is_empty() {
-        let Ok(root) = profile
-            .config
-            .lite_cut_assets_dir()
-            .and_then(|path| resolved_path(&path))
-        else {
-            return read_error();
-        };
-        for row in &mut items {
-            decorate_proxy(row, &root);
-        }
+    }).map_err(|_| AssetMediaError::Read)?.unwrap_or_default();
+    if items.is_empty() {
+        return Ok(Vec::new());
     }
-    json_reply(
-        StatusCode::OK,
-        json!({"items":items,"limit":limit,"offset":offset}),
-    )
+    let root = asset_root(profile)?;
+    Ok(items.into_iter().map(|row| {
+        let preview = Preview::read(&root, &row);
+        (row, preview)
+    }).collect())
 }
 
 fn read_page(
@@ -189,32 +240,38 @@ impl AssetMediaError {
     }
 }
 
-fn load_media(profile: &ProfileState, id: i64) -> Result<(PathBuf, bool), AssetMediaError> {
-    let selected = read_table(&profile.config.database_path(), TABLE, |connection| {
-        connection
-            .query_row(
-                "SELECT file_path, kind FROM lite_cut_assets WHERE id = ?1",
-                [id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()
-    });
-    let (raw, kind) = selected
-        .map_err(|_| AssetMediaError::Read)?
-        .flatten()
-        .ok_or(AssetMediaError::Missing)?;
+fn load_row(profile: &ProfileState, id: i64) -> Result<Value, AssetMediaError> {
+    read_table(&profile.config.database_path(), TABLE, |connection| {
+        let select = asset_select(connection)?;
+        connection.query_row(&format!("{select} WHERE id = ?1"), [id], asset_json).optional()
+    })
+    .map_err(|_| AssetMediaError::Read)?
+    .flatten()
+    .ok_or(AssetMediaError::Missing)
+}
+
+enum Media {
+    File { path: PathBuf, font: bool },
+    Pending(proxy::Source),
+}
+
+fn load_media(profile: &ProfileState, id: i64) -> Result<Media, AssetMediaError> {
+    let row = load_row(profile, id)?;
     let root = asset_root(profile)?;
-    let source = asset_path(&root, &raw)
+    let source = asset_path(&root, stored_path(&row))
         .map_err(|(status, message)| AssetMediaError::File(status, message))?;
-    let font = kind.eq_ignore_ascii_case("font");
+    let font = row["kind"].as_str().is_some_and(|kind| kind.eq_ignore_ascii_case("font"));
     if font || !needs_proxy(&source) {
-        return Ok((source, font));
+        return Ok(Media::File { path: source, font });
     }
-    let ready = cached_proxy(&root, &source).ok_or(AssetMediaError::File(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "尚未生成素材预览代理",
-    ))?;
-    Ok((ready.path, false))
+    if let Some(ready) = cached_proxy(&root, &source) {
+        return Ok(Media::File { path: ready.path, font: false });
+    }
+    Ok(Media::Pending(proxy::Source {
+        root,
+        path: source,
+        duration: row["duration_sec"].as_f64(),
+    }))
 }
 
 fn asset_root(profile: &ProfileState) -> Result<PathBuf, AssetMediaError> {
@@ -263,7 +320,7 @@ fn cached_proxy(root: &Path, source: &Path) -> Option<CachedProxy> {
         .find_map(|(extension, alpha)| {
             let path = source.with_extension(extension).canonicalize().ok()?;
             let metadata = fs::metadata(&path).ok()?;
-            if !path.starts_with(root) || !metadata.is_file() {
+            if !path.starts_with(root) || !metadata.is_file() || metadata.len() == 0 {
                 return None;
             }
             let version = metadata
@@ -282,38 +339,73 @@ fn cached_proxy(root: &Path, source: &Path) -> Option<CachedProxy> {
         })
 }
 
-fn decorate_proxy(row: &mut Value, root: &Path) {
-    let raw = row["file_path"].as_str().expect("asset path from SQLite");
-    let required = needs_proxy(Path::new(raw));
-    let (status, message, version, mode, alpha) = if !required {
-        ("not_needed", "", "source".to_owned(), "direct", false)
-    } else {
-        match asset_path(root, raw) {
-            Ok(source) => match cached_proxy(root, &source) {
-                Some(ready) => ("ready", "", ready.version, "ready", ready.alpha),
-                None => (
-                    "failed",
-                    "尚未生成素材预览代理",
-                    "unavailable".to_owned(),
-                    "failed",
-                    false,
-                ),
-            },
-            Err(_) => (
-                "missing",
-                "素材文件不存在",
-                "unavailable".to_owned(),
-                "failed",
-                false,
-            ),
+fn stored_path(row: &Value) -> &str {
+    row["file_path"].as_str().expect("asset path from SQLite")
+}
+
+enum Preview {
+    Direct,
+    Ready(CachedProxy),
+    Missing,
+    Pending(proxy::Source),
+}
+
+impl Preview {
+    fn read(root: &Path, row: &Value) -> Self {
+        let raw = stored_path(row);
+        if !needs_proxy(Path::new(raw)) {
+            return Self::Direct;
         }
-    };
-    row["preview_proxy_required"] = json!(required);
-    row["preview_proxy_status"] = json!(status);
-    row["preview_proxy_error"] = json!(message);
-    row["preview_proxy_version"] = json!(version);
-    row["preview_proxy_mode"] = json!(mode);
-    row["has_alpha"] = json!(alpha);
+        let Ok(source) = asset_path(root, raw) else {
+            return Self::Missing;
+        };
+        if let Some(ready) = cached_proxy(root, &source) {
+            return Self::Ready(ready);
+        }
+        Self::Pending(proxy::Source {
+            root: root.to_owned(),
+            path: source,
+            duration: row["duration_sec"].as_f64(),
+        })
+    }
+
+    fn apply(self, profile: &Arc<ProfileState>, row: &mut Value, retry: bool) {
+        match self {
+            Self::Pending(source) => profile.lite_cut_proxies.schedule(profile, source, retry).apply(row),
+            other => other.decorate(row),
+        }
+    }
+
+    fn decorate(self, row: &mut Value) {
+        let (required, status, message, version, mode, alpha) = match self {
+            Self::Direct => (false, "not_needed", "", "source".to_owned(), "direct", false),
+            Self::Ready(ready) => (true, "ready", "", ready.version, "ready", ready.alpha),
+            Self::Missing => (true, "missing", "素材文件不存在", "unavailable".to_owned(), "failed", false),
+            Self::Pending(_) => (true, "failed", "尚未生成素材预览代理", "unavailable".to_owned(), "failed", false),
+        };
+        row["preview_proxy_required"] = json!(required);
+        row["preview_proxy_status"] = json!(status);
+        row["preview_proxy_error"] = json!(message);
+        row["preview_proxy_version"] = json!(version);
+        row["preview_proxy_mode"] = json!(mode);
+        row["has_alpha"] = json!(alpha);
+    }
+}
+
+fn decorate_proxy(row: &mut Value, root: &Path) {
+    Preview::read(root, row).decorate(row);
+}
+
+pub(super) async fn queue_uploaded_proxy(profile: &Arc<ProfileState>, row: &mut Value) {
+    if !needs_proxy(Path::new(stored_path(row))) {
+        return;
+    }
+    let input = row.clone();
+    if let Ok(Ok(preview)) = profile_work(profile, move |profile| {
+        asset_root(profile).map(|root| Preview::read(&root, &input))
+    }).await {
+        preview.apply(profile, row, false);
+    }
 }
 
 fn read_error() -> HttpResponse {

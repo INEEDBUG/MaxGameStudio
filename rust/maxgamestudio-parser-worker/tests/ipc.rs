@@ -359,6 +359,26 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         assert_eq!(count, segments, "{kind} source segments");
         assert_eq!(fixture_checksum(&serde_json::to_vec(&clips).unwrap()), digest, "{kind} legacy parity");
     }
+    let mut highlights = Vec::new();
+    for name in names {
+        for clip in clips[name].as_array().unwrap() {
+            if clip["category"] == "highlight" && clip["kill_count"].as_u64().unwrap_or(0) >= 2 {
+                let mut clip = clip.clone();
+                clip.as_object_mut().unwrap().remove("clip_id");
+                highlights.push(clip);
+            }
+        }
+    }
+    assert_eq!(highlights.len(), 17);
+    assert_eq!(
+        highlights.iter().map(|clip| clip["kill_count"].as_u64().unwrap()).sum::<u64>(),
+        35
+    );
+    assert_eq!(
+        fixture_checksum(&serde_json::to_vec(&highlights).unwrap()),
+        0xd39d7a3e29e405a1,
+        "legacy ordinary multi-kill highlight parity"
+    );
 }
 
 #[test]

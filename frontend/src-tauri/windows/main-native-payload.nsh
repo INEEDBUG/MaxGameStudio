@@ -67,6 +67,8 @@ FunctionEnd
   File "${MGS_NATIVE_ASSETS}\pov\gameinfo.gi.default"
   File "${MGS_NATIVE_ASSETS}\pov\gameinfo.gi.pov"
   File "${MGS_NATIVE_ASSETS}\pov\pov_default.vpk"
+  SetOutPath "$PLUGINSDIR\main-native-files\third_party\licenses"
+  File "${MGS_NATIVE_ASSETS}\third_party\licenses\s3s-multipart-LICENSE.txt"
   !insertmacro MGS_NativeProgramAction "Install" "$INSTDIR" ""
   ${If} $R0 != 0
     StrCpy $R7 "无法验证或替换 MaxGameStudio 程序。请关闭应用、检查磁盘空间，并确认该目录内的旧版本受支持。"

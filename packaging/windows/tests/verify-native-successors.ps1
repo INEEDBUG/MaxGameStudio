@@ -58,7 +58,8 @@ $main = @{
   Required = @('data/basic.ini', 'data/cs2-insight.config.example.json', 'data/lite_cut_effect_contract.json',
     'data/lite_cut_visual_acceptance.json', 'backend/assets/fonts/NotoSansSC-Bold.ttf', 'backend/assets/fonts/NotoSansSC-Medium.ttf',
     'backend/assets/fonts/Rajdhani-Bold.ttf', 'backend/assets/fonts/Rajdhani-SemiBold.ttf', 'backend/assets/fonts/OFL.txt',
-    'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk')
+    'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk',
+    'third_party/licenses/s3s-multipart-LICENSE.txt')
   Optional = @('WebView2Loader.dll', 'libunwind.dll', 'maxgamestudio-parser-worker.exe', 'maxgamestudio-parser-worker.LICENSE.txt')
 }
 $league = @{

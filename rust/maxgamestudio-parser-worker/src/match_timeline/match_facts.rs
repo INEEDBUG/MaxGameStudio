@@ -2,9 +2,9 @@
 
 use super::{
     damage_stats::DamageInput,
-    kill_inputs,
+    highlight_inputs, kill_inputs,
     player_stats::{self, Player},
-    round_compilation::MatchRounds,
+    round_compilation::{ClipOptions, MatchRounds},
     round_economy::{self, RoundEconomy},
     round_score::{self, RoundOutcome, Side, TeamKey},
     spec_slots::{SlotLookup, SpecSlots},
@@ -26,6 +26,14 @@ pub(super) struct Timing<'a> {
     pub(super) compilations: Option<&'a RequestedCompilations>,
 }
 
+struct RecordingInputs<'a, 'events> {
+    request: &'a RequestedCompilations,
+    requested: BTreeSet<&'a str>,
+    kills: kill_inputs::Sources<'events>,
+    highlight_events: Option<highlight_inputs::Events<'events>>,
+    highlight_ticks: BTreeSet<i32>,
+}
+
 pub(super) fn collect(
     bytes: &[u8],
     huffman: &Vec<(u8, u8)>,
@@ -45,7 +53,19 @@ pub(super) fn collect(
             .map(|name| name.trim())
             .collect::<BTreeSet<_>>();
         let kills = kill_inputs::Sources::collect(events, start_tick, &requested, freeze_ticks);
-        (request, requested, kills)
+        let mut highlight_ticks = kills.highlight_ticks();
+        let highlight_events = (!highlight_ticks.is_empty()).then(|| {
+            let events = highlight_inputs::Events::collect(events, start_tick, freeze_ticks);
+            highlight_ticks.extend(events.defuse_ticks(&requested));
+            events
+        });
+        RecordingInputs {
+            request,
+            requested,
+            kills,
+            highlight_events,
+            highlight_ticks,
+        }
     });
     let mut ticks = match_summary::summary_ticks(events, demo_end_tick);
     ticks.extend(freeze_ticks.values().map(|&tick| tick as i32));
@@ -54,9 +74,17 @@ pub(super) fn collect(
     if !economy_ticks.is_empty() {
         properties.extend_from_slice(round_economy::PROPERTIES);
     }
-    if let Some((_, _, kills)) = &compilations {
-        ticks.extend(kills.ticks());
+    if let Some(recording) = &compilations {
+        ticks.extend(recording.kills.ticks());
         properties.extend_from_slice(&kill_inputs::PROPERTIES);
+        if !recording.highlight_ticks.is_empty() {
+            ticks.extend(recording.highlight_ticks.iter().copied());
+            for &property in highlight_inputs::PROPERTIES {
+                if !properties.contains(&property) {
+                    properties.push(property);
+                }
+            }
+        }
     }
     ticks.sort_unstable();
     ticks.dedup();
@@ -148,54 +176,84 @@ pub(super) fn collect(
     }
     add_round_facts(rounds, &scores.rounds, &economy.rounds);
     let ranked_player_ids = player_stats::ranked_player_ids(&player_stats);
-    let compilation_data = compilations.map(|(request, requested, kills)| {
-        let last_round_tail_ticks = match std::env::var("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC") {
-            Ok(seconds) if !seconds.is_empty() => Some(
-                seconds.trim().parse::<f64>().ok().filter(|value| value.is_finite())
-                    .map(|value| (value * 64.0) as i64)
-                    .ok_or_else(|| Failure::request("invalid last-round recording tail"))?,
-            ),
-            _ => None,
-        };
-        let offset = std::env::var("CS2_SPEC_PLAYER_SLOT_OFFSET").ok();
-        let slots = SpecSlots::from_events(events, start_tick, offset.as_deref());
-        let slots: BTreeMap<_, _> = players
-            .iter()
-            .filter_map(|player| match slots.lookup(player.name) {
-                SlotLookup::Known(slot) => Some((player.name.to_lowercase(), slot)),
-                SlotLookup::Missing | SlotLookup::Ambiguous => None,
-            })
-            .collect();
-        let clip_rounds = MatchRounds::collect(
-            events,
-            freeze_ticks,
-            &scores,
-            i64::from(start_tick),
-            demo_end_tick,
-            timing.tick_rate,
-            &requested,
-        );
-        let map = summary["map_name"].as_str().unwrap_or("unknown");
-        let spatial = kills.snapshots(sample.as_ref());
-        let clips = players
-            .iter()
-            .filter(|player| requested.contains(player.name))
-            .map(|player| {
-                (
-                    player.name,
-                    clip_rounds.clips(
-                        player,
-                        &slots,
-                        map,
-                        request.rounds.as_deref(),
-                        (&kills, &spatial),
-                        last_round_tail_ticks,
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        Ok::<_, Failure>((clips, slots, clip_rounds.timeline_data()))
-    }).transpose()?;
+    let compilation_data = compilations
+        .map(|recording| {
+            let RecordingInputs {
+                request,
+                requested,
+                kills,
+                highlight_events,
+                highlight_ticks,
+            } = recording;
+            let last_round_tail_ticks = tail_ticks(
+                "CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC",
+                "invalid last-round recording tail",
+            )?;
+            let offset = std::env::var("CS2_SPEC_PLAYER_SLOT_OFFSET").ok();
+            let slots = SpecSlots::from_events(events, start_tick, offset.as_deref());
+            let slots: BTreeMap<_, _> = players
+                .iter()
+                .filter_map(|player| match slots.lookup(player.name) {
+                    SlotLookup::Known(slot) => Some((player.name.to_lowercase(), slot)),
+                    SlotLookup::Missing | SlotLookup::Ambiguous => None,
+                })
+                .collect();
+            let clip_rounds = MatchRounds::collect(
+                events,
+                freeze_ticks,
+                &scores,
+                i64::from(start_tick),
+                demo_end_tick,
+                timing.tick_rate,
+                &requested,
+            );
+            let map = summary["map_name"].as_str().unwrap_or("unknown");
+            let spatial = kills.snapshots(sample.as_ref());
+            let highlights = highlight_events
+                .zip(sample.as_ref())
+                .and_then(|(events, sample)| {
+                    let samples = highlight_inputs::Samples::collect(
+                        sample,
+                        &highlight_ticks,
+                        &economy_ticks,
+                    )?;
+                    Some((events, samples))
+                })
+                .map(|(events, samples)| {
+                    let mid_round_buffer_ticks = tail_ticks(
+                        "CS2_INSIGHT_MID_ROUND_END_BUFFER_SEC",
+                        "invalid middle-round recording tail",
+                    )?;
+                    Ok::<_, Failure>(highlight_inputs::Source {
+                        events,
+                        samples,
+                        mid_round_buffer_ticks,
+                    })
+                })
+                .transpose()?;
+            let clips = players
+                .iter()
+                .filter(|player| requested.contains(player.name))
+                .map(|player| {
+                    (
+                        player.name,
+                        clip_rounds.clips(
+                            player,
+                            &slots,
+                            map,
+                            request.rounds.as_deref(),
+                            (&kills, &spatial),
+                            ClipOptions {
+                                last_round_tail_ticks,
+                                highlights: highlights.as_ref(),
+                            },
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            Ok::<_, Failure>((clips, slots, clip_rounds.timeline_data()))
+        })
+        .transpose()?;
     let players: Vec<_> = players
         .iter()
         .map(|player| {
@@ -236,6 +294,22 @@ pub(super) fn collect(
         facts["recording_timeline"] = timeline;
     }
     Ok(facts)
+}
+
+fn tail_ticks(key: &str, invalid: &'static str) -> Result<Option<i64>, Failure> {
+    let Ok(seconds) = std::env::var(key) else {
+        return Ok(None);
+    };
+    if seconds.is_empty() {
+        return Ok(None);
+    }
+    seconds
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .map(|value| Some((64.0 * value) as i64))
+        .ok_or_else(|| Failure::request(invalid))
 }
 
 fn add_round_facts(

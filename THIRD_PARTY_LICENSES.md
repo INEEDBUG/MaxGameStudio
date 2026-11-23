@@ -21,6 +21,10 @@ MaxGameStudio 在编译与运行时依赖以下开源组件。常规编译依赖
 | aiosqlite         | MIT            | https://github.com/omnilib/aiosqlite                                |
 | watchdog          | Apache-2.0     | https://github.com/gorakhargosh/watchdog                            |
 
+## Native backend (Rust)
+
+- **s3s-multipart 0.17.0** parses multipart media uploads. The Main installer includes the s3s authors' attribution and the Apache-2.0 license. [License and notice](third_party/licenses/s3s-multipart-LICENSE.txt) · [Upstream source](https://github.com/s3s-project/s3s/tree/v0.17.0/crates/s3s-multipart)
+
 ## Frontend (Node)
 
 | Package                 | License | Source                                                 |

@@ -21,6 +21,7 @@ $files = @(
     "src/match_timeline/round_score.rs", "src/match_timeline/round_economy.rs",
     "src/match_timeline/round_compilation.rs", "src/match_timeline/spec_slots.rs",
     "src/match_timeline/death_compilation.rs",
+    "src/match_timeline/highlight_inputs.rs", "src/match_timeline/highlights.rs",
     "src/match_timeline/kill_action_tags.rs", "src/match_timeline/kill_compilation.rs",
     "src/match_timeline/kill_inputs.rs",
     "src/match_timeline/rival_compilation.rs",

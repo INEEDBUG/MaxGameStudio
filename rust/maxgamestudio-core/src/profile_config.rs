@@ -100,6 +100,12 @@ impl ProfileConfig {
         }
     }
 
+    pub(crate) fn lite_cut_proxy_resolution(&self) -> io::Result<u64> {
+        let stored = self.load()?;
+        let edge = stored.known["lite_cut_proxy_resolution"].as_i64().unwrap_or(720);
+        Ok(if edge == 0 { 720 } else { edge.clamp(360, 2160) as u64 })
+    }
+
     pub(crate) fn obs_settings(&self) -> io::Result<crate::obs_wire::ObsSettings> {
         self.obs_profile().map(|(settings, _)| settings)
     }

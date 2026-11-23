@@ -56,7 +56,7 @@ pub(in crate::native_http) async fn inspect(
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,codec_name,width,height,r_frame_rate,duration,start_time",
+            "format=duration:stream=codec_type,codec_name,width,height,r_frame_rate,duration,start_time,pix_fmt:stream_tags=alpha_mode",
             "-of",
             "json",
         ])
@@ -111,4 +111,17 @@ pub(in crate::native_http) async fn inspect(
         ));
     }
     Ok(data)
+}
+
+pub(super) fn video_has_alpha(video: &Value) -> bool {
+    let pixel_format = video["pix_fmt"].as_str().unwrap_or_default();
+    pixel_format.starts_with("yuva")
+        || pixel_format.starts_with("gbrap")
+        || matches!(pixel_format, "rgba" | "argb" | "bgra" | "abgr")
+        || video["tags"].as_object().is_some_and(|tags| {
+            tags.iter().any(|(key, value)| {
+                key.eq_ignore_ascii_case("alpha_mode")
+                    && value.as_str().is_some_and(|value| value.trim() == "1")
+            })
+        })
 }

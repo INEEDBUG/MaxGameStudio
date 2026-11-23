@@ -164,7 +164,7 @@ fn frame_rate(raw: &str) -> f64 {
     rate.filter(|rate| rate.is_finite()).unwrap_or(60.0)
 }
 
-fn image_dimensions(path: &Path) -> io::Result<Option<(u32, u32)>> {
+pub(super) fn image_dimensions(path: &Path) -> io::Result<Option<(u32, u32)>> {
     let mut reader = BufReader::new(File::open(path)?);
     let mut first = [0; 2];
     reader.read_exact(&mut first)?;

@@ -40,6 +40,10 @@ pub(super) struct TaggedKill<'a> {
 }
 
 impl TaggedKill<'_> {
+    pub(super) fn source_event(&self) -> &GameEvent {
+        self.kill.event
+    }
+
     pub(super) fn as_clip_input(&self) -> kill_compilation::Kill<'_> {
         kill_compilation::Kill {
             round: self.kill.round,
@@ -149,6 +153,31 @@ impl<'a> Sources<'a> {
 
     pub(super) fn ticks(&self) -> impl Iterator<Item = i32> + '_ {
         self.wanted.keys().copied()
+    }
+
+    pub(super) fn highlight_ticks(&self) -> BTreeSet<i32> {
+        let mut ticks = BTreeSet::new();
+        for kills in self.kills.values() {
+            let mut counts = BTreeMap::<i64, usize>::new();
+            for kill in kills {
+                *counts.entry(kill.round).or_default() += 1;
+            }
+            for kill in kills.iter().filter(|kill| counts[&kill.round] >= 2) {
+                // The old analyzer schedules -8 and -16 for all kills. The two
+                // older fallbacks are explicitly scheduled only for snipers.
+                let offsets = if matches!(kill.weapon.as_str(), "awp" | "ssg08") {
+                    &[0, 8, 16, 24, 32][..]
+                } else {
+                    &[0, 8, 16][..]
+                };
+                ticks.extend(
+                    offsets
+                        .iter()
+                        .map(|offset| (kill.event.tick - offset).max(0)),
+                );
+            }
+        }
+        ticks
     }
 
     pub(super) fn snapshots<'b>(&self, output: Option<&'b DemoOutput>) -> SpatialRows<'b> {
@@ -274,7 +303,7 @@ fn sample(column: Option<&VarVec>, index: usize) -> Option<f64> {
     values.get(index)?.filter(|value| value.is_finite()).map(f64::from)
 }
 
-fn same_player(first: &str, second: &str) -> bool {
+pub(super) fn same_player(first: &str, second: &str) -> bool {
     if first.is_ascii() && second.is_ascii() {
         return first.eq_ignore_ascii_case(second);
     }

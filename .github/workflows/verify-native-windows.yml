@@ -9,6 +9,9 @@ on:
       league_startup_only:
         type: boolean
         default: false
+      backend_only:
+        type: boolean
+        default: false
     secrets:
       main_signing_key:
         required: false
@@ -32,24 +35,27 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
+        if: ${{ !inputs.backend_only }}
         with:
           version: '11.9.0'
           run_install: false
       - uses: actions/setup-node@v4
+        if: ${{ !inputs.backend_only }}
         with:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: actions/setup-python@v5
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         with:
           python-version: '3.12.10'
       - uses: dtolnay/rust-toolchain@stable
+        id: rust
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Verify the exact released baselines
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,19 +110,19 @@ jobs:
             Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-parser-sha256.txt') -Encoding ascii
 
       - name: Build the adjacent Main baseline installer
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: ./packaging/windows/build-native-candidate.ps1 -Product Main -Version $env:MAIN_PREDECESSOR_VERSION
 
       - name: Build the adjacent League baseline installer
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: ./packaging/windows/build-native-candidate.ps1 -Product League -Version $env:LEAGUE_PREDECESSOR_VERSION
 
       - name: Inventory the exact installed native baselines
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: |
           ./packaging/windows/tests/verify-native-successors.ps1 -Phase Catalog `
@@ -124,7 +130,7 @@ jobs:
             -MainBaselineVersion $env:MAIN_PREDECESSOR_VERSION -LeagueBaselineVersion $env:LEAGUE_PREDECESSOR_VERSION
 
       - name: Build the native Main installer
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.main_signing_key }}
@@ -133,6 +139,7 @@ jobs:
             -PredecessorCatalog (Join-Path $env:RUNNER_TEMP 'mgs-native-candidates/main-native-predecessor.json')
 
       - name: Build the native League installer
+        if: ${{ !inputs.backend_only }}
         shell: pwsh
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -145,7 +152,7 @@ jobs:
           ./packaging/windows/build-native-candidate.ps1 -Product League -Version $env:LEAGUE_VERSION @argsForLeague
 
       - name: Verify installed League startup as an ordinary Windows user
-        if: inputs.league_startup_only
+        if: ${{ inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -156,7 +163,7 @@ jobs:
           ./packaging/windows/tests/verify-native-league-boot.ps1 -Installer $installer -Version $env:LEAGUE_VERSION -ExecutableSha256 $sha
 
       - name: Verify both native successors and their existing data
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: |
           ./packaging/windows/tests/verify-native-successors.ps1 -Phase Verify `
@@ -166,7 +173,7 @@ jobs:
             -FixturePythonExe (Join-Path $env:pythonLocation 'python.exe') -FixturePythonVersion $env:FIXTURE_PYTHON_VERSION
 
       - name: Verify personal and machine upgrades and measure both products
-        if: ${{ !inputs.league_startup_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -197,7 +204,7 @@ jobs:
           }
 
       - name: Verify the native Main backend and owned media fixtures
-        if: ${{ !cancelled() && !inputs.league_startup_only && steps.native-parser.outcome == 'success' }}
+        if: ${{ !cancelled() && !inputs.league_startup_only && steps.rust.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -237,4 +244,5 @@ jobs:
           $core = @('--release','--locked','--manifest-path','rust/Cargo.toml','-p','maxgamestudio-core','--features','native-http')
           cargo test @core -- --test-threads=1
           cargo test @core --test native_http cancelled_recording_queue_restores_fixture_player_data -- --exact --ignored
+          cargo test @core --test native_http lite_cut_generates_preview_and_waveform_for_an_existing_asset -- --exact --ignored
           cargo test @core --lib ffmpeg_upper_video_uses_source_trim_layer_order_fades_and_copies_base_aac -- --ignored

@@ -22,7 +22,8 @@ $assets = @('data/basic.ini', 'data/cs2-insight.config.example.json',
   'backend/assets/fonts/NotoSansSC-Bold.ttf', 'backend/assets/fonts/NotoSansSC-Medium.ttf',
   'backend/assets/fonts/Rajdhani-Bold.ttf', 'backend/assets/fonts/Rajdhani-SemiBold.ttf',
   'backend/assets/fonts/OFL.txt',
-  'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk')
+  'pov/gameinfo.gi.default', 'pov/gameinfo.gi.pov', 'pov/pov_default.vpk',
+  'third_party/licenses/s3s-multipart-LICENSE.txt')
 $sidecars = @('WebView2Loader.dll', 'libunwind.dll')
 $worker = 'maxgamestudio-parser-worker.exe'
 $notice = 'maxgamestudio-parser-worker.LICENSE.txt'

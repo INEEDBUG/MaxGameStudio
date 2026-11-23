@@ -73,7 +73,9 @@ pub(crate) fn scan(
         inputs.wanted_events.push("player_hurt".to_owned());
     }
     if include_recording {
-        inputs.wanted_events.push("player_blind".to_owned());
+        inputs
+            .wanted_events
+            .extend(["player_blind", "item_pickup", "bomb_begindefuse"].map(str::to_owned));
     }
 
     let mut events = Parser::new(inputs, ParsingMode::Normal)

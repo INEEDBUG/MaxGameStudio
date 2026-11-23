@@ -3,6 +3,7 @@
 use super::{length, number, probe, render_command, run, text_overlay::TextOverlay, Media};
 use crate::native_http::lite_cut::{
     export_sources::{main_clip, media_path, upper_clips, upper_file_path, upper_recording_id},
+    ffmpeg::video_has_alpha,
     project_schema::list,
 };
 use crate::profile_platform::path_text;
@@ -195,7 +196,9 @@ impl Plan {
             let mut process = render_command(media.ffmpeg);
             process.arg("-i").arg(path_text(&previous));
             if let Some(trim_in) = trim_in {
-                reject_webm_alpha(media, &asset).await?;
+                if let Some(decoder) = webm_alpha_decoder(media, &asset).await? {
+                    process.args(["-c:v", decoder]);
+                }
                 process.args([
                     "-ss",
                     &format!("{trim_in:.6}"),
@@ -263,12 +266,15 @@ fn has_unsupported_transition(clip: &Value, allow_fade: bool) -> bool {
     })
 }
 
-async fn reject_webm_alpha(media: &Media<'_>, path: &Path) -> Result<(), &'static str> {
+async fn webm_alpha_decoder(
+    media: &Media<'_>,
+    path: &Path,
+) -> Result<Option<&'static str>, &'static str> {
     if !path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("webm"))
     {
-        return Ok(());
+        return Ok(None);
     }
     // Native VP9 decoding can silently discard a WebM alpha plane.
     let info = probe(media.ffprobe, path, media.cancel, FAILED).await?;
@@ -276,15 +282,14 @@ async fn reject_webm_alpha(media: &Media<'_>, path: &Path) -> Result<(), &'stati
         .iter()
         .find(|stream| stream["codec_type"] == "video")
         .ok_or(FAILED)?;
-    if video["tags"].as_object().is_some_and(|tags| {
-        tags.iter().any(|(key, val)| {
-            key.eq_ignore_ascii_case("alpha_mode")
-                && val.as_str().is_some_and(|value| value.trim() == "1")
-        })
-    }) {
-        return Err(UNAVAILABLE);
+    if !video_has_alpha(video) {
+        return Ok(None);
     }
-    Ok(())
+    match video["codec_name"].as_str() {
+        Some("vp8") => Ok(Some("libvpx")),
+        Some("vp9") => Ok(Some("libvpx-vp9")),
+        _ => Err(UNAVAILABLE),
+    }
 }
 
 impl Placement {

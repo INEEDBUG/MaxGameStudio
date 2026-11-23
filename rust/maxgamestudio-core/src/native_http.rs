@@ -119,6 +119,7 @@ struct ProfileState {
     obs_writes: Semaphore,
     media_process: Arc<Semaphore>,
     lite_cut_exports: lite_cut::ActiveExports,
+    lite_cut_proxies: lite_cut::ActiveProxies,
     demo_events: DemoEvents,
     upload_dir: PathBuf,
     #[cfg(windows)]
@@ -159,6 +160,7 @@ impl NativeHttpServer {
             obs_writes: Semaphore::new(1),
             media_process: Arc::new(Semaphore::new(1)),
             lite_cut_exports: lite_cut::ActiveExports::default(),
+            lite_cut_proxies: lite_cut::ActiveProxies::default(),
             demo_events: DemoEvents::new(),
             upload_dir: profile
                 .temp_dir
@@ -236,6 +238,7 @@ impl NativeHttpServer {
             #[cfg(windows)]
             profile.recording.shutdown().await;
             profile.lite_cut_exports.shutdown().await;
+            profile.lite_cut_proxies.shutdown().await;
         }
         if let Some(publisher) = publisher {
             let _ = publisher.await;
@@ -485,17 +488,12 @@ async fn route(
     let allowed = match route {
         #[cfg(windows)]
         Route::RecordingQueue | Route::RecordingAbort | Route::RecordingGsi => "POST",
+        Route::LiteCut(ref route) if route.allow_header() == "POST" => "POST",
         Route::Gsi
         | Route::BackupRestore
         | Route::ReplayBinary
         | Route::ObsSetup(_)
         | Route::RecordingPlan
-        | Route::LiteCut(lite_cut::Route::Restore { .. })
-        | Route::LiteCut(
-            lite_cut::Route::ValidateAssets
-            | lite_cut::Route::StartExport { .. }
-            | lite_cut::Route::CancelExport(_),
-        )
         | Route::Demos(
             DemoRoute::InspectPath
             | DemoRoute::OpenLocal

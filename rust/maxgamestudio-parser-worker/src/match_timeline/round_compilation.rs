@@ -2,7 +2,8 @@
 //! replay windows can assign the same transition tick to an earlier round.
 
 use super::{
-    death_compilation,
+    death_compilation, highlight_inputs,
+    highlights::Recording,
     kill_compilation, kill_inputs,
     player_stats::Player,
     rival_compilation,
@@ -30,6 +31,11 @@ pub(super) struct MatchRounds<'a> {
     scores: &'a RoundScores,
     match_end: i64,
     tick_rate: f64,
+}
+
+pub(super) struct ClipOptions<'a, 'events, 'sample> {
+    pub(super) last_round_tail_ticks: Option<i64>,
+    pub(super) highlights: Option<&'a highlight_inputs::Source<'events, 'sample>>,
 }
 
 impl<'a> MatchRounds<'a> {
@@ -186,7 +192,7 @@ impl<'a> MatchRounds<'a> {
         map: &str,
         selected: Option<&[i64]>,
         (kills, spatial): (&kill_inputs::Sources<'_>, &kill_inputs::SpatialRows<'_>),
-        last_round_tail_ticks: Option<i64>,
+        options: ClipOptions<'_, '_, '_>,
     ) -> Vec<Value> {
         let slot = slots.get(&player.name.to_lowercase()).copied();
         let tagged = kills.kills_for(player.name, spatial, &self.decisions);
@@ -202,7 +208,7 @@ impl<'a> MatchRounds<'a> {
                 freezes: self.freezes,
                 scores: self.scores,
                 completed_rounds: self.completed_rounds,
-                last_round_tail_ticks,
+                last_round_tail_ticks: options.last_round_tail_ticks,
                 last_decision_round: self.decisions.keys().next_back().copied(),
                 demo_end_tick: self.match_end,
                 slots,
@@ -218,7 +224,7 @@ impl<'a> MatchRounds<'a> {
                 freezes: self.freezes,
                 scores: self.scores,
                 completed_rounds: self.completed_rounds,
-                last_round_tail_ticks,
+                last_round_tail_ticks: options.last_round_tail_ticks,
                 last_decision_round: self.decisions.keys().next_back().copied(),
                 demo_end_tick: self.match_end,
                 slots,
@@ -228,7 +234,30 @@ impl<'a> MatchRounds<'a> {
             slot,
             |round| self.post_match(round),
         );
-        let mut clips = rival_compilation::build(
+        let mut clips = options
+            .highlights
+            .map(|source| {
+                source.clips(highlight_inputs::ClipInput {
+                    player,
+                    kills: &kill_events,
+                    tagged: &tagged,
+                    fires: &fires,
+                    freezes: self.freezes,
+                    decisions: &self.decisions,
+                    scores: self.scores,
+                    recording: Recording {
+                        player_steamid: player.steam_id64,
+                        map_name: map,
+                        target_slot: slot,
+                        slots,
+                        terminal_round: None,
+                        demo_end_tick: self.match_end,
+                        mid_round_buffer_ticks: None,
+                    },
+                })
+            })
+            .unwrap_or_default();
+        clips.extend(rival_compilation::build(
             rival_compilation::Facts {
                 kills: &kill_events,
                 deaths: &self.requested_deaths,
@@ -238,13 +267,13 @@ impl<'a> MatchRounds<'a> {
                 last_decision_round: self.decisions.keys().next_back().copied(),
                 demo_end_tick: self.match_end,
                 slots,
-                last_round_tail_ticks,
+                last_round_tail_ticks: options.last_round_tail_ticks,
             },
             player,
             map,
             slot,
             |round| self.post_match(round),
-        );
+        ));
         clips.extend(all_kills);
         clips.extend(deaths);
         clips.extend(self.freeze_to_death(player, slot, map, selected));

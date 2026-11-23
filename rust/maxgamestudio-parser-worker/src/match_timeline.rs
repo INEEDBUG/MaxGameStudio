@@ -2,6 +2,8 @@
 
 mod damage_stats;
 mod death_compilation;
+mod highlight_inputs;
+mod highlights;
 mod kill_action_tags;
 mod kill_compilation;
 mod kill_inputs;

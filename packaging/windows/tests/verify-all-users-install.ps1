@@ -168,8 +168,15 @@ function Assert-NativeInstall($Product) {
     if ($version.ProductName -cne 'MaxGameStudio' -or !(Test-Path -LiteralPath (Join-Path $dir 'data\basic.ini') -PathType Leaf)) {
       throw 'The machine Main installation lacks the native product identity or data resource.'
     }
-    foreach ($relative in 'python', 'backend', 'league-runtime') {
+    foreach ($relative in 'python', 'league-runtime') {
       if (Test-Path -LiteralPath (Join-Path $dir $relative)) { throw "Fresh native Main includes a legacy payload directory: $relative" }
+    }
+    $backend = Join-Path $dir 'backend'
+    $fonts = @('NotoSansSC-Bold.ttf', 'NotoSansSC-Medium.ttf', 'Rajdhani-Bold.ttf', 'Rajdhani-SemiBold.ttf', 'OFL.txt') |
+      ForEach-Object { Join-Path $backend "assets\fonts\$_" }
+    $installed = @(Get-ChildItem -LiteralPath $backend -Recurse -File -Force | Select-Object -ExpandProperty FullName)
+    if (Compare-Object -ReferenceObject $fonts -DifferenceObject $installed -CaseSensitive) {
+      throw 'Fresh native Main must have exactly the bundled fonts and license under backend.'
     }
   } else {
     $native = Get-LeagueNativeRuntime $dir

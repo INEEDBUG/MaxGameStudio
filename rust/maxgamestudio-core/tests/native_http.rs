@@ -20,6 +20,12 @@ use std::{
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+fn resolved_fixture_path(path: &Path) -> String {
+    let path = fs::canonicalize(path).unwrap();
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+}
+
 #[derive(Deserialize)]
 struct Fixture {
     version: String,
@@ -446,7 +452,7 @@ fn config_startup_uses_bundle_data_and_reports_owned_identity_and_recovery() {
     assert_eq!(runtime["pid"], server.child.id());
     assert_eq!(runtime["instance_id"], "fixture-process");
     assert_eq!(runtime["version"], "3.2.0-fixture");
-    assert_eq!(runtime["data_dir"], profile.to_string_lossy().as_ref());
+    assert_eq!(runtime["data_dir"], resolved_fixture_path(&profile));
     assert_eq!(runtime["recovery_required"], true);
     assert_eq!(
         runtime["runtime_session"],
@@ -609,8 +615,9 @@ fn library_analysis_keeps_the_saved_result_when_a_same_name_upload_exists() {
     let database = scratch.path().join("cs2-insight.db");
     let config = scratch.path().join("settings.json");
     let missing = scratch.path().join("saved").join("match.dem");
-    let uploads = scratch.path().join("cs2_insight_demos");
-    fs::create_dir(&uploads).unwrap();
+    let profile = scratch.path().join("profile");
+    let uploads = profile.join("fixture-temp/cs2_insight_demos");
+    fs::create_dir_all(&uploads).unwrap();
     fs::write(uploads.join("match.dem"), b"a different Demo").unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     seed_demo_library(&connection);
@@ -627,7 +634,7 @@ fn library_analysis_keeps_the_saved_result_when_a_same_name_upload_exists() {
     let before = fs::read(&database).unwrap();
     let server = RunningServer::launch_with_config(
         "3.2.0-fixture",
-        Some((&scratch.path().join("profile"), scratch.path())),
+        Some((&profile, scratch.path())),
         Some(&config),
     );
     assert_eq!(
@@ -1253,6 +1260,138 @@ fn cancelled_recording_queue_restores_fixture_player_data() {
         (200, json!({"status":"idle"}))
     );
     obs.join().unwrap();
+    server.stop();
+}
+
+#[test]
+fn uploads_lite_cut_browser_form_data_to_the_selected_asset_directory() {
+    let scratch = tempfile::tempdir().unwrap();
+    let profile = scratch.path().join("profile");
+    let config = scratch.path().join("settings.json");
+    let assets = scratch.path().join("素材目录");
+    fs::write(&config, json!({"lite_cut_assets_dir":assets}).to_string()).unwrap();
+    let server = RunningServer::launch_with_config(
+        "3.2.0-fixture", Some((&profile, scratch.path())), Some(&config),
+    );
+    let (status, project) = profile_request(
+        &server, "POST", "/api/lite-cut/projects", &json!({"name":"Fixture project"}), true,
+    );
+    assert_eq!(status, 200);
+    let project_id = project["id"].as_i64().unwrap();
+    let path = format!("/api/lite-cut/assets/upload?project_id={project_id}&client_duration_sec=1.25");
+    let part = concat!(
+        "--mgs-browser-boundary\r\n",
+        "Content-Disposition: form-data; name=\"file\"; filename=\"test.mp4\"\r\n",
+        "Content-Type: video/mp4\r\n\r\nfixture media bytes",
+    );
+    let upload = |path: &str, complete: bool, authorized: bool| {
+        let ending = if complete { "\r\n--mgs-browser-boundary--\r\n" } else { "" };
+        let auth = if authorized { "X-CS2-Insight-Token: synthetic-token\r\n" } else { "" };
+        send_request(server.addr, &format!(
+            "POST {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: multipart/form-data; boundary=mgs-browser-boundary\r\nContent-Length: {}\r\n{auth}\r\n{part}{ending}",
+            server.addr, part.len() + ending.len(),
+        ))
+    };
+    let method = profile_response(&server, "GET", &path, &Value::Null, true);
+    assert_eq!(method.status, 405);
+    assert_eq!(method.headers["allow"], "POST");
+    assert_eq!(upload(&path, true, false).status, 401);
+    assert_eq!(upload("/api/lite-cut/assets/upload?project_id=99999", true, true).status, 404);
+
+    let mut paths = Vec::new();
+    for _ in 0..2 {
+        let response = upload(&path, true, true);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let row: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(row["project_id"], project_id);
+        assert_eq!(row["kind"], "video");
+        assert_eq!(row["name"], "test.mp4");
+        assert_eq!(row["duration_sec"], 1.25);
+        let saved = Path::new(row["file_path"].as_str().unwrap()).canonicalize().unwrap();
+        assert!(saved.starts_with(assets.canonicalize().unwrap()));
+        assert_eq!(fs::read(&saved).unwrap(), b"fixture media bytes");
+        paths.push(saved);
+    }
+    assert_ne!(paths[0], paths[1]);
+    assert_eq!(upload(&path, false, true).status, 400);
+    assert_eq!(fs::read_dir(paths[0].parent().unwrap()).unwrap().count(), 2);
+    let (status, listed) = profile_request(
+        &server, "GET", &format!("/api/lite-cut/assets?project_id={project_id}"), &Value::Null, true,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(listed["items"].as_array().unwrap().len(), 2);
+    server.stop();
+}
+
+#[test]
+#[ignore = "requires the pinned FFmpeg and FFprobe fixture executables"]
+fn lite_cut_generates_preview_and_waveform_for_an_existing_asset() {
+    let scratch = tempfile::tempdir().unwrap();
+    let ffmpeg = std::path::PathBuf::from(std::env::var_os("MGS_LITECUT_VIDEO_TEST_FFMPEG").unwrap());
+    let assets = scratch.path().join("素材目录");
+    fs::create_dir(&assets).unwrap();
+    let source = assets.join("existing.mkv");
+    let media = Command::new(&ffmpeg)
+        .args([
+            "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+            "color=c=blue:s=96x64:r=12:d=1", "-f", "lavfi", "-i",
+            "sine=f=660:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-shortest",
+        ])
+        .arg(&source)
+        .output().unwrap();
+    assert!(media.status.success(), "{}", String::from_utf8_lossy(&media.stderr));
+    let original = fs::read(&source).unwrap();
+    fs::write(scratch.path().join("custom-config.json"), json!({
+        "lite_cut_assets_dir":assets,"ffmpeg_path":ffmpeg
+    }).to_string()).unwrap();
+    let database = rusqlite::Connection::open(scratch.path().join("cs2-insight.db")).unwrap();
+    database.execute_batch(
+        "CREATE TABLE lite_cut_assets(id INTEGER PRIMARY KEY, project_id INTEGER, name TEXT,
+             kind TEXT, mime_type TEXT, file_path TEXT, duration_sec REAL, created_at TEXT);",
+    ).unwrap();
+    database.execute(
+        "INSERT INTO lite_cut_assets VALUES (1,NULL,'Existing','video','video/x-matroska',?1,1.0,'2026-11-20')",
+        [source.to_string_lossy().as_ref()],
+    ).unwrap();
+    drop(database);
+
+    let server = RunningServer::launch("3.2.0-fixture", Some((scratch.path(), scratch.path())));
+    let stream = "/api/lite-cut/assets/1/stream";
+    let pending = profile_response(&server, "GET", stream, &Value::Null, true);
+    assert_eq!(pending.status, 425);
+    assert_eq!(pending.headers["retry-after"], "1");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let ready = loop {
+        let (status, listed) = profile_request(&server, "GET", "/api/lite-cut/assets", &Value::Null, true);
+        assert_eq!(status, 200);
+        let asset = &listed["items"][0];
+        if asset["preview_proxy_status"] == "ready" {
+            break asset.clone();
+        }
+        assert!(asset["preview_proxy_status"] != "failed" && Instant::now() < deadline, "{asset}");
+        thread::sleep(Duration::from_millis(100));
+    };
+    let version = ready["preview_proxy_version"].as_str().unwrap();
+    let range = send_request(server.addr, &format!(
+        "GET {stream}?v={version} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nX-CS2-Insight-Token: synthetic-token\r\nRange: bytes=4-7\r\n\r\n", server.addr
+    ));
+    assert_eq!(range.status, 206);
+    assert_eq!(range.body, "ftyp");
+    let retry = profile_request(&server, "POST", "/api/lite-cut/assets/1/proxy/retry", &Value::Null, true);
+    assert_eq!(retry, (200, ready));
+
+    let waveform = "/api/lite-cut/assets/1/waveform?buckets=8";
+    let (status, mut first) = profile_request(&server, "GET", waveform, &Value::Null, true);
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(first["cached"], false);
+    assert_eq!(first["peaks"].as_array().unwrap().len(), 8);
+    first["cached"] = json!(true);
+    assert_eq!(profile_request(&server, "GET", waveform, &Value::Null, true), (200, first));
+    assert_eq!(fs::read(&source).unwrap(), original);
+    assert!(source.with_extension("preview60.mp4").is_file());
+    assert!(source.with_extension("waveform-v1.json").is_file());
+    assert_eq!(fs::read_dir(assets).unwrap().count(), 3);
     server.stop();
 }
 
@@ -1978,7 +2117,7 @@ fn demo_watch_inspection_counts_without_opening_candidates_or_mutating_catalog()
             (status, inspected),
             (
                 200,
-                json!({"valid":true,"path":root,"demo_count":demos,"zip_count":zips,"max_depth":depth})
+                json!({"valid":true,"path":resolved_fixture_path(&root),"demo_count":demos,"zip_count":zips,"max_depth":depth})
             )
         );
     }
