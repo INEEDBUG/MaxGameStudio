@@ -5,6 +5,7 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ('mgs-native-test-' + [guid]::Ne
 $stage = Join-Path $scratch 'staged'
 $program = Join-Path $scratch 'existing'
 $catalog = Join-Path $scratch 'prior.json'
+$nativePrior = Join-Path $scratch 'native-prior-input.json'
 $manifest = Join-Path $scratch 'candidate.json'
 $exe = 'cs2-insight-agent-desktop.exe'
 $uninstaller = 'uninstall.exe'
@@ -18,7 +19,9 @@ function Digest([string]$Root, [string]$Relative) {
   (Get-FileHash -LiteralPath (Join-Path $Root $Relative) -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 function Run([string]$Phase, [int]$Code) {
-  & $shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Phase $Phase -Program "$program\." -Stage $stage -Manifest $manifest -Catalog $catalog -UninstallerImage (Join-Path $stage $uninstaller)
+  $nativePriorArgs = @()
+  if (Test-Path -LiteralPath $nativePrior) { $nativePriorArgs = @('-NativePriorCatalog', $nativePrior) }
+  & $shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Phase $Phase -Program "$program\." -Stage $stage -Manifest $manifest -Catalog $catalog -UninstallerImage (Join-Path $stage $uninstaller) @nativePriorArgs
   if ($LASTEXITCODE -ne $Code) { throw "$Phase returned $LASTEXITCODE, expected $Code." }
 }
 try {
@@ -114,6 +117,59 @@ try {
   }
   Write-Host 'MAIN_NATIVE_PARSER_OWNERSHIP_VERIFIED'
 
+  $program = Join-Path $scratch 'Native Predecessor'
+  $null = New-Item -ItemType Directory -Path (Join-Path $program 'data') -Force
+  Put $program $exe 'first native runtime'
+  Put $program $uninstaller 'first native uninstaller'
+  Put $program 'WebView2Loader.dll' 'obsolete native loader'
+  Put $program 'data/personal.txt' 'local settings'
+  $predecessor = @{$exe = (Digest $program $exe); $uninstaller = (Digest $program $uninstaller)
+    'WebView2Loader.dll' = (Digest $program 'WebView2Loader.dll')}
+  $priorMap = @{$predecessor[$exe] = $predecessor}
+  $dataDigest = Digest $program 'data/personal.txt'
+
+  Put $program $exe 'modified native runtime'
+  $modifiedExe = Digest $program $exe
+  @{$modifiedExe = $predecessor} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nativePrior
+  Run Install 2
+  $priorMap | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nativePrior
+  Run Install 2
+  Run Retire 2
+  if ((Digest $program $exe) -ne $modifiedExe -or (Digest $program $uninstaller) -ne $predecessor[$uninstaller]) {
+    throw 'An unknown native executable changed its installation.'
+  }
+  Put $program $exe 'first native runtime'
+  Put $program $uninstaller 'modified native uninstaller'
+  $modifiedUninstaller = Digest $program $uninstaller
+  Run Install 2
+  if ((Digest $program $exe) -ne $predecessor[$exe] -or (Digest $program $uninstaller) -ne $modifiedUninstaller) {
+    throw 'A modified native uninstaller was overwritten or the existing executable changed.'
+  }
+  Put $program $uninstaller 'first native uninstaller'
+  $predecessor['data/personal.txt'] = $dataDigest
+  $priorMap | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nativePrior
+  Run Retire 2
+  $predecessor.Remove('data/personal.txt')
+  $priorMap | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $nativePrior
+  Run Install 0
+  Run Install 0
+  if ((Digest $program $exe) -ne $new[$exe] -or (Digest $program $uninstaller) -ne (Digest $stage $uninstaller) -or
+      (Test-Path -LiteralPath (Join-Path $program 'WebView2Loader.dll')) -or (Digest $program 'data/personal.txt') -ne $dataDigest) {
+    throw 'The next native version did not replace verified predecessors and preserve local data.'
+  }
+  Run Uninstall 0
+
+  Put $program $exe 'first native runtime'
+  Put $program $uninstaller 'first native uninstaller'
+  Put $program 'WebView2Loader.dll' 'locally changed loader'
+  Run Retire 0
+  if ((Test-Path -LiteralPath (Join-Path $program $exe)) -or (Test-Path -LiteralPath (Join-Path $program $uninstaller)) -or
+      [IO.File]::ReadAllText((Join-Path $program 'WebView2Loader.dll')) -ne 'locally changed loader' -or
+      (Digest $program 'data/personal.txt') -ne $dataDigest) {
+    throw 'The native predecessor retirement did not preserve local files.'
+  }
+  Write-Host 'MAIN_NATIVE_PREDECESSOR_VERIFIED'
+
   if ($env:MGS_TEST_MAKENSIS) {
     $binary = Join-Path $scratch $exe
     Add-Type -OutputAssembly $binary -OutputType ConsoleApplication -TypeDefinition @'
@@ -159,6 +215,8 @@ SectionEnd
       MGS_MAIN_NATIVE_WORK = $scratch
       MGS_MAIN_NATIVE_CATALOG = $testCatalog
       MGS_MAIN_NATIVE_CATALOG_SHA256 = (Get-FileHash -LiteralPath $testCatalog).Hash
+      MGS_MAIN_NATIVE_PRIOR_CATALOG = $null
+      MGS_MAIN_NATIVE_PRIOR_CATALOG_SHA256 = $null
       MGS_MAIN_NATIVE_GNU = '0'
       MGS_MAIN_NATIVE_PARSER = '0'
       MGS_MAIN_NATIVE_PARSER_EXE = $binary
@@ -186,6 +244,13 @@ SectionEnd
         throw 'Native NSIS accepted a notice that did not match the pinned upstream source.'
       }
       $env:MGS_MAIN_NATIVE_PARSER_NOTICE = $buildEnvironment.MGS_MAIN_NATIVE_PARSER_NOTICE
+      $env:MGS_MAIN_NATIVE_PRIOR_CATALOG = $nativePrior
+      $env:MGS_MAIN_NATIVE_PRIOR_CATALOG_SHA256 = '0' * 64
+      & $env:MGS_TEST_MAKENSIS /V2 $fixture
+      if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $output)) {
+        throw 'Native NSIS accepted a predecessor catalog with the wrong pinned digest.'
+      }
+      $env:MGS_MAIN_NATIVE_PRIOR_CATALOG_SHA256 = (Get-FileHash -LiteralPath $nativePrior).Hash
       & $env:MGS_TEST_MAKENSIS /V2 $fixture
       if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $output -PathType Leaf)) {
         throw 'Native NSIS fixture with a parser did not compile.'
@@ -194,6 +259,10 @@ SectionEnd
       if ($compiled.PSObject.Properties[$worker].Value -ne (Get-FileHash -LiteralPath $binary).Hash -or
           $compiled.PSObject.Properties[$notice].Value -ne (Get-FileHash -LiteralPath $env:MGS_MAIN_NATIVE_PARSER_NOTICE).Hash) {
         throw 'The parser worker or pinned notice is missing from the compiled inventory.'
+      }
+      $compiledPrior = Get-Content -LiteralPath (Join-Path $scratch 'native-prior-catalog.json') -Raw | ConvertFrom-Json
+      if ($compiledPrior.PSObject.Properties[$predecessor[$exe]].Value.$uninstaller -ne $predecessor[$uninstaller]) {
+        throw 'The compiled native predecessor map is missing its original uninstaller digest.'
       }
       Write-Host 'MAIN_NATIVE_PARSER_NSIS_COMPILE_VERIFIED'
     } finally {

@@ -1,6 +1,7 @@
 !define MGS_NATIVE_PAYLOAD_SCRIPT "${MGS_WINDOWS_DIR}\main-native-payload.ps1"
 !define MGS_NATIVE_ASSETS "${MGS_WINDOWS_DIR}\..\..\.."
 !define MGS_NATIVE_CATALOG "$%MGS_MAIN_NATIVE_WORK%\legacy-catalog.json"
+!define MGS_NATIVE_PRIOR_CATALOG "$%MGS_MAIN_NATIVE_WORK%\native-prior-catalog.json"
 !define MGS_NATIVE_MANIFEST "$%MGS_MAIN_NATIVE_WORK%\candidate.json"
 !if "$%MGS_MAIN_NATIVE_GNU%" == "1"
   !define MGS_NATIVE_GNU_FLAG "-Gnu"
@@ -30,9 +31,10 @@ FunctionEnd
   File "/oname=$PLUGINSDIR\candidate.json" "${MGS_NATIVE_MANIFEST}"
   !if "${phase}" != "Uninstall"
     File "/oname=$PLUGINSDIR\prior.json" "${MGS_NATIVE_CATALOG}"
+    File "/oname=$PLUGINSDIR\native-prior.json" "${MGS_NATIVE_PRIOR_CATALOG}"
   !endif
   Call ${extra}MGS_FindWindowsPowerShell
-  nsExec::ExecToStack '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\main-native-payload.ps1" -Phase ${phase} -Program "${program}\." -Stage "$PLUGINSDIR\main-native-files" -Manifest "$PLUGINSDIR\candidate.json" -Catalog "$PLUGINSDIR\prior.json" -UninstallerImage "$EXEPATH"'
+  nsExec::ExecToStack '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\main-native-payload.ps1" -Phase ${phase} -Program "${program}\." -Stage "$PLUGINSDIR\main-native-files" -Manifest "$PLUGINSDIR\candidate.json" -Catalog "$PLUGINSDIR\prior.json" -NativePriorCatalog "$PLUGINSDIR\native-prior.json" -UninstallerImage "$EXEPATH"'
   Pop $R0
   Pop $R1
 !macroend

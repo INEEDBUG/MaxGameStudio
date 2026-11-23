@@ -5,6 +5,7 @@ param(
   [string]$Manifest,
   [string]$Catalog,
   [string]$CatalogSHA256,
+  [string]$NativePriorCatalog,
   [string]$Version,
   [string]$UninstallerImage,
   [string]$ParserExe,
@@ -31,10 +32,10 @@ function Get-Hash([string]$Path) {
   (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-function Read-Inventory([string]$Path, [string[]]$Allowed) {
-  $contents = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+function ConvertTo-Inventory($Contents, [string[]]$Allowed) {
+  if ($Contents -isnot [pscustomobject]) { throw 'Expected a program file inventory.' }
   $files = @{}
-  foreach ($entry in $contents.PSObject.Properties) {
+  foreach ($entry in $Contents.PSObject.Properties) {
     $relative = $entry.Name
     $known = $relative -cin $Allowed -or (!$Allowed -and
       ($relative -cin $nativeFiles + @($uninstaller, '.gitkeep') -or
@@ -51,6 +52,32 @@ function Read-Inventory([string]$Path, [string[]]$Allowed) {
     throw 'Program inventory must contain the parser worker and MIT notice together.'
   }
   return $files
+}
+
+function Read-Inventory([string]$Path, [string[]]$Allowed) {
+  ConvertTo-Inventory (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) $Allowed
+}
+
+function Read-NativePriorCatalog([string]$Path) {
+  $catalogs = @{}
+  if ($Path) {
+    $contents = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ($contents -isnot [pscustomobject]) { throw 'Expected a native predecessor catalog.' }
+    foreach ($entry in $contents.PSObject.Properties) {
+      $inventory = ConvertTo-Inventory $entry.Value ($nativeFiles + $uninstaller)
+      if ($entry.Name -cnotmatch '^[a-f0-9]{64}$' -or $entry.Name -cne $inventory[$exe] -or !$inventory[$uninstaller]) {
+        throw 'A native predecessor entry must identify its own executable and uninstaller digests.'
+      }
+      $catalogs[$entry.Name] = $inventory
+    }
+  }
+  return $catalogs
+}
+
+function Get-VerifiedPredecessor([string]$Digest, [hashtable]$Legacy, [hashtable]$Native) {
+  if ($Digest -eq $Legacy[$exe]) { return $Legacy }
+  if ($Native.ContainsKey($Digest)) { return $Native[$Digest] }
+  throw 'No verified predecessor inventory for the existing installation.'
 }
 
 function Get-OrdinaryItem([string]$Path) {
@@ -178,6 +205,21 @@ try {
     }
     $prior = Read-Inventory $snapshot @()
     if (!$prior[$uninstaller]) { throw 'Legacy catalog lacks the installed uninstaller digest.' }
+    $nativeSnapshot = Join-Path ([IO.Path]::GetDirectoryName($Manifest)) 'native-prior-catalog.json'
+    $nativeInput = $env:MGS_MAIN_NATIVE_PRIOR_CATALOG
+    $nativeDigest = $env:MGS_MAIN_NATIVE_PRIOR_CATALOG_SHA256
+    if ($nativeInput -or $nativeDigest) {
+      if (!$nativeInput -or $nativeDigest -cnotmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'Provide the native predecessor catalog and its independently pinned SHA-256.'
+      }
+      [IO.File]::Copy($nativeInput, $nativeSnapshot, $true)
+      if ((Get-Hash $nativeSnapshot) -ine $nativeDigest) { throw 'Native predecessor catalog SHA-256 mismatch.' }
+      if ((Read-NativePriorCatalog $nativeSnapshot).ContainsKey($prior[$exe])) {
+        throw 'The native predecessor catalog duplicates the legacy executable digest.'
+      }
+    } else {
+      [IO.File]::WriteAllText($nativeSnapshot, '{}')
+    }
     $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($Program)
     if ([IO.Path]::GetFileName($Program) -cne $exe -or
         $info.ProductName -cne 'MaxGameStudio' -or $info.ProductVersion -cne $Version) {
@@ -214,12 +256,12 @@ try {
     Remove-VerifiedFiles $root $expected @{}
     exit 0
   }
-  $prior = Read-Inventory $Catalog @()
+  $legacyPrior = Read-Inventory $Catalog @()
+  $nativePrior = Read-NativePriorCatalog $NativePriorCatalog
   if ($Phase -eq 'Retire') {
     $oldExe = Get-ProgramObject $root $exe
-    if (!$oldExe -or $oldExe.PSIsContainer -or (Get-Hash $oldExe.FullName) -ne $prior[$exe]) {
-      throw 'This personal installation has no verified legacy catalog.'
-    }
+    if (!$oldExe -or $oldExe.PSIsContainer) { throw 'The existing executable is missing or occupied.' }
+    $prior = Get-VerifiedPredecessor (Get-Hash $oldExe.FullName) $legacyPrior $nativePrior
     Remove-VerifiedFiles $root $prior @{}
     exit 0
   }
@@ -235,7 +277,7 @@ try {
     if ($existingExe.PSIsContainer) { throw 'The existing executable path is occupied.' }
     $digest = Get-Hash $existingExe.FullName
     if ($digest -eq $expected[$exe]) { $prior = $expected }
-    elseif ($digest -ne $prior[$exe]) { throw 'This installation has no verified legacy catalog.' }
+    else { $prior = Get-VerifiedPredecessor $digest $legacyPrior $nativePrior }
   } else {
     if ([IO.Directory]::Exists($root) -and (Get-ChildItem -LiteralPath $root -Force | Select-Object -First 1)) {
       throw 'A fresh install requires an empty directory.'
