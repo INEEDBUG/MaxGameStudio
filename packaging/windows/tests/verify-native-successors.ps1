@@ -289,6 +289,8 @@ foreach ($machine in $false, $true) {
       $other = if ($product.Name -eq 'Main') { $league } else { $main }
       $next = Invoke-Overlay $product $machine -Upgrade
       if ($next[$product.Exe] -ceq $product.RemovalInventory[$product.Exe]) { throw 'The installed executable did not advance.' }
+      if ($machine) { Assert-Inventory $next $product.Successor "$($product.Name) successor across both scopes" }
+      else { $product.Successor = $next }
       $product.RemovalVersion = $product.Next
       $product.RemovalInventory = $next
       Assert-Profile $profile
@@ -323,5 +325,9 @@ if ($Phase -eq 'Catalog') {
   $null = New-Item -ItemType File -Path $league.Catalog -Value ($league.Predecessor | ConvertTo-Json)
   Write-Host 'NATIVE_PREDECESSOR_CATALOGS_VERIFIED: both scopes have identical owned files, including uninstallers.'
 } else {
+  $mainInventory = Join-Path $Directory "$($main.Stem)_$($main.Next)_program-inventory.json"
+  $leagueInventory = Join-Path $Directory "$($league.Stem)_$($league.Next)_program-inventory.json"
+  $null = New-Item -ItemType File -Path $mainInventory -Value (@{$main.Successor[$main.Exe] = $main.Successor} | ConvertTo-Json -Depth 4)
+  $null = New-Item -ItemType File -Path $leagueInventory -Value ($league.Successor | ConvertTo-Json)
   Write-Host 'NATIVE_SUCCESSOR_UNINSTALLS_VERIFIED: both scopes were cleaned, with independent removal and original profiles preserved.'
 }

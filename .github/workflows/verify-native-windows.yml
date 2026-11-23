@@ -12,6 +12,9 @@ on:
       backend_only:
         type: boolean
         default: false
+      deliver:
+        type: boolean
+        default: false
     secrets:
       main_signing_key:
         required: false
@@ -173,6 +176,7 @@ jobs:
             -FixturePythonExe (Join-Path $env:pythonLocation 'python.exe') -FixturePythonVersion $env:FIXTURE_PYTHON_VERSION
 
       - name: Verify personal and machine upgrades and measure both products
+        id: native-installed
         if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
         run: |
@@ -202,6 +206,8 @@ jobs:
             if ($hash -cne $expected) { throw 'A verified installer changed during the run.' }
             Write-Host "NATIVE_SMOKE_PACKAGE_VERIFIED: $(Split-Path -Leaf $path) sha256=$hash source=$env:GITHUB_SHA"
           }
+          "main_sha256=$($pair.CandidateSha256)" >> $env:GITHUB_OUTPUT
+          "league_sha256=$($pair.LeagueCandidateSha256)" >> $env:GITHUB_OUTPUT
 
       - name: Verify the native Main backend and owned media fixtures
         if: ${{ !cancelled() && !inputs.league_startup_only && steps.rust.outcome == 'success' }}
@@ -246,3 +252,46 @@ jobs:
           cargo test @core --test native_http cancelled_recording_queue_restores_fixture_player_data -- --exact --ignored
           cargo test @core --test native_http lite_cut_generates_preview_and_waveform_for_an_existing_asset -- --exact --ignored
           cargo test @core --lib ffmpeg_upper_video_uses_source_trim_layer_order_fades_and_copies_base_aac -- --ignored
+
+      - name: Collect the verified beta pair and installed inventories
+        if: ${{ inputs.deliver && !inputs.league_startup_only && !inputs.backend_only }}
+        shell: pwsh
+        env:
+          MAIN_VERIFIED_SHA: ${{ steps.native-installed.outputs.main_sha256 }}
+          LEAGUE_VERIFIED_SHA: ${{ steps.native-installed.outputs.league_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $source = Join-Path $env:RUNNER_TEMP 'mgs-native-candidates'
+          $out = Join-Path $env:RUNNER_TEMP 'mgs-native-beta-pair'
+          $null = New-Item -ItemType Directory -Path $out
+          $main = "MaxGameStudio_$($env:MAIN_VERSION)"
+          $league = "MaxGameStudioLeague_$($env:LEAGUE_VERSION)"
+          $setups = [ordered]@{
+            "${main}_x64-setup.exe" = $env:MAIN_VERIFIED_SHA
+            "${league}_x64-setup.exe" = $env:LEAGUE_VERIFIED_SHA
+          }
+          $names = @($setups.Keys) + @("${main}_x64-setup.exe.sig", "${main}_program-inventory.json", "${league}_program-inventory.json")
+          $files = [ordered]@{}
+          foreach ($name in $names) {
+            Copy-Item -LiteralPath (Join-Path $source $name) -Destination $out
+            $file = Get-Item -LiteralPath (Join-Path $out $name)
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
+            if ($setups.Contains($name) -and $hash -cne $setups[$name]) { throw "Verified package changed: $name" }
+            $files[$name] = @{ sha256=$hash; bytes=$file.Length }
+          }
+          node packaging/windows/tests/verify-native-updaters.mjs --signed-main-package (Join-Path $out "${main}_x64-setup.exe")
+          [ordered]@{
+            repository=$env:GITHUB_REPOSITORY; commit=$env:GITHUB_SHA; run_id=$env:GITHUB_RUN_ID
+            run_attempt=$env:GITHUB_RUN_ATTEMPT; main=$env:MAIN_VERSION; league=$env:LEAGUE_VERSION; files=$files
+          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'verified-pair.json') -Encoding utf8
+
+      - name: Upload the verified Windows beta pair
+        if: ${{ inputs.deliver && !inputs.league_startup_only && !inputs.backend_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaxGameStudio-native-beta-pair-${{ github.sha }}
+          path: ${{ runner.temp }}/mgs-native-beta-pair/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

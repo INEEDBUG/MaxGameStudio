@@ -19,6 +19,10 @@ on:
         description: "Verify Rust parsing and media without building installers"
         type: boolean
         default: false
+      native_deliver:
+        description: "Build, verify, and upload the exact two native beta installers"
+        type: boolean
+        default: false
   push:
     branches:
       - "main"
@@ -27,7 +31,7 @@ on:
       - "V*"
 
 concurrency:
-  group: ${{ (inputs.native_smoke || inputs.native_league_startup || inputs.native_backend_only) && 'verify-native-windows' || 'release-windows' }}
+  group: ${{ (inputs.native_smoke || inputs.native_league_startup || inputs.native_backend_only || inputs.native_deliver) && 'verify-native-windows' || 'release-windows' }}
   cancel-in-progress: false
 
 permissions:
@@ -35,7 +39,7 @@ permissions:
 
 jobs:
   native-smoke:
-    if: github.event_name == 'workflow_dispatch' && (inputs.native_smoke || inputs.native_league_startup || inputs.native_backend_only) && github.repository == 'INEEDBUG/MaxGameStudio'
+    if: github.event_name == 'workflow_dispatch' && (inputs.native_smoke || inputs.native_league_startup || inputs.native_backend_only || inputs.native_deliver) && github.repository == 'INEEDBUG/MaxGameStudio'
     uses: ./.github/workflows/verify-native-windows.yml
     permissions:
       contents: read
@@ -44,11 +48,12 @@ jobs:
       main_version: ${{ inputs.version }}
       league_startup_only: ${{ inputs.native_league_startup }}
       backend_only: ${{ inputs.native_backend_only }}
+      deliver: ${{ inputs.native_deliver }}
     secrets:
       main_signing_key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
   release:
-    if: ${{ !inputs.native_smoke && !inputs.native_league_startup && !inputs.native_backend_only }}
+    if: ${{ !inputs.native_smoke && !inputs.native_league_startup && !inputs.native_backend_only && !inputs.native_deliver }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

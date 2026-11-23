@@ -454,8 +454,8 @@ fn windows_device_name(name: &str) -> bool {
 #[derive(Default)]
 struct AssetInfo {
     duration: Option<f64>,
-    width: Option<u64>,
-    height: Option<u64>,
+    width: Option<i64>,
+    height: Option<i64>,
     alpha: bool,
 }
 
@@ -475,8 +475,8 @@ async fn asset_info(
         if let Ok(Ok(Some((width, height)))) =
             profile_work(profile, move |_| image_dimensions(&path)).await
         {
-            result.width = Some(u64::from(width));
-            result.height = Some(u64::from(height));
+            result.width = Some(i64::from(width));
+            result.height = Some(i64::from(height));
         }
     }
     if kind == "font" {
@@ -501,8 +501,8 @@ fn apply_probe(result: &mut AssetInfo, info: &Value, kind: &str) {
         streams.iter().find(|stream| stream["codec_type"] == "video")
     }) {
         if kind != "audio" {
-            result.width = video["width"].as_u64().filter(|value| *value > 0).or(result.width);
-            result.height = video["height"].as_u64().filter(|value| *value > 0).or(result.height);
+            result.width = video["width"].as_i64().filter(|value| *value > 0).or(result.width);
+            result.height = video["height"].as_i64().filter(|value| *value > 0).or(result.height);
         }
         result.alpha = video_has_alpha(video);
     }
