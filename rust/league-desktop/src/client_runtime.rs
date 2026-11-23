@@ -1,7 +1,7 @@
 //! Disconnect-safe snapshots from the local League client for the existing renderer.
 
 use crate::{
-    aram_automation::{AramOptions, AramSchedule, SelectionScope},
+    aram_automation::{AramOptions, AramSchedule, ScheduledStep, SelectionScope},
     client_discovery::{discover_clients, ClientInstance, LocalClient},
     desktop::emit,
     lcu::{
@@ -637,20 +637,24 @@ impl ClientRuntime {
         select: &Value,
         options: &AramOptions,
     ) {
-        let cancel = || {
+        let cancel = |failed_step| {
             if let Ok(mut state) = self.state.lock() {
                 if state.generation == generation {
-                    state.aram.cancel();
+                    if matches!(failed_step, Some(ScheduledStep::Trade { .. })) {
+                        state.aram.cancel_trade();
+                    } else {
+                        state.aram.cancel();
+                    }
                 }
             }
         };
         let Some(scope) = SelectionScope::from_sample(client.instance, flow, select) else {
-            return cancel();
+            return cancel(None);
         };
         let Ok(target) = client.target() else {
-            return cancel();
+            return cancel(None);
         };
-        let Ok(Ok(lists)) = tokio::time::timeout(
+        let Ok(Ok(mut lists)) = tokio::time::timeout(
             Duration::from_millis(1200),
             self.transport.read_selection_lists(
                 &target,
@@ -660,8 +664,18 @@ impl ClientRuntime {
         )
         .await
         else {
-            return cancel();
+            return cancel(None);
         };
+        if options.want_trade() && select["benchEnabled"] == true {
+            lists.incoming_trade = tokio::time::timeout(
+                Duration::from_millis(250),
+                self.transport.read_champion_trade(&target),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten();
+        }
         let due = {
             let Ok(mut state) = self.state.lock() else {
                 return;
@@ -680,25 +694,43 @@ impl ClientRuntime {
             if self.transport.read_phase(&target).await?.as_deref() != Some("ChampSelect") {
                 return Ok(Value::Null);
             }
-            self.transport.read_champ_select(&target).await
+            let current_flow = if let ScheduledStep::Trade { offer, .. } = due.step {
+                let Some(current_flow) = self.transport.read_gameflow_session(&target).await?
+                else {
+                    return Ok(Value::Null);
+                };
+                if current_flow.queue() != flow.queue()
+                    || self.transport.read_champion_trade(&target).await? != Some(offer)
+                {
+                    return Ok(Value::Null);
+                }
+                Some(current_flow)
+            } else {
+                None
+            };
+            let latest = self.transport.read_champ_select(&target).await?;
+            let latest_flow = current_flow.as_ref().unwrap_or(flow);
+            if SelectionScope::from_sample(client.instance, latest_flow, &latest) != Some(due.scope)
+            {
+                return Ok(Value::Null);
+            }
+            Ok::<_, LcuError>(latest)
         })
         .await;
         let Ok(Ok(latest)) = latest else {
-            return cancel();
+            return cancel(Some(due.step));
         };
-        if SelectionScope::from_sample(client.instance, flow, &latest) != Some(due.scope)
-            || !due.still_applies(select, &latest, &lists.subset)
-        {
-            return cancel();
+        if !due.still_applies(select, &latest, &lists.subset) {
+            return cancel(Some(due.step));
         }
         let Ok(target) = client.target() else {
-            return cancel();
+            return cancel(None);
         };
         let authorized = self.state.lock().is_ok_and(|mut state| {
             state.generation == generation && !state.aram_paused && state.aram.mark_attempted(due)
         });
         if authorized {
-            let _ = self.transport.apply_selection(&target, due).await;
+            let _ = self.transport.apply_selection(&target, due.step).await;
         }
     }
 }

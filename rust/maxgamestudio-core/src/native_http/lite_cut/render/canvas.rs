@@ -147,7 +147,7 @@ mod tests {
         ]).output().unwrap();
         assert!(video.status.success(), "{}", String::from_utf8_lossy(&video.stderr));
         assert_eq!(video.stdout.len(), 320 * 180 * 3 * 10);
-        let red = |frame, x: usize| video.stdout[((frame * 180 + 90) * 320 + x) * 3];
+        let red = |frame: usize, x: usize| video.stdout[((frame * 180 + 90) * 320 + x) * 3];
         assert!((116..=138).contains(&red(1, 80)));
         assert!(red(1, 240) < 5);
         assert!(red(8, 80) < 5);

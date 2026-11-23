@@ -1,6 +1,6 @@
 //! Narrow HTTPS reads from an already verified local League client.
 
-use crate::aram_automation::{AramOptions, ScheduledAction, SelectionLists};
+use crate::aram_automation::{AramOptions, ScheduledStep, SelectionLists};
 use maxgamestudio_league_core::{auto_select::AutoSelectAction, resg::select_resg_champion};
 use reqwest::{redirect::Policy, Client, RequestBuilder, StatusCode};
 use rustls::pki_types::{pem::PemObject, CertificateDer};
@@ -129,13 +129,12 @@ impl GameflowSession {
         self.game_mode() == Some("KIWI")
     }
 
+    pub(crate) fn queue(&self) -> Option<&GameflowQueue> {
+        self.game_data.as_ref()?.queue.as_ref()
+    }
+
     fn game_mode(&self) -> Option<&str> {
-        self.game_data
-            .as_ref()?
-            .queue
-            .as_ref()?
-            .game_mode
-            .as_deref()
+        self.queue()?.game_mode.as_deref()
     }
 
     pub(crate) fn resg_champion(&self, selection: &Value, puuid: Option<&str>) -> Option<u32> {
@@ -165,7 +164,7 @@ pub(crate) struct GameflowGameData {
     team_two: Value,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GameflowQueue {
     pub(crate) id: Option<i32>,
@@ -174,12 +173,33 @@ pub(crate) struct GameflowQueue {
     pub(crate) queue_type: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct IncomingChampionTrade {
+    pub(crate) id: u32,
+    pub(crate) champion: i32,
+}
+
+fn incoming_champion_trade(value: &Value) -> Option<IncomingChampionTrade> {
+    if value["type"] != "CHAMPION"
+        || value["state"] != "RECEIVED"
+        || value["initiatedByLocalPlayer"] != false
+    {
+        return None;
+    }
+    let id = u32::try_from(value["id"].as_u64()?).ok()?;
+    let champion = i32::try_from(value["requesterChampionId"].as_u64()?).ok()?;
+    (1..100_000)
+        .contains(&champion)
+        .then_some(IncomingChampionTrade { id, champion })
+}
+
 #[derive(Clone, Copy)]
 enum ReadEndpoint {
     Phase,
     CurrentSummoner,
     GameflowSession,
     ChampSelect,
+    IncomingChampionTrade,
     ChampionGrid,
     Pickable,
     Bannable,
@@ -194,6 +214,7 @@ impl ReadEndpoint {
             Self::CurrentSummoner => "/lol-summoner/v1/current-summoner",
             Self::GameflowSession => "/lol-gameflow/v1/session",
             Self::ChampSelect => "/lol-champ-select/v1/session",
+            Self::IncomingChampionTrade => "/lol-champ-select/v1/ongoing-champion-swap",
             Self::ChampionGrid => "/lol-champ-select/v1/all-grid-champions",
             Self::Pickable => "/lol-champ-select/v1/pickable-champion-ids",
             Self::Bannable => "/lol-champ-select/v1/bannable-champion-ids",
@@ -207,6 +228,7 @@ impl ReadEndpoint {
             Self::Phase => 1024,
             Self::CurrentSummoner => 16 * 1024,
             Self::GameflowSession | Self::ChampSelect => 256 * 1024,
+            Self::IncomingChampionTrade => 8 * 1024,
             Self::ChampionGrid => 512 * 1024,
             Self::Pickable | Self::Bannable | Self::Subset => 16 * 1024,
             Self::GameData(endpoint) => endpoint.body_limit(),
@@ -279,30 +301,41 @@ impl LcuTransport {
             .unwrap_or(Value::Null))
     }
 
+    pub(crate) async fn read_champion_trade(
+        &self,
+        target: &LcuTarget<'_>,
+    ) -> Result<Option<IncomingChampionTrade>, LcuError> {
+        Ok(self
+            .read::<Value>(target, ReadEndpoint::IncomingChampionTrade)
+            .await?
+            .as_ref()
+            .and_then(incoming_champion_trade))
+    }
+
     pub(crate) async fn read_selection_lists(
         &self,
         target: &LcuTarget<'_>,
         options: &AramOptions,
         has_subset: bool,
     ) -> Result<SelectionLists, LcuError> {
-        let mut lists = SelectionLists {
-            grid: self
+        let mut lists = SelectionLists::default();
+        if options.want_pick() || options.want_ban() {
+            lists.grid = self
                 .read(target, ReadEndpoint::ChampionGrid)
                 .await?
-                .unwrap_or(Value::Null),
-            ..Default::default()
-        };
+                .unwrap_or(Value::Null);
+        }
         if options.want_pick() {
             lists.pickable = self
                 .read(target, ReadEndpoint::Pickable)
                 .await?
                 .unwrap_or(Value::Null);
-            if has_subset {
-                lists.subset = self
-                    .read(target, ReadEndpoint::Subset)
-                    .await?
-                    .unwrap_or(Value::Null);
-            }
+        }
+        if has_subset && (options.want_pick() || options.want_trade()) {
+            lists.subset = self
+                .read(target, ReadEndpoint::Subset)
+                .await?
+                .unwrap_or(Value::Null);
         }
         if options.want_ban() {
             lists.bannable = self
@@ -316,10 +349,21 @@ impl LcuTransport {
     pub(crate) async fn apply_selection(
         &self,
         target: &LcuTarget<'_>,
-        step: ScheduledAction,
+        step: ScheduledStep,
     ) -> Result<(), LcuError> {
+        let response = self
+            .selection_request(target, step)
+            .send()
+            .await
+            .map_err(request_error)?;
+        if !response.status().is_success() {
+            return Err(LcuError::UnexpectedStatus(response.status().as_u16()));
+        }
+        Ok(())
+    }
+
+    fn selection_request(&self, target: &LcuTarget<'_>, step: ScheduledStep) -> RequestBuilder {
         let address = format!("https://127.0.0.1:{}", target.port);
-        let champion = step.champion;
         let patch = |id: i64, body: Value| {
             self.client
                 .patch(format!(
@@ -328,38 +372,39 @@ impl LcuTransport {
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .body(body.to_string())
         };
-        let request = match step.action {
-            AutoSelectAction::Intent { action_id } => {
-                patch(action_id, json!({"championId": champion}))
+        match step {
+            ScheduledStep::Draft { action, champion } => match action {
+                AutoSelectAction::Intent { action_id } => {
+                    patch(action_id, json!({"championId": champion}))
+                }
+                AutoSelectAction::Pick {
+                    action_id,
+                    completed,
+                } => patch(
+                    action_id,
+                    json!({"championId": champion, "type": "pick", "completed": completed}),
+                ),
+                AutoSelectAction::Ban {
+                    action_id,
+                    completed,
+                } => patch(
+                    action_id,
+                    json!({"championId": champion, "type": "ban", "completed": completed}),
+                ),
+                AutoSelectAction::BenchSwap => self.client.post(format!(
+                    "{address}/lol-champ-select/v1/session/bench/swap/{champion}"
+                )),
+            },
+            ScheduledStep::Trade { offer, accept, .. } => {
+                let id = offer.id;
+                let response = if accept { "accept" } else { "decline" };
+                self.client.post(format!(
+                    "{address}/lol-champ-select/v1/session/champion-swaps/{id}/{response}"
+                ))
             }
-            AutoSelectAction::Pick {
-                action_id,
-                completed,
-            } => patch(
-                action_id,
-                json!({"championId": champion, "type": "pick", "completed": completed}),
-            ),
-            AutoSelectAction::Ban {
-                action_id,
-                completed,
-            } => patch(
-                action_id,
-                json!({"championId": champion, "type": "ban", "completed": completed}),
-            ),
-            AutoSelectAction::BenchSwap => self.client.post(format!(
-                "{address}/lol-champ-select/v1/session/bench/swap/{champion}"
-            )),
-        };
-        let response = request
-            .basic_auth("riot", Some(target.token))
-            .timeout(Duration::from_secs(1))
-            .send()
-            .await
-            .map_err(request_error)?;
-        if !response.status().is_success() {
-            return Err(LcuError::UnexpectedStatus(response.status().as_u16()));
         }
-        Ok(())
+        .basic_auth("riot", Some(target.token))
+        .timeout(Duration::from_secs(1))
     }
 
     fn request(&self, target: &LcuTarget<'_>, read: ReadEndpoint) -> RequestBuilder {
@@ -455,6 +500,10 @@ mod tests {
             ),
             (ReadEndpoint::GameflowSession, "/lol-gameflow/v1/session"),
             (ReadEndpoint::ChampSelect, "/lol-champ-select/v1/session"),
+            (
+                ReadEndpoint::IncomingChampionTrade,
+                "/lol-champ-select/v1/ongoing-champion-swap",
+            ),
         ] {
             let request = transport.request(&target, read).build().unwrap();
             assert_eq!(request.method(), reqwest::Method::GET);
@@ -464,6 +513,60 @@ mod tests {
             assert_eq!(request.url().path(), path);
             assert!(request.url().username().is_empty());
             assert!(request.url().password().is_none());
+            assert!(request.headers()[reqwest::header::AUTHORIZATION].is_sensitive());
+        }
+    }
+
+    #[test]
+    fn incoming_champion_exchange_uses_only_the_pinned_local_champion_routes() {
+        let sample = br#"{
+            "id":42,"initiatedByLocalPlayer":false,"otherSummonerIndex":1,
+            "requesterChampionId":63,"responderIndex":3,"state":"RECEIVED","type":"CHAMPION"
+        }"#;
+        let value = decode_body::<Value>(sample).unwrap().unwrap();
+        let offer = incoming_champion_trade(&value).unwrap();
+        assert_eq!(
+            offer,
+            IncomingChampionTrade {
+                id: 42,
+                champion: 63
+            }
+        );
+
+        for (field, replacement) in [
+            ("id", json!(-1)),
+            ("id", json!("42/decline")),
+            ("initiatedByLocalPlayer", json!(true)),
+            ("state", json!("SENT")),
+            ("state", json!("ACCEPTED")),
+            ("type", json!("POSITION")),
+            ("requesterChampionId", json!(0)),
+        ] {
+            let mut invalid = value.clone();
+            invalid[field] = replacement;
+            assert!(incoming_champion_trade(&invalid).is_none(), "{field}");
+        }
+
+        let transport = LcuTransport::new().unwrap();
+        let target = LcuTarget::new(31111, "fixture-only").unwrap();
+        for (accept, suffix) in [(true, "accept"), (false, "decline")] {
+            let request = transport
+                .selection_request(
+                    &target,
+                    ScheduledStep::Trade {
+                        offer,
+                        held: 57,
+                        accept,
+                    },
+                )
+                .build()
+                .unwrap();
+            assert_eq!(request.method(), reqwest::Method::POST);
+            assert_eq!(
+                request.url().as_str(),
+                format!("https://127.0.0.1:31111/lol-champ-select/v1/session/champion-swaps/42/{suffix}")
+            );
+            assert!(request.body().is_none());
             assert!(request.headers()[reqwest::header::AUTHORIZATION].is_sensitive());
         }
     }

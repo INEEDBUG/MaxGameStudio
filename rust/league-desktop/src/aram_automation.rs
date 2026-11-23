@@ -1,6 +1,9 @@
 //! Project verified League champion-select data onto the existing ARAM planner.
 
-use crate::{client_discovery::ClientInstance, lcu::GameflowSession};
+use crate::{
+    client_discovery::ClientInstance,
+    lcu::{GameflowSession, IncomingChampionTrade},
+};
 use maxgamestudio_league_core::auto_select::{
     plan_auto_select, ActionKind, AutoSelectAction, AutoSelectInput, AutoSelectPlan,
     ChampSelectPhase, ChampionAction, ChampionGridEntry, ChampionPreferences, PhaseTiming,
@@ -16,6 +19,7 @@ use std::{
 pub(crate) struct AramOptions {
     pick: PickPreferences,
     ban: ChampionPreferences,
+    handle_trade: bool,
 }
 
 impl AramOptions {
@@ -30,11 +34,12 @@ impl AramOptions {
                 bench_delay_ms: seconds(&pick["benchSwapAccumulatedDelaySeconds"], 2.9) * 1000.0,
             },
             ban: preferences(&ban["aram"]),
+            handle_trade: pick["benchHandleTradeEnabled"] == true,
         }
     }
 
     pub(crate) fn any_enabled(&self) -> bool {
-        self.pick.choice.enabled || self.ban.enabled
+        self.want_pick() || self.want_ban() || self.want_trade()
     }
 
     pub(crate) fn want_pick(&self) -> bool {
@@ -43,6 +48,10 @@ impl AramOptions {
 
     pub(crate) fn want_ban(&self) -> bool {
         self.ban.enabled
+    }
+
+    pub(crate) fn want_trade(&self) -> bool {
+        self.handle_trade
     }
 }
 
@@ -145,13 +154,26 @@ pub(crate) struct SelectionLists {
     pub(crate) bannable: Value,
     pub(crate) grid: Value,
     pub(crate) subset: Value,
+    pub(crate) incoming_trade: Option<IncomingChampionTrade>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScheduledStep {
+    Draft {
+        action: AutoSelectAction,
+        champion: i32,
+    },
+    Trade {
+        offer: IncomingChampionTrade,
+        held: i32,
+        accept: bool,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ScheduledAction {
     pub(crate) scope: SelectionScope,
-    pub(crate) action: AutoSelectAction,
-    pub(crate) champion: i32,
+    pub(crate) step: ScheduledStep,
     due: Instant,
 }
 
@@ -160,7 +182,23 @@ impl ScheduledAction {
         if before["timer"]["phase"] != select["timer"]["phase"] {
             return false;
         }
-        match self.action {
+        let (action, champion) = match self.step {
+            ScheduledStep::Draft { action, champion } => (action, champion),
+            ScheduledStep::Trade { held, .. } => {
+                let has_scoped_bench = (select["timer"]["phase"] == "BAN_PICK"
+                    && select["allowSubsetChampionPicks"] == true
+                    && ids(subset).next().is_some())
+                    || entries(&select["benchChampions"])
+                        .any(|entry| id(&entry["championId"]).is_some());
+                return select["benchEnabled"] == true
+                    && has_scoped_bench
+                    && local_player(select, self.scope.cell)
+                        .and_then(|player| id(&player["championId"]))
+                        == Some(held)
+                    && trade_time_left(select).is_some();
+            }
+        };
+        match action {
             AutoSelectAction::Intent { action_id } => remaining_actions(select, self.scope.cell)
                 .any(|action| {
                     action["id"].as_i64() == Some(action_id)
@@ -168,7 +206,7 @@ impl ScheduledAction {
                         && id(&action["championId"]).is_none()
                 }),
             AutoSelectAction::Pick { action_id, .. } | AutoSelectAction::Ban { action_id, .. } => {
-                let kind = if matches!(self.action, AutoSelectAction::Pick { .. }) {
+                let kind = if matches!(action, AutoSelectAction::Pick { .. }) {
                     "pick"
                 } else {
                     "ban"
@@ -190,13 +228,24 @@ impl ScheduledAction {
                     && if select["timer"]["phase"] == "BAN_PICK"
                         && select["allowSubsetChampionPicks"] == true
                     {
-                        ids(subset).any(|id| id == self.champion)
+                        ids(subset).any(|id| id == champion)
                     } else {
                         entries(&select["benchChampions"])
-                            .any(|entry| id(&entry["championId"]) == Some(self.champion))
+                            .any(|entry| id(&entry["championId"]) == Some(champion))
                     }
             }
         }
+    }
+}
+
+fn trade_time_left(select: &Value) -> Option<f64> {
+    let timer = &select["timer"];
+    match timer["phase"].as_str()? {
+        "BAN_PICK" => Some(f64::INFINITY),
+        "FINALIZATION" => timer["adjustedTimeLeftInPhase"]
+            .as_f64()
+            .filter(|&left| left > 0.0),
+        _ => None,
     }
 }
 
@@ -206,6 +255,9 @@ pub(crate) struct AramSchedule {
     pending: Option<ScheduledAction>,
     attempted: Vec<(AutoSelectAction, i32)>,
     bench_since: HashMap<i32, Instant>,
+    pending_trade: Option<ScheduledAction>,
+    trade_seen: Option<(IncomingChampionTrade, Instant)>,
+    attempted_trades: HashSet<u32>,
 }
 
 impl AramSchedule {
@@ -215,6 +267,12 @@ impl AramSchedule {
 
     pub(crate) fn cancel(&mut self) {
         self.pending = None;
+        self.cancel_trade();
+    }
+
+    pub(crate) fn cancel_trade(&mut self) {
+        self.pending_trade = None;
+        self.trade_seen = None;
     }
 
     pub(crate) fn observe(
@@ -243,7 +301,7 @@ impl AramSchedule {
             Some("BAN_PICK") => ChampSelectPhase::BanPick,
             Some("FINALIZATION") => ChampSelectPhase::Finalization,
             _ => {
-                self.pending = None;
+                self.cancel();
                 return None;
             }
         };
@@ -264,6 +322,10 @@ impl AramSchedule {
             } else {
                 bench_champions.iter().copied().collect()
             };
+        let offer = available.incoming_trade.filter(|_| {
+            options.want_trade() && select["benchEnabled"] == true && !on_bench.is_empty()
+        });
+        self.pending_trade = self.schedule_trade(scope, select, offer, &options.pick, now);
         self.bench_since.retain(|id, _| on_bench.contains(id));
         for id in on_bench {
             self.bench_since.entry(id).or_insert(now);
@@ -288,13 +350,14 @@ impl AramSchedule {
             champion_grid.entry(-1).or_default();
         }
         let pending = |kind| {
-            self.pending
-                .filter(|plan| match plan.action {
-                    AutoSelectAction::Pick { .. } => kind == ActionKind::Pick,
-                    AutoSelectAction::Ban { .. } => kind == ActionKind::Ban,
-                    _ => false,
-                })
-                .map(|plan| plan.champion)
+            self.pending.and_then(|plan| match plan.step {
+                ScheduledStep::Draft { action, champion } => match action {
+                    AutoSelectAction::Pick { .. } if kind == ActionKind::Pick => Some(champion),
+                    AutoSelectAction::Ban { .. } if kind == ActionKind::Ban => Some(champion),
+                    _ => None,
+                },
+                _ => None,
+            })
         };
         let input = AutoSelectInput {
             game_mode: queue.game_mode.clone(),
@@ -342,40 +405,87 @@ impl AramSchedule {
                 } else {
                     let delay = Duration::try_from_secs_f64(delay_ms.max(0.0) / 1000.0).ok()?;
                     let due = now.checked_add(delay)?;
-                    let due = self
-                        .pending
-                        .filter(|pending| {
-                            pending.action == action && pending.champion == champion_id
-                        })
-                        .map_or(due, |pending| pending.due.min(due));
-                    self.pending = Some(ScheduledAction {
-                        scope,
+                    let step = ScheduledStep::Draft {
                         action,
                         champion: champion_id,
-                        due,
-                    });
+                    };
+                    let due = self
+                        .pending
+                        .filter(|pending| pending.step == step)
+                        .map_or(due, |pending| pending.due.min(due));
+                    self.pending = Some(ScheduledAction { scope, step, due });
                 }
             }
         }
-        self.pending.filter(|pending| pending.due <= now)
+        self.pending
+            .filter(|pending| pending.due <= now)
+            .or(self.pending_trade.filter(|pending| pending.due <= now))
+    }
+
+    fn schedule_trade(
+        &mut self,
+        scope: SelectionScope,
+        select: &Value,
+        offer: Option<IncomingChampionTrade>,
+        pick: &PickPreferences,
+        now: Instant,
+    ) -> Option<ScheduledAction> {
+        if self.trade_seen.map(|(seen, _)| seen) != offer {
+            self.trade_seen = offer.map(|offer| (offer, now));
+        }
+        let (offer, seen_at) = self.trade_seen?;
+        if self.attempted_trades.contains(&offer.id) {
+            return None;
+        }
+        let left = trade_time_left(select)?;
+        let held = id(&local_player(select, scope.cell)?["championId"]).filter(|&id| id > 0)?;
+        let rank = |champion| pick.choice.champions.iter().position(|&id| id == champion);
+        let accept = rank(offer.champion).is_some_and(|offered| {
+            rank(held).is_none_or(|current| pick.upgrade_bench && offered < current)
+        });
+        let step = ScheduledStep::Trade {
+            offer,
+            held,
+            accept,
+        };
+        let elapsed_ms = now.saturating_duration_since(seen_at).as_secs_f64() * 1000.0;
+        let delay_ms = (pick.choice.delay_ms - elapsed_ms).max(0.0).min(left);
+        let due = now.checked_add(Duration::try_from_secs_f64(delay_ms / 1000.0).ok()?)?;
+        let due = self
+            .pending_trade
+            .filter(|pending| pending.step == step)
+            .map_or(due, |pending| pending.due.min(due));
+        Some(ScheduledAction { scope, step, due })
     }
 
     pub(crate) fn mark_attempted(&mut self, action: ScheduledAction) -> bool {
-        if self.pending != Some(action) {
-            return false;
+        match action.step {
+            ScheduledStep::Draft {
+                action: draft,
+                champion,
+            } if self.pending == Some(action) => {
+                self.pending = None;
+                self.attempted.push((draft, champion));
+                true
+            }
+            ScheduledStep::Trade { offer, .. } if self.pending_trade == Some(action) => {
+                self.pending_trade = None;
+                self.attempted_trades.insert(offer.id)
+            }
+            _ => false,
         }
-        self.pending = None;
-        self.attempted.push((action.action, action.champion));
-        true
     }
 
     pub(crate) fn next_poll(&self) -> Duration {
-        self.pending.map_or(Duration::from_secs(2), |pending| {
-            pending
-                .due
-                .saturating_duration_since(Instant::now())
-                .clamp(Duration::from_millis(40), Duration::from_secs(2))
-        })
+        self.pending
+            .into_iter()
+            .chain(self.pending_trade)
+            .map(|pending| pending.due)
+            .min()
+            .map_or(Duration::from_secs(2), |due| {
+                due.saturating_duration_since(Instant::now())
+                    .clamp(Duration::from_millis(40), Duration::from_secs(2))
+            })
     }
 }
 
@@ -425,12 +535,14 @@ mod tests {
         let action = scheduler
             .observe(scope, &flow, &selection, &available, &options, due)
             .unwrap();
-        assert_eq!(action.champion, 63);
         assert_eq!(
-            action.action,
-            AutoSelectAction::Pick {
-                action_id: 4,
-                completed: false
+            action.step,
+            ScheduledStep::Draft {
+                action: AutoSelectAction::Pick {
+                    action_id: 4,
+                    completed: false
+                },
+                champion: 63,
             }
         );
         assert!(action.still_applies(&selection, &selection, &Value::Null));
@@ -456,5 +568,164 @@ mod tests {
         other["gameData"]["queue"]["gameMode"] = json!("CLASSIC");
         let other: GameflowSession = serde_json::from_value(other).unwrap();
         assert!(SelectionScope::from_sample(client, &other, &selection).is_none());
+    }
+
+    fn exchange_sample() -> (SelectionScope, GameflowSession, Value) {
+        let flow = serde_json::from_value(json!({
+            "phase": "ChampSelect",
+            "gameData": {"gameId": 3807, "isCustomGame": false,
+                "queue": {"gameMode": "ARAM", "type": "ARAM_UNRANKED_5x5"}}
+        }))
+        .unwrap();
+        let select = json!({
+            "gameId": 3807, "localPlayerCellId": 3, "isCustomGame": false, "isSpectating": false,
+            "myTeam": [{"cellId": 3, "championId": 57}], "benchEnabled": true,
+            "benchChampions": [{"championId": 99}],
+            "timer": {"phase": "FINALIZATION", "adjustedTimeLeftInPhase": 5000}
+        });
+        let client = ClientInstance {
+            pid: 22,
+            created_at: 556,
+        };
+        (
+            SelectionScope::from_sample(client, &flow, &select).unwrap(),
+            flow,
+            select,
+        )
+    }
+
+    fn exchange_options(enabled: bool, upgrade: bool) -> AramOptions {
+        AramOptions::from_saved(
+            &json!({"aram": {
+                "champions": {"default": [63, 57]}, "delaySeconds": 1,
+                "benchHandleTradeEnabled": enabled, "benchSelectFirstAvailableChampion": upgrade
+            }}),
+            &Value::Null,
+        )
+    }
+
+    #[test]
+    fn champion_exchange_matches_the_pinned_priority_and_delay() {
+        for (enabled, upgrade, held, requested, phase_left, expected) in [
+            (false, true, 57, 63, 5_000, None),
+            (true, true, 57, 63, 5_000, Some((true, 1_000))),
+            (true, true, 57, 48, 5_000, Some((false, 1_000))),
+            (true, false, 57, 63, 5_000, Some((false, 1_000))),
+            (true, false, 48, 63, 5_000, Some((true, 1_000))),
+            (true, true, 57, 63, 350, Some((true, 350))),
+        ] {
+            let (scope, flow, mut select) = exchange_sample();
+            select["myTeam"][0]["championId"] = json!(held);
+            select["timer"]["adjustedTimeLeftInPhase"] = json!(phase_left);
+            let offer = IncomingChampionTrade {
+                id: 42,
+                champion: requested,
+            };
+            let available = SelectionLists {
+                incoming_trade: Some(offer),
+                ..Default::default()
+            };
+            let options = exchange_options(enabled, upgrade);
+            let mut scheduler = AramSchedule::default();
+            let now = Instant::now();
+            assert_eq!(options.any_enabled(), enabled);
+            assert!(scheduler
+                .observe(scope, &flow, &select, &available, &options, now)
+                .is_none());
+            let Some((accept, delay)) = expected else {
+                assert!(scheduler
+                    .observe(
+                        scope,
+                        &flow,
+                        &select,
+                        &available,
+                        &options,
+                        now + Duration::from_secs(1)
+                    )
+                    .is_none());
+                continue;
+            };
+            let due = now + Duration::from_millis(delay);
+            assert!(scheduler
+                .observe(
+                    scope,
+                    &flow,
+                    &select,
+                    &available,
+                    &options,
+                    due - Duration::from_millis(1)
+                )
+                .is_none());
+            let pending = scheduler
+                .observe(scope, &flow, &select, &available, &options, due)
+                .unwrap();
+            assert_eq!(
+                pending.step,
+                ScheduledStep::Trade {
+                    offer,
+                    held,
+                    accept
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn champion_exchange_requires_the_same_held_champion_and_attempts_once_per_offer() {
+        let (scope, flow, select) = exchange_sample();
+        let mut available = SelectionLists {
+            incoming_trade: Some(IncomingChampionTrade {
+                id: 42,
+                champion: 63,
+            }),
+            ..Default::default()
+        };
+        let mut scheduler = AramSchedule::default();
+        let options = exchange_options(true, true);
+        let now = Instant::now();
+        scheduler.observe(scope, &flow, &select, &available, &options, now);
+        let due = now + Duration::from_secs(1);
+        let pending = scheduler
+            .observe(scope, &flow, &select, &available, &options, due)
+            .unwrap();
+        assert!(pending.still_applies(&select, &select, &Value::Null));
+        let mut changed = select.clone();
+        changed["myTeam"][0]["championId"] = json!(99);
+        assert!(!pending.still_applies(&select, &changed, &Value::Null));
+        changed = select.clone();
+        changed["timer"]["adjustedTimeLeftInPhase"] = json!(0);
+        assert!(!pending.still_applies(&select, &changed, &Value::Null));
+        changed = select.clone();
+        changed["benchChampions"] = json!([]);
+        assert!(!pending.still_applies(&select, &changed, &Value::Null));
+
+        scheduler.cancel_trade();
+        assert!(!scheduler.mark_attempted(pending));
+        assert!(scheduler
+            .observe(scope, &flow, &select, &available, &options, due)
+            .is_none());
+        let due = due + Duration::from_secs(1);
+        let pending = scheduler
+            .observe(scope, &flow, &select, &available, &options, due)
+            .unwrap();
+        assert!(scheduler.mark_attempted(pending));
+        assert!(!scheduler.mark_attempted(pending));
+        available.incoming_trade = Some(IncomingChampionTrade {
+            id: 42,
+            champion: 48,
+        });
+        assert!(scheduler
+            .observe(scope, &flow, &select, &available, &options, due)
+            .is_none());
+        assert!(scheduler
+            .observe(
+                scope,
+                &flow,
+                &select,
+                &available,
+                &options,
+                due + Duration::from_secs(1)
+            )
+            .is_none());
     }
 }
