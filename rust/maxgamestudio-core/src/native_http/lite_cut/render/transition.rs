@@ -225,13 +225,18 @@ fn stream_number(stream: &Value, field: &str) -> Result<f64, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_http::lite_cut::project_schema::normalize;
     use serde_json::json;
 
     fn clip(start: f64, end: f64, incoming: Value, outgoing: Value) -> Value {
-        json!({
-            "timeline_start":start,"trim_in":0.0,"trim_out":end-start,"speed":1.0,
-            "freeze_frame_sec":0.0,"transition_in":incoming,"transition_out":outgoing
-        })
+        let mut project = normalize(Some(json!({
+            "tracks":[{"id":"v1","type":"video","label":"V1","clips":[{
+                "id":"clip","timeline_start":start,"trim_out":end-start,
+                "transition_in":incoming,"transition_out":outgoing
+            }]}]
+        })))
+        .unwrap();
+        project["tracks"][0]["clips"][0].take()
     }
 
     #[test]

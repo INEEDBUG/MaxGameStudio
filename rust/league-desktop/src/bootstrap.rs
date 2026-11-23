@@ -49,10 +49,6 @@ pub(super) fn initial_state(
             "delayedBenchSwap":null,"delayedChampionSwap":null,"expectedPicks":null,
             "expectedBans":null,"expectedSwaps":null,"activeGroupConfigId":null,
         }),
-        ("client-installation-main", "state") => json!({
-            "leagueClientExecutablePaths":[],"tencentInstallationPath":null,"tclsExecutablePath":null,
-            "weGameLauncherExecutablePath":null,"weGameExecutablePath":null,"officialRiotClientExecutablePath":null,
-        }),
         ("extra-assets-main", "gtimg") => json!({"heroList":null,"kiwiAugments":null}),
         ("extra-assets-main", "opgg") => json!({"aramBalance":null}),
         (CLIENT, "initialization") => json!({"progress":null}),

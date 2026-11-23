@@ -199,9 +199,34 @@ function Invoke-NativeUpdaterProbe($Product, $User, [string]$ExpectedHash, [stri
   $folder = Join-Path $env:ProgramFiles ('MGS-Update-Probe-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $folder | Out-Null
   $launchScript = Join-Path $folder 'launch.ps1'
+  $launchFixture = Join-Path $folder 'league-launch-fixture.exe'
+  $launchFixtureSource = Join-Path $folder 'league-launch-fixture.rs'
+  $priorLaunchFixture = $env:MGS_TEST_LEAGUE_LAUNCHERS
   $launcher = $null
   $stage = 'app-launch'
   try {
+    if ($Product.Name -eq 'League' -and !$LegacyIdle) {
+      [IO.File]::WriteAllText($launchFixtureSource, @'
+#![windows_subsystem = "windows"]
+use std::{env, fs, io};
+
+fn main() -> io::Result<()> {
+    let exe = env::current_exe()?;
+    let directory = exe.parent().unwrap();
+    if env::current_dir()? != directory {
+        return Err(io::Error::other("wrong launcher working directory"));
+    }
+    let id = if exe.ends_with("Client.exe") { "tcls" } else { "wegame" };
+    fs::write(directory.parent().unwrap().join(format!("{id}.txt")), b"launched")
+}
+'@)
+      & rustc --edition 2021 --crate-name mgs_league_launcher_fixture -C opt-level=1 $launchFixtureSource -o $launchFixture
+      if ($LASTEXITCODE -ne 0) { throw 'The native League launcher fixture failed to compile.' }
+      $key = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($User.SID)"
+      $profilePath = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $key -Name ProfileImagePath))
+      $install = Join-Path $profilePath 'AppData\Local\MGS League Fixture'
+      $env:MGS_TEST_LEAGUE_LAUNCHERS = @{ install=$install; markers=$install } | ConvertTo-Json -Compress
+    }
     [IO.File]::WriteAllText($launchScript, @'
 param([string]$Executable, [int]$Port, [string]$LegacyProduct)
 $ErrorActionPreference = 'Stop'
@@ -223,6 +248,18 @@ if ($LegacyProduct -eq 'League') {
     Set-ItemProperty -LiteralPath $storage -Name LocationV1 -Value $locator
   }
   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+}
+$fixtureExe = Join-Path $PSScriptRoot 'league-launch-fixture.exe'
+if ([IO.File]::Exists($fixtureExe)) {
+  $install = Join-Path $env:LOCALAPPDATA 'MGS League Fixture'
+  foreach ($file in @('Launcher\Client.exe', 'WeGameLauncher\launcher.exe')) {
+    $destination = Join-Path $install $file
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $destination))
+    [IO.File]::Copy($fixtureExe, $destination)
+  }
+  $key = 'HKCU:\Software\Tencent\LOL'
+  New-Item -Path $key -Force | Out-Null
+  New-ItemProperty -LiteralPath $key -Name InstallPath -PropertyType String -Value $install | Out-Null
 }
 $app = Start-Process @launch
 exit $app.ExitCode
@@ -292,10 +329,13 @@ exit $app.ExitCode
     if (!$LegacyIdle) { throw }
     Write-Host "BASELINE_HOME_RESOURCE_UNAVAILABLE: $($Product.Name) $($Product.Version) stage=$stage comparison=incomparable"
   } finally {
+    $env:MGS_TEST_LEAGUE_LAUNCHERS = $priorLaunchFixture
     try {
       if ($launcher) { Stop-CiFixtureProcess $launcher }
     } finally {
-      if (Test-Path -LiteralPath $launchScript -PathType Leaf) { Remove-Item -LiteralPath $launchScript }
+      foreach ($file in @($launchScript, $launchFixtureSource, $launchFixture)) {
+        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
+      }
       Remove-Item -LiteralPath $folder
     }
   }

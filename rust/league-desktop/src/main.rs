@@ -10,6 +10,9 @@ mod desktop;
 mod client_discovery;
 
 #[cfg(windows)]
+mod client_launchers;
+
+#[cfg(windows)]
 mod client_runtime;
 
 #[cfg(windows)]

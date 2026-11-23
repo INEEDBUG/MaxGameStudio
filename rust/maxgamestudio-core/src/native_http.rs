@@ -488,7 +488,7 @@ async fn route(
     let allowed = match route {
         #[cfg(windows)]
         Route::RecordingQueue | Route::RecordingAbort | Route::RecordingGsi => "POST",
-        Route::LiteCut(ref route) if matches!(route.allow_header(), "POST" | "DELETE") => {
+        Route::LiteCut(ref route) if matches!(route.allow_header(), "POST" | "PATCH" | "DELETE") => {
             route.allow_header()
         }
         Route::Gsi

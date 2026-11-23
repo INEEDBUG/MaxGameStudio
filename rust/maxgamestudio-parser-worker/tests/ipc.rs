@@ -361,12 +361,14 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
     }
     let mut highlights = Vec::new();
     let mut single_highlights = Vec::new();
+    let mut standalone_defuses = Vec::new();
     for name in names {
         for clip in clips[name].as_array().unwrap() {
             if clip["category"] == "highlight" {
                 let mut clip = clip.clone();
                 clip.as_object_mut().unwrap().remove("clip_id");
                 match clip["kill_count"].as_u64() {
+                    Some(0) => standalone_defuses.push(clip),
                     Some(1) => single_highlights.push(clip),
                     Some(2..) => highlights.push(clip),
                     _ => panic!("unexpected kill count in public Demo highlight: {clip}"),
@@ -390,6 +392,7 @@ fn opt_in_match_facts_keep_the_legacy_round_scores_and_default_timeline() {
         0x87a6f668d685286c,
         "legacy single-kill highlight parity"
     );
+    assert!(standalone_defuses.is_empty(), "the legacy public Demo has no eligible standalone defuse highlight");
 }
 
 #[test]

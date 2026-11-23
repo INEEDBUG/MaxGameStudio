@@ -1,4 +1,5 @@
 use crate::{
+    client_launchers::{self, Launcher},
     client_runtime::{client_from_view, monitor, ClientRuntime, CLIENT},
     lcu::game_art::GameArtPath,
     opgg_window::{self, OpggPreferences, OpggWindow},
@@ -401,6 +402,29 @@ async fn league_call(
         let shard = shard.as_str().ok_or("缺少区服。")?;
         let input = input.as_str().ok_or("缺少玩家名称和标签。")?;
         return Ok(response(client.lookup_player(shard, input).await));
+    }
+    if namespace == SYNC_NAMESPACE
+        && method == "subscribeAndGetInitialState"
+        && matches!(
+            args.as_slice(),
+            [namespace, name] if namespace.as_str() == Some(client_launchers::NAMESPACE)
+                && name.as_str() == Some("state")
+        )
+    {
+        let state = tauri::async_runtime::spawn_blocking(client_launchers::state)
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(response(Ok::<_, io::Error>(state_fields(state, None))));
+    }
+    if namespace == client_launchers::NAMESPACE {
+        if window.label() != "main" || !args.is_empty() {
+            return Err("无效的客户端启动请求。".into());
+        }
+        let launcher = Launcher::from_method(&method).ok_or("未知的客户端启动方式。")?;
+        let result = tauri::async_runtime::spawn_blocking(move || launcher.launch())
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(response(result));
     }
     let app = window.app_handle();
     let invoke = || -> Result<Value, Box<dyn std::error::Error>> {

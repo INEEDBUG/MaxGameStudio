@@ -44,7 +44,6 @@ fn pinned_startup_states_have_a_specific_disconnected_snapshot() {
         (AUTO_SELECT, "state"),
         (AUTO_SELECT, "settings"),
         ("auto-misc-main", "settings"),
-        ("client-installation-main", "state"),
         ("extra-assets-main", "gtimg"),
         ("extra-assets-main", "opgg"),
         ("game-client-main", "settings"),

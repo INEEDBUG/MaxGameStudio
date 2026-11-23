@@ -270,6 +270,27 @@ Update-StandaloneSource $startup $oldStartupMark '<img :src="leagueIco" class="m
 Update-StandaloneSource $startup "import AkariLogo from '@renderer-shared/assets/icon/AkariLogo.vue'" ''
 Update-StandaloneSource $startup "{{ t('appName', { ns: 'common' }) }}" "{{ as.settings.locale.startsWith('en') ? 'League Toolbox' : '英雄联盟工具箱' }}"
 
+$startupSource = [IO.File]::ReadAllText((Join-Path $SourceRoot $startup))
+$startupLaunchers = [regex]::Match($startupSource, '(?s)      <!-- shortcuts -->.*?(?=\r?\n    </NScrollbar>)')
+$startupLaunchActions = [regex]::Match($startupSource, '(?s)const launch = async .*?(?=const otherClients = computed)')
+if (!$startupLaunchers.Success -or !$startupLaunchActions.Success) {
+  throw 'Pinned League startup launcher block not found.'
+}
+Update-StandaloneSource $startup $startupLaunchers.Value ''
+Update-StandaloneSource $startup $startupLaunchActions.Value ''
+foreach ($line in @(
+  "import riotClient from '@renderer-shared/assets/ico/riotclient.ico'",
+  "import weGameIco from '@renderer-shared/assets/ico/wegame.ico'",
+  "import { ClientInstallationRenderer } from '@renderer-shared/shards/client-installation'",
+  "import { useClientInstallationStore } from '@renderer-shared/shards/client-installation/store'",
+  'const cis = useClientInstallationStore()',
+  'const ci = useInstance(ClientInstallationRenderer)',
+  'const message = useMessage()'
+)) {
+  Update-StandaloneSource $startup ("$line" + [Environment]::NewLine) ''
+}
+Update-StandaloneSource $startup "import { NEllipsis, NIcon, NScrollbar, NSpin, useMessage } from 'naive-ui'" "import { NIcon, NScrollbar, NSpin } from 'naive-ui'"
+
 $about = Join-Path $renderer 'components\settings-modal\AboutPane.vue'
 Update-StandaloneSource $about '<div class="flex justify-center">' @'
 <div class="flex flex-wrap items-center justify-center gap-3">

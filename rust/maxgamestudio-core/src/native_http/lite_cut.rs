@@ -6,6 +6,7 @@ mod export_sources;
 mod exports;
 pub(super) mod ffmpeg;
 mod fonts;
+mod management;
 mod project_schema;
 mod project_store;
 mod render;
@@ -41,6 +42,9 @@ pub(super) enum Route {
     Snapshots(String),
     Restore { project: String, snapshot: String },
     Assets(assets::Route),
+    StorageStats,
+    ProxyCache,
+    ProxySettings,
     ValidateAssets,
     Font(String),
     StartExport { background: bool },
@@ -51,6 +55,12 @@ pub(super) enum Route {
 
 impl Route {
     pub(super) fn from_path(path: &str) -> Option<Self> {
+        match path {
+            "/api/lite-cut/storage" => return Some(Self::StorageStats),
+            "/api/lite-cut/proxy-cache" => return Some(Self::ProxyCache),
+            "/api/lite-cut/proxy-cache/settings" => return Some(Self::ProxySettings),
+            _ => {}
+        }
         if path == PROJECTS_PATH {
             return Some(Self::List);
         }
@@ -110,6 +120,7 @@ impl Route {
             Self::List => "GET, POST",
             Self::Project(_) => "GET, PATCH",
             Self::Assets(assets::Route::Delete(_)) => "DELETE",
+            Self::ProxySettings => "PATCH",
             Self::Restore { .. }
             | Self::ValidateAssets
             | Self::Assets(assets::Route::Upload | assets::Route::RetryProxy(_))
@@ -161,6 +172,9 @@ pub(super) async fn respond(
         Route::Assets(route) => {
             return assets::respond(profile, route, request, extended_request).await
         }
+        Route::StorageStats => return management::storage(profile).await,
+        Route::ProxyCache => return management::proxy_cache(profile).await,
+        Route::ProxySettings => return management::patch_proxy_settings(profile, request).await,
         Route::ValidateAssets => return export_sources::validate(profile, request).await,
         Route::Font(name) => return fonts::serve(profile, &name, request, extended_request).await,
         Route::StartExport { background } => {

@@ -10,6 +10,23 @@
         </div>
       </section>
 
+      <section class="overview-panel client-launchers" aria-labelledby="league-launchers">
+        <h2 id="league-launchers">{{ english ? 'Launch League' : '启动英雄联盟' }}</h2>
+        <div v-if="launchers.length" class="launcher-list">
+          <button v-for="launcher in launchers" :key="launcher.id" type="button"
+            :data-client-launcher="launcher.id" class="launcher-button"
+            :disabled="launching !== null" :aria-busy="launching === launcher.id"
+            @click="launchClient(launcher)">
+            <img :src="launcher.icon" alt="" />
+            <span class="launcher-name">
+              <strong>{{ launcher.name }}</strong>
+              <span class="launcher-path" :title="launcher.path">{{ launcher.path }}</span>
+            </span>
+          </button>
+        </div>
+        <p v-else>{{ english ? 'No supported League client installation was found.' : '未找到可启动的英雄联盟客户端。' }}</p>
+      </section>
+
       <div class="overview-columns">
         <section class="overview-panel">
           <h2>{{ english ? 'Quick settings' : '常用功能' }}</h2>
@@ -52,15 +69,19 @@
 
 <script setup lang="ts">
 import leagueLogo from '@renderer-shared/assets/ico/league.ico?url'
+import riotLogo from '@renderer-shared/assets/ico/riotclient.ico?url'
+import weGameLogo from '@renderer-shared/assets/ico/wegame.ico?url'
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { AutoGameflowRenderer } from '@renderer-shared/shards/auto-gameflow'
 import { useAutoGameflowStore } from '@renderer-shared/shards/auto-gameflow/store'
+import { ClientInstallationRenderer } from '@renderer-shared/shards/client-installation'
+import { useClientInstallationStore } from '@renderer-shared/shards/client-installation/store'
 import { useLeagueClientStore } from '@renderer-shared/shards/league-client/store'
 import { WindowManagerRenderer } from '@renderer-shared/shards/window-manager'
 import { useAuxWindowStore } from '@renderer-shared/shards/window-manager/store'
 import { NButton, NScrollbar, NSwitch, useMessage } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import ResgWindowButton from '@main-window/components/resg-window/ResgWindowButton.vue'
@@ -68,6 +89,8 @@ import { useMainWindowAppContext } from '@main-window/context'
 import LeagueUpdateButton from './LeagueUpdateButton.vue'
 
 const client = useLeagueClientStore()
+const installations = useClientInstallationStore()
+const clientInstallation = useInstance(ClientInstallationRenderer)
 const app = useAppCommonStore()
 const autoGameflow = useAutoGameflowStore()
 const aux = useAuxWindowStore()
@@ -77,6 +100,50 @@ const router = useRouter()
 const message = useMessage()
 const { openSettingsModal } = useMainWindowAppContext()
 const english = computed(() => app.settings.locale.startsWith('en'))
+
+type Launcher = {
+  id: string
+  name: string
+  icon: string
+  path: string | null
+  start: () => Promise<unknown>
+}
+
+const launching = ref<string | null>(null)
+const launchers = computed(() => {
+  const options: Launcher[] = [
+    {
+      id: 'tcls', name: english.value ? 'TCLS client' : 'TCLS 客户端', icon: leagueLogo,
+      path: installations.tclsExecutablePath,
+      start: () => clientInstallation.launchTencentTcls()
+    },
+    {
+      id: 'wegame', name: 'WeGame', icon: weGameLogo,
+      path: installations.weGameLauncherExecutablePath ?? installations.weGameExecutablePath,
+      start: () => installations.weGameLauncherExecutablePath
+        ? clientInstallation.launchWeGameLeagueOfLegends()
+        : clientInstallation.launchWeGame()
+    },
+    {
+      id: 'riot', name: 'Riot Client', icon: riotLogo,
+      path: installations.officialRiotClientExecutablePath,
+      start: () => clientInstallation.launchDefaultRiotClient()
+    }
+  ]
+  return options.filter((option): option is Launcher & { path: string } => option.path !== null)
+})
+
+async function launchClient(launcher: Launcher) {
+  if (launching.value) return
+  launching.value = launcher.id
+  try {
+    await launcher.start()
+  } catch {
+    message.error(english.value ? `Could not launch ${launcher.name}. Check the installation and try again.` : `无法启动 ${launcher.name}。请检查安装后重试。`)
+  } finally {
+    launching.value = null
+  }
+}
 
 const clientStatus = computed(() => {
   if (client.isConnected) return english.value ? 'League client connected' : '英雄联盟客户端已连接'
@@ -145,6 +212,27 @@ p { margin: 4px 0 0; opacity: .76; line-height: 1.5; font-size: 12px; }
   flex: none;
   object-fit: contain;
 }
+.client-launchers { margin-top: 16px; }
+.launcher-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 178px), 1fr)); gap: 8px; }
+.launcher-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  min-height: 48px;
+  border: 1px solid var(--overview-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.launcher-button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 6%, transparent); }
+.launcher-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.launcher-button:disabled { opacity: .65; cursor: wait; }
+.launcher-button img { width: 23px; height: 23px; object-fit: contain; flex: none; }
+.launcher-name { min-width: 0; font-size: 13px; }
+.launcher-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: .76; }
 .overview-columns { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin: 16px 0; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
 .settings-row + .settings-row { border-top: 1px solid var(--overview-border); }

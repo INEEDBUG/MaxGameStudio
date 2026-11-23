@@ -413,12 +413,12 @@ export async function readLeagueUpdater(evaluate, current, readinessTimeout = 15
   })
 }
 
-export async function verifyLeagueNavigation(evaluate) {
+export async function verifyLeagueNavigation(evaluate, launcherFixture) {
   await waitFor('the installed League Overview and both game icons', 15_000, () => evaluate(`(() => {
     const overview = document.querySelector('.league-overview')
     const sidebarIcon = document.querySelector('img.league-sidebar-mark')
     return !!overview?.querySelector('img.league-game-mark')?.naturalWidth &&
-      !!sidebarIcon?.naturalWidth
+      !!sidebarIcon?.naturalWidth && !!overview?.querySelector('[aria-labelledby="league-launchers"]')
   })()`))
 
   const click = async selector => {
@@ -429,6 +429,29 @@ export async function verifyLeagueNavigation(evaluate) {
       return true
     })()`)
     assert.equal(clicked, true, 'An installed League navigation action was unavailable.')
+  }
+
+  if (launcherFixture) {
+    const { install, markers } = JSON.parse(launcherFixture)
+    for (const [id, file] of [['tcls', 'Launcher/Client.exe'], ['wegame', 'WeGameLauncher/launcher.exe']]) {
+      const control = `.league-overview button[data-client-launcher="${id}"]`
+      const executable = join(install, file)
+      await waitFor(`the detected ${id} launcher and its loaded game icon`, 10_000, () => evaluate(`(() => {
+        const button = document.querySelector(${JSON.stringify(control)})
+        return !!button && !button.disabled && !!button.querySelector('img')?.naturalWidth &&
+          button.querySelector('[title]')?.title === ${JSON.stringify(executable)}
+      })()`))
+      await click(control)
+      await waitFor(`the ${id} fixture executable to start in its working directory`, 10_000, async () => {
+        try {
+          return (await readFile(join(markers, `${id}.txt`), 'utf8')) === 'launched'
+        } catch (error) {
+          if (error.code === 'ENOENT') return false
+          throw error
+        }
+      })
+    }
+    console.log('NATIVE_LEAGUE_LAUNCHERS_VERIFIED: both Overview buttons launched their detected standard-user fixtures.')
   }
 
   const expectPlayerLookup = () => waitFor('the installed League player lookup view', 10_000,
@@ -601,7 +624,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
       assert.ok(isDeepStrictEqual(result, {
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
       }), 'League returned unexpected update feed metadata.')
-      await verifyLeagueNavigation(evaluate)
+      await verifyLeagueNavigation(evaluate, process.env.MGS_TEST_LEAGUE_LAUNCHERS)
       console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: game icons, both player lookup entries, and independent ARAM companion switches.')
       await selectLeagueExit(evaluate)
     }

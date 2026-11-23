@@ -54,11 +54,9 @@ pub(super) fn collect(
             .collect::<BTreeSet<_>>();
         let kills = kill_inputs::Sources::collect(events, start_tick, &requested, freeze_ticks);
         let mut highlight_ticks = kills.highlight_ticks();
-        let highlight_events = (!highlight_ticks.is_empty()).then(|| {
-            let events = highlight_inputs::Events::collect(events, start_tick, freeze_ticks);
-            highlight_ticks.extend(events.defuse_ticks(&requested));
-            events
-        });
+        let highlight_events = highlight_inputs::Events::collect(events, start_tick, freeze_ticks);
+        highlight_ticks.extend(highlight_events.defuse_ticks(&requested));
+        let highlight_events = (!highlight_ticks.is_empty()).then_some(highlight_events);
         RecordingInputs {
             request,
             requested,
@@ -224,10 +222,17 @@ pub(super) fn collect(
                         "CS2_INSIGHT_MID_ROUND_END_BUFFER_SEC",
                         "invalid middle-round recording tail",
                     )?;
+                    let terminal_defuse_offset_ticks = tail_ticks(
+                        "CS2_INSIGHT_LAST_ROUND_END_OFFSET_SEC",
+                        "invalid terminal-round decision offset",
+                    )
+                    .ok()
+                    .map(|offset| offset.unwrap_or(-3 * 64));
                     Ok::<_, Failure>(highlight_inputs::Source {
                         events,
                         samples,
                         mid_round_buffer_ticks,
+                        terminal_defuse_offset_ticks,
                     })
                 })
                 .transpose()?;

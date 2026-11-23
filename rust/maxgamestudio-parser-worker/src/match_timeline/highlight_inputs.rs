@@ -1,7 +1,9 @@
 //! Evidence for the ordinary highlight branch from the recording scan and selected rows.
 
 use super::{
-    highlights::{self, Encounter, Hurt, KillFacts, Recording, RoundFacts},
+    highlights::{
+        self, ClipBounds, DefuseFacts, Encounter, Hurt, KillFacts, Recording, RoundFacts,
+    },
     kill_action_tags::Position,
     kill_compilation::{Fire, Kill},
     kill_inputs::{same_player, TaggedKill},
@@ -63,6 +65,11 @@ struct Defuse<'a> {
     tick: i64,
     round: i64,
     plant: Option<i64>,
+}
+
+struct DefuseHighlight {
+    tick: i64,
+    tags: Vec<String>,
 }
 
 impl<'a> Events<'a> {
@@ -435,6 +442,7 @@ pub(super) struct Source<'a, 'sample> {
     pub(super) events: Events<'a>,
     pub(super) samples: Samples<'sample>,
     pub(super) mid_round_buffer_ticks: Option<i64>,
+    pub(super) terminal_defuse_offset_ticks: Option<i64>,
 }
 
 pub(super) struct ClipInput<'a> {
@@ -474,6 +482,29 @@ impl Source<'_, '_> {
             mid_round_buffer_ticks: self.mid_round_buffer_ticks,
             ..input.recording
         };
+        let mut defuses = self.defuse_highlights(actor);
+        // An unprojected kill could still qualify in the released analyzer.
+        for death in self.events.deaths.iter().filter(|death| {
+            death.attacker == Some(actor)
+                && (death.tick <= 0
+                    || death.victim.is_none_or(|name| {
+                        name.eq_ignore_ascii_case("nat") || name.eq_ignore_ascii_case("none")
+                    }))
+        }) {
+            let round = if death.round > 1
+                && input
+                    .freezes
+                    .get(&death.round)
+                    .is_some_and(|&freeze| death.tick < freeze)
+            {
+                death.round - 1
+            } else {
+                death.round
+            };
+            if let Some(defuses) = defuses.get_mut(&round) {
+                *defuses = None;
+            }
+        }
 
         let mut buckets = BTreeMap::<i64, RoundKills>::new();
         for tagged in input.tagged {
@@ -491,9 +522,10 @@ impl Source<'_, '_> {
             if post_match(number, score, completed, final_score) {
                 continue;
             }
-            if self.defuse_overlay(actor, number) != Some(false) {
+            if defuses.get(&number).is_some_and(Option::is_none) {
                 continue;
             }
+            let may_merge = defuses.contains_key(&number);
             let Some(first) = kills.retained.iter().map(|(kill, _)| kill.tick).min() else {
                 continue;
             };
@@ -559,17 +591,7 @@ impl Source<'_, '_> {
                     weapon: hit.observation.weapon,
                 })
                 .collect();
-            let outcome = score.zip(scores.get(&(number + 1)).copied()).and_then(
-                |([own, opp], [own_after, opp_after])| {
-                    if own_after > own {
-                        Some(true)
-                    } else if opp_after > opp {
-                        Some(false)
-                    } else {
-                        None
-                    }
-                },
-            );
+            let outcome = round_won(&scores, number);
             let initial_health = self
                 .samples
                 .at(first)
@@ -599,7 +621,8 @@ impl Source<'_, '_> {
                 teammate_kills,
                 target_hurt: &target_hurt,
                 defuse_window: self.events.defuse_windows.get(&(actor, number)).copied(),
-                // Both cases were decided from authoritative observations just above.
+                // Build a normal clip to check whether this round needs a merge.
+                // Its merged form will be handled separately.
                 merged_defuse: false,
                 post_match: false,
             };
@@ -609,6 +632,7 @@ impl Source<'_, '_> {
                 || kills.retained.len() >= 2
                 || highlights::is_knife(kills.retained[0].0.weapon))
             .then_some(kills.retained.as_slice());
+            let mut covers_defuse = false;
             for clip_kills in retained
                 .into_iter()
                 .chain(kills.ending_knives.iter().map(std::slice::from_ref))
@@ -624,8 +648,46 @@ impl Source<'_, '_> {
                         self.kill_facts(kill, tagged, label, &input, &teams, clip_kills.len() > 1)
                     })
                     .collect();
-                if let Some(contexts) = contexts {
+                if may_merge {
+                    covers_defuse |= match contexts {
+                        None => true,
+                        Some(contexts) => {
+                            highlights::build(&round, &contexts, &recording).is_some()
+                                || ((clip_kills.len() > 1 || outcome == Some(true))
+                                    && clip_kills.iter().any(|(kill, _)| {
+                                        !self.pre_kill(kill).is_some_and(pre_kill_complete)
+                                    }))
+                        }
+                    };
+                } else if let Some(contexts) = contexts {
                     clips.extend(highlights::build(&round, &contexts, &recording));
+                }
+            }
+            if covers_defuse {
+                defuses.remove(&number);
+            }
+        }
+        if let Some(terminal_offset_ticks) = self.terminal_defuse_offset_ticks {
+            for (number, observed) in defuses {
+                let score = scores.get(&number).copied();
+                if post_match(number, score, completed, final_score) {
+                    continue;
+                }
+                for highlight in observed.into_iter().flatten() {
+                    let facts = DefuseFacts {
+                        bounds: ClipBounds {
+                            round: number,
+                            freeze_end_tick: input.freezes.get(&number).copied(),
+                            next_freeze_end_tick: input.freezes.get(&(number + 1)).copied(),
+                            cap_round_end_tick: cap_rounds.get(&number).copied(),
+                        },
+                        tick: highlight.tick,
+                        tags: &highlight.tags,
+                        score,
+                        won: round_won(&scores, number),
+                        terminal_offset_ticks,
+                    };
+                    clips.push(highlights::build_defuse(facts, &recording));
                 }
             }
         }
@@ -675,24 +737,51 @@ impl Source<'_, '_> {
         }
     }
 
-    fn defuse_overlay(&self, actor: &str, round: i64) -> Option<bool> {
+    fn defuse_highlights(&self, actor: &str) -> BTreeMap<i64, Option<Vec<DefuseHighlight>>> {
+        let mut rounds = BTreeMap::new();
         for defuse in self
             .events
             .defuses
             .iter()
-            .filter(|defuse| defuse.round == round && same_player(actor, defuse.actor))
+            .filter(|defuse| defuse.round > 0 && same_player(actor, defuse.actor))
         {
             let Some(plant) = defuse.plant else {
                 continue;
             };
-            if defuse.tick - plant >= 39 * 64 {
-                return Some(true);
-            }
-            if ninja_defuse(self.samples.at(defuse.tick)?, defuse.actor) {
-                return Some(true);
+            let Some(rows) = self.samples.at(defuse.tick) else {
+                rounds.insert(defuse.round, None);
+                continue;
+            };
+            let tags = defuse_tags(defuse.tick - plant, ninja_defuse(rows, defuse.actor));
+            if !tags.is_empty() {
+                if let Some(observed) = rounds
+                    .entry(defuse.round)
+                    .or_insert_with(|| Some(Vec::new()))
+                {
+                    observed.push(DefuseHighlight {
+                        tick: defuse.tick,
+                        tags,
+                    });
+                }
             }
         }
-        Some(false)
+        rounds
+    }
+
+    fn pre_kill(&self, kill: &Kill<'_>) -> Option<&[Pawn<'_>]> {
+        let tick = kill.tick;
+        self.samples
+            .at(tick - 8)
+            .or_else(|| self.samples.at(tick - 16))
+            .or_else(|| {
+                matches!(kill.weapon, "awp" | "ssg08")
+                    .then(|| {
+                        self.samples
+                            .at(tick - 24)
+                            .or_else(|| self.samples.at(tick - 32))
+                    })
+                    .flatten()
+            })
     }
 
     fn kill_facts<'b>(
@@ -739,19 +828,7 @@ impl Source<'_, '_> {
                 Some((current.position.z? - earlier.position.z?).abs() > 20.0)
             })
             .unwrap_or_default();
-        let pre = self
-            .samples
-            .at(tick - 8)
-            .or_else(|| self.samples.at(tick - 16))
-            .or_else(|| {
-                matches!(kill.weapon, "awp" | "ssg08")
-                    .then(|| {
-                        self.samples
-                            .at(tick - 24)
-                            .or_else(|| self.samples.at(tick - 32))
-                    })
-                    .flatten()
-            });
+        let pre = self.pre_kill(kill);
         // The later pre-kill fallbacks can depend on ticks scheduled by fail
         // processing. Never use a guessed alive count for a duel or multi-kill.
         let encounter = if needs_pre_sample {
@@ -831,6 +908,14 @@ fn angle_difference(a: f64, b: f64) -> f64 {
     ((a - b + 180.0).rem_euclid(360.0) - 180.0).abs()
 }
 
+fn pre_kill_complete(pawns: &[Pawn<'_>]) -> bool {
+    // An unobserved pawn definitively invalidates the old alive count. If
+    // the alive summary is merely empty, older sampled ticks may still count.
+    pawns
+        .iter()
+        .any(|pawn| !pawn.known || (pawn.alive && pawn.team.is_some()))
+}
+
 fn encounter(pawns: &[Pawn<'_>], actor: &str) -> Option<Encounter> {
     if pawns.iter().any(|row| !row.known) {
         return None;
@@ -900,6 +985,18 @@ fn ninja_defuse(pawns: &[Pawn<'_>], defuser: &str) -> bool {
     enemies >= 2
 }
 
+fn defuse_tags(elapsed_ticks: i64, ninja: bool) -> Vec<String> {
+    let mut tags = Vec::new();
+    if elapsed_ticks >= 39 * 64 {
+        let remaining = 40.0 - elapsed_ticks as f64 / 64.0;
+        tags.push(format!("⏱️ 极限拆包 ({remaining:.1}s)"));
+    }
+    if ninja {
+        tags.push("🥷 忍者偷包".to_owned());
+    }
+    tags
+}
+
 fn legacy_scores(events: &Events<'_>, teams: &BTreeMap<i64, i32>) -> BTreeMap<i64, [i64; 2]> {
     if !events.score_observed {
         return BTreeMap::new();
@@ -914,6 +1011,18 @@ fn legacy_scores(events: &Events<'_>, teams: &BTreeMap<i64, i32>) -> BTreeMap<i6
         scores.insert(round + 1, current);
     }
     scores
+}
+
+fn round_won(scores: &BTreeMap<i64, [i64; 2]>, round: i64) -> Option<bool> {
+    let &[own, other] = scores.get(&round)?;
+    let &[own_after, other_after] = scores.get(&(round + 1))?;
+    if own_after > own {
+        Some(true)
+    } else if other_after > other {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn post_match(
@@ -1043,6 +1152,163 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn pawn(name: &str, team: i32, x: f64, z: f64) -> Pawn<'_> {
+        Pawn {
+            name,
+            position: Position {
+                x: Some(x),
+                y: Some(0.0),
+                z: Some(z),
+            },
+            yaw: Some(0.0),
+            health: Some(100),
+            alive: true,
+            team: Some(team),
+            known: true,
+        }
+    }
+
+    #[test]
+    fn defuse_tags_keep_exact_time_radius_and_order() {
+        let mut players = [
+            pawn("Target", 3, 0.0, 0.0),
+            pawn("A", 2, 800.0, 0.0),
+            pawn("B", 2, 0.0, 999.0),
+        ];
+        assert!(ninja_defuse(&players, "Target"));
+        assert_eq!(
+            defuse_tags(2561, true),
+            ["⏱️ 极限拆包 (-0.0s)", "🥷 忍者偷包"]
+        );
+        players[2].position.z = Some(1000.0);
+        assert!(!ninja_defuse(&players, "Target"));
+        players[2].alive = false;
+        assert!(!ninja_defuse(&players, "Target"));
+        assert!(defuse_tags(2495, false).is_empty());
+        assert_eq!(defuse_tags(2496, false), ["⏱️ 极限拆包 (1.0s)"]);
+    }
+
+    #[test]
+    fn standalone_defuse_uses_round_evidence_and_defers_a_covered_round() {
+        let freezes = BTreeMap::from([(1, 1761), (2, 10699), (3, 16960)]);
+        let decisions = BTreeMap::from([(2, 21457), (9, 56705)]);
+        let target = "Target";
+        let player = Player {
+            name: target,
+            steam_id64: "22",
+            team_key: TeamKey::B,
+            final_group: 3,
+        };
+        let scores = RoundScores {
+            match_score: None,
+            counted_rounds: None,
+            team_groups: Some([2, 3]),
+            halftime_round: None,
+            regulation_end_round: None,
+            rounds: Vec::new(),
+        };
+        let slots = BTreeMap::new();
+        let winner = |round, tick, side: &str| {
+            event(
+                "round_end",
+                tick,
+                &[
+                    ("total_rounds_played", Variant::I32(round)),
+                    ("winner", Variant::String(side.to_owned())),
+                ],
+            )
+        };
+        let evidence = [
+            winner(1, 10300, "T"),
+            event("bomb_planted", 11138, &[]),
+            event(
+                "bomb_defused",
+                13699,
+                &[
+                    ("total_rounds_played", Variant::I32(1)),
+                    ("user_name", Variant::String(target.to_owned())),
+                ],
+            ),
+            winner(2, 21457, "CT"),
+        ];
+        let samples = Samples {
+            cohorts: BTreeMap::from([(
+                13699,
+                vec![
+                    pawn(target, 3, 0.0, 0.0),
+                    pawn("A", 2, 800.0, 0.0),
+                    pawn("B", 2, 0.0, 999.0),
+                ],
+            )]),
+            equipment: BTreeMap::new(),
+            teams: BTreeMap::from([(
+                target.to_lowercase(),
+                BTreeMap::from([(1, 3), (2, 3), (3, 3)]),
+            )]),
+        };
+        let source = Source {
+            events: Events::collect(&evidence, 1, &freezes),
+            samples,
+            mid_round_buffer_ticks: None,
+            terminal_defuse_offset_ticks: Some(-192),
+        };
+        let inspect = |tagged: &[TaggedKill<'_>]| {
+            source.clips(ClipInput {
+                player: &player,
+                tagged,
+                fires: &[],
+                freezes: &freezes,
+                decisions: &decisions,
+                scores: &scores,
+                recording: Recording {
+                    player_steamid: "22",
+                    map_name: "de_mirage",
+                    target_slot: Some(5),
+                    slots: &slots,
+                    terminal_round: None,
+                    demo_end_tick: 57985,
+                    mid_round_buffer_ticks: None,
+                },
+            })
+        };
+        let clips = inspect(&[]);
+        assert_eq!(clips.len(), 1);
+        let clip = &clips[0];
+        assert_eq!(
+            clip["context_tags"],
+            serde_json::json!(["⏱️ 极限拆包 (-0.0s)", "🥷 忍者偷包"])
+        );
+        assert_eq!(clip["start_tick"], 13379);
+        assert_eq!(clip["end_tick"], 13891);
+        assert_eq!(clip["clip_max_tick"], 21649);
+        assert_eq!(clip["score_own"], 0);
+        assert_eq!(clip["score_opp"], 1);
+        assert_eq!(clip["round_won"], true);
+
+        let kill_events = [event(
+            "player_death",
+            11299,
+            &[
+                ("total_rounds_played", Variant::I32(1)),
+                ("attacker_name", Variant::String(target.to_owned())),
+                ("user_name", Variant::String("A".to_owned())),
+                ("weapon", Variant::String("knife_m9_bayonet".to_owned())),
+            ],
+        )];
+        let kills = super::super::kill_inputs::Sources::collect(
+            &kill_events,
+            1,
+            &BTreeSet::from([target]),
+            &freezes,
+        );
+        let tagged = kills.kills_for(target, &BTreeMap::new(), &decisions);
+        assert_eq!(tagged.len(), 1);
+        assert!(
+            inspect(&tagged).is_empty(),
+            "a qualifying knife needs the merged branch"
+        );
     }
 
     #[test]

@@ -81,6 +81,58 @@ pub(super) struct Recording<'a> {
     pub(super) mid_round_buffer_ticks: Option<i64>,
 }
 
+pub(super) struct ClipBounds {
+    pub(super) round: i64,
+    pub(super) freeze_end_tick: Option<i64>,
+    pub(super) next_freeze_end_tick: Option<i64>,
+    pub(super) cap_round_end_tick: Option<i64>,
+}
+
+pub(super) struct DefuseFacts<'a> {
+    pub(super) bounds: ClipBounds,
+    pub(super) tick: i64,
+    pub(super) tags: &'a [String],
+    pub(super) score: Option<[i64; 2]>,
+    pub(super) won: Option<bool>,
+    pub(super) terminal_offset_ticks: i64,
+}
+
+pub(super) fn build_defuse(facts: DefuseFacts<'_>, recording: &Recording<'_>) -> Value {
+    let round = facts.bounds.round;
+    let min = facts.bounds.freeze_end_tick;
+    let cap = clip_cap(facts.bounds, recording, None, facts.terminal_offset_ticks);
+    let [own, opposing] = facts.score.map_or([None, None], |score| score.map(Some));
+    let end = facts.tick.saturating_add(TAIL);
+    let mut hash = DefaultHasher::new();
+    (
+        "defuse",
+        recording.map_name,
+        recording.player_steamid,
+        round,
+        facts.tick,
+        &facts.tags,
+    )
+        .hash(&mut hash);
+    let clip_id = format!("c_{:08x}", hash.finish() as u32);
+    json!({
+        "clip_id":clip_id, "map_name":recording.map_name, "round":round,
+        "category":"highlight", "weapon_used":"拆弹器", "kill_count":0,
+        "start_tick":facts.tick.saturating_sub(LEAD).max(0),
+        "end_tick":cap.map_or(end, |cap| end.min(cap)), "context_tags":facts.tags,
+        "killer_name":null, "killers":[], "killers_steamid64s":[], "killer_steamid64":null,
+        "victims":[], "victim_steamid64s":[], "kill_ticks":[],
+        "target_spec_slot":recording.target_slot, "kill_spec_slots":[], "victim_spec_slots":[],
+        "killer_spec_slot":null, "killers_spec_slots":[],
+        "score_own":own, "score_opp":opposing, "round_won":facts.won,
+        "clip_min_tick":min, "clip_max_tick":cap, "death_tick":null,
+        "ai_score":null, "ai_commentary":null, "source_ticks":[], "source_rounds":[],
+        "source_round_ends":[], "compilation_kind":null, "fixed_segment_pacing":false,
+        "freeze_to_death_round_filter":null, "freeze_to_death_round_windows":null,
+        "flash_assisters":[], "kill_weapons":[], "kill_headshots":[],
+        "kill_tag_lists":[], "shots_to_kill":[],
+    })
+}
+
 pub(super) fn build(
     round: &RoundFacts<'_>,
     kills: &[KillFacts<'_>],
@@ -114,7 +166,17 @@ pub(super) fn build(
             end = end.max(death.saturating_add(TAIL));
         }
     }
-    let cap = clip_cap(round, recording, last);
+    let cap = clip_cap(
+        ClipBounds {
+            round: round.number,
+            freeze_end_tick: round.freeze_end_tick,
+            next_freeze_end_tick: round.next_freeze_end_tick,
+            cap_round_end_tick: round.cap_round_end_tick,
+        },
+        recording,
+        Some(last),
+        0,
+    );
     let [own, opposing] = round.score.map_or([None, None], |score| score.map(Some));
     let (victim_steamids, flash_assisters) = if single {
         (Vec::new(), Vec::new())
@@ -613,14 +675,27 @@ fn weapon_label(kills: &[&KillFacts<'_>]) -> String {
         .join(" / ")
 }
 
-fn clip_cap(round: &RoundFacts<'_>, recording: &Recording<'_>, last: i64) -> Option<i64> {
-    if recording.terminal_round == Some(round.number) {
-        return (last != 0).then_some(last.saturating_add(1).max(recording.demo_end_tick));
+fn clip_cap(
+    bounds: ClipBounds,
+    recording: &Recording<'_>,
+    last_kill: Option<i64>,
+    terminal_offset_ticks: i64,
+) -> Option<i64> {
+    if recording.terminal_round == Some(bounds.round) {
+        let event = last_kill.or_else(|| {
+            bounds
+                .cap_round_end_tick
+                .filter(|&tick| tick != 0)
+                .map(|tick| tick.saturating_add(terminal_offset_ticks))
+        });
+        return event
+            .filter(|&tick| tick != 0)
+            .map(|event| event.saturating_add(1).max(recording.demo_end_tick));
     }
-    let round_end = round.cap_round_end_tick?;
-    let next_freeze = round.next_freeze_end_tick.filter(|&tick| tick > round_end);
+    let round_end = bounds.cap_round_end_tick?;
+    let next_freeze = bounds.next_freeze_end_tick.filter(|&tick| tick > round_end);
     let limit = round_end.saturating_add(recording.mid_round_buffer_ticks.unwrap_or(TAIL));
-    let cap = if last > round_end {
+    let cap = if let Some(last) = last_kill.filter(|&tick| tick > round_end) {
         next_freeze.unwrap_or_else(|| limit.max(last.saturating_add(TAIL)))
     } else {
         limit
@@ -631,6 +706,49 @@ fn clip_cap(round: &RoundFacts<'_>, recording: &Recording<'_>, last: i64) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_defuse_uses_round_end_and_eof_caps_without_kill_anchors() {
+        let slots = BTreeMap::new();
+        let recording = Recording {
+            player_steamid: "22",
+            map_name: "de_mirage",
+            target_slot: Some(7),
+            slots: &slots,
+            terminal_round: Some(9),
+            demo_end_tick: 57985,
+            mid_round_buffer_ticks: None,
+        };
+        let tags = ["⏱️ 极限拆包 (1.0s)".to_owned()];
+        for (terminal_offset_ticks, expected_cap) in [(-192, 57985), (1280, 57986)] {
+            let clip = build_defuse(
+                DefuseFacts {
+                    bounds: ClipBounds {
+                        round: 9,
+                        freeze_end_tick: Some(53446),
+                        next_freeze_end_tick: None,
+                        cap_round_end_tick: Some(56705),
+                    },
+                    tick: 56704,
+                    tags: &tags,
+                    score: Some([2, 6]),
+                    won: Some(false),
+                    terminal_offset_ticks,
+                },
+                &recording,
+            );
+            assert_eq!(clip["weapon_used"], "拆弹器");
+            assert_eq!(clip["kill_count"], 0);
+            assert_eq!(clip["kill_ticks"], json!([]));
+            assert_eq!(clip["kill_spec_slots"], json!([]));
+            assert_eq!(clip["target_spec_slot"], 7);
+            assert_eq!(clip["start_tick"], 56384);
+            assert_eq!(clip["end_tick"], 56896);
+            assert_eq!(clip["clip_min_tick"], 53446);
+            assert_eq!(clip["clip_max_tick"], expected_cap);
+            assert_eq!(clip["death_tick"], Value::Null);
+        }
+    }
 
     fn round() -> RoundFacts<'static> {
         RoundFacts {

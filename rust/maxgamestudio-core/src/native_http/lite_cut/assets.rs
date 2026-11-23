@@ -309,7 +309,7 @@ fn asset_path(root: &Path, raw: &str) -> Result<PathBuf, (StatusCode, &'static s
     Ok(path)
 }
 
-fn needs_proxy(source: &Path) -> bool {
+pub(super) fn needs_proxy(source: &Path) -> bool {
     source
         .extension()
         .and_then(|ext| ext.to_str())
