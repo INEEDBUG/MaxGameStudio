@@ -244,15 +244,35 @@ fn managed_relative(root: &Path, raw: &str) -> Option<PathBuf> {
     let path = PathBuf::from(path_text(&path));
     let root = PathBuf::from(path_text(root));
     let mut parts = path.components();
+    let mut same_root = true;
     for prefix in root.components() {
-        if key(Path::new(prefix.as_os_str())) != key(Path::new(parts.next()?.as_os_str())) {
-            return None;
-        }
+        same_root &= key(Path::new(prefix.as_os_str())) == key(Path::new(parts.next()?.as_os_str()));
     }
     let relative = parts.as_path();
     if relative.as_os_str().is_empty()
         || relative.components().any(|part| !matches!(part, Component::Normal(_)))
     {
+        return None;
+    }
+    if !same_root {
+        #[cfg(windows)]
+        {
+            // Older rows may contain a short name for the configured root.
+            // Resolve only that prefix, then let regular_source check every child.
+            let drive = |path: &Path| {
+                path.components()
+                    .next()
+                    .map(|part| key(Path::new(part.as_os_str())))
+            };
+            if drive(&path) != drive(&root) {
+                return None;
+            }
+            let alias = path.ancestors().nth(relative.components().count())?;
+            if key(&alias.canonicalize().ok()?) != key(&root) {
+                return None;
+            }
+        }
+        #[cfg(not(windows))]
         return None;
     }
     Some(relative.to_owned())
