@@ -11,6 +11,7 @@ if (!$IsWindows -or ![Environment]::Is64BitProcess -or
 }
 . (Join-Path $PSScriptRoot 'fixture-process-stop.ps1')
 . (Join-Path $PSScriptRoot 'standard-user-fixture.ps1')
+. (Join-Path $PSScriptRoot '../league-standalone/shortcut-target.ps1')
 Add-Type -Path (Join-Path $PSScriptRoot 'AllUsersInstallerNative.cs')
 
 $root = Join-Path $env:ProgramFiles 'MaxGameStudioLeagueToolbox'
@@ -24,6 +25,16 @@ if ($installerInfo.Name -cne "MaxGameStudioLeague_${Version}_x64-setup.exe" -or
   throw 'Expected the selected League candidate on a clean disposable runner.'
 }
 $hash = (Get-FileHash -LiteralPath $installerInfo.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+$sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+function Assert-NsisShellPlugins([string]$Package) {
+  $contents = (& $sevenZip l -ba $Package) -join "`n"
+  if ($LASTEXITCODE -ne 0 -or $contents -notmatch '\$PLUGINSDIR\\System\.dll') {
+    throw "Could not list the League NSIS plugins in $Package."
+  }
+  if ($contents -match '\\WinShell\.dll\b') { throw "WinShell.dll still exists in $Package." }
+}
+Assert-NsisShellPlugins $installerInfo.FullName
+
 $accounts = [Collections.Generic.List[Security.Principal.SecurityIdentifier]]::new()
 try {
   $user = New-FixtureUser 'boot' $accounts
@@ -35,6 +46,21 @@ try {
   if ($record.DisplayVersion -cne $Version -or $installedLocation.Trim('"') -ine $root) {
     throw 'League setup did not register the planned native installation.'
   }
+  Assert-NsisShellPlugins (Join-Path $root 'Uninstall MaxGameStudioLeagueToolbox.exe')
+  $shell = New-Object -ComObject Shell.Application
+  $shortcutName = '英雄联盟工具箱.lnk'
+  $target = Join-Path $root $product.Exe
+  foreach ($folder in 'CommonDesktopDirectory', 'CommonPrograms') {
+    $directory = [Environment]::GetFolderPath($folder)
+    $shortcut = $shell.Namespace($directory).ParseName($shortcutName)
+    if (!$shortcut -or $shortcut.ExtendedProperty('System.AppUserModel.ID') -cne 'com.maxgamestudio.league.toolbox') {
+      throw "League $folder shortcut did not retain its taskbar group."
+    }
+    if ((Get-MgsShortcutTarget (Join-Path $directory $shortcutName)) -ine $target) {
+      throw "League $folder shortcut points to an unexpected executable."
+    }
+  }
+  Write-Host 'NATIVE_LEAGUE_SHORTCUTS_VERIFIED: setup and uninstaller without WinShell.dll, desktop and Start Menu targets and AppUserModelID preserved.'
   Invoke-NativeUpdaterProbe $product $user $ExecutableSha256
   if ((Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash -ine $hash) {
     throw 'The League installer changed during the startup test.'

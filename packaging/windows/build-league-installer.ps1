@@ -70,11 +70,12 @@ if ($uninstaller.Length -ge 260) {
   throw 'Windows TEMP is too long for NSIS WriteUninstaller. Select a shorter build TEMP directory.'
 }
 $resources = Join-Path $scratch 'build'
+$standalone = Join-Path $PSScriptRoot 'league-standalone'
 New-Item -ItemType Directory -Path $resources | Out-Null
 $encoding = [Text.UTF8Encoding]::new($false)
 try {
   foreach ($name in @('installer.nsh', 'destination-guard.ps1', 'retire-user-install.ps1', 'shortcut-target.ps1')) {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "league-standalone\$name") -Destination $resources
+    Copy-Item -LiteralPath (Join-Path $standalone $name) -Destination $resources
   }
   if ($Native) {
     . (Join-Path $resources 'retire-user-install.ps1')
@@ -112,7 +113,14 @@ try {
     $notice = Join-Path $payload 'LeagueAkari-MIT.txt'
     $license = & git -C $source show HEAD:LICENSE
     if ($LASTEXITCODE -ne 0 -or !$license) { throw 'Cannot read the pinned League Akari MIT license.' }
-    [IO.File]::WriteAllLines($notice, [string[]]$license, $encoding)
+    $nativeNotices = @(
+      $license -join [Environment]::NewLine
+      [IO.File]::ReadAllText((Join-Path $standalone 'native-renderer/artwork/LUCIDE-LICENSE.txt'))
+      [IO.File]::ReadAllText((Join-Path $standalone 'native-renderer/artwork/IONICONS-LICENSE.txt'))
+      [IO.File]::ReadAllText((Join-Path $standalone 'native-renderer/artwork/COMFORTAA-OFL.txt'))
+      [IO.File]::ReadAllText((Join-Path $standalone 'native-shell-links.LICENSE.txt'))
+    )
+    [IO.File]::WriteAllText($notice, ($nativeNotices -join "`r`n`r`n"), $encoding)
     $hashes['LeagueAkari-MIT.txt'] = (Get-FileHash -LiteralPath $notice -Algorithm SHA256).Hash.ToLowerInvariant()
     $inventory = Join-Path $payload $LeagueInventoryName
     [IO.File]::WriteAllText($inventory, ($hashes | ConvertTo-Json -Compress), $encoding)
@@ -141,7 +149,9 @@ try {
   } else {
     Copy-Item -LiteralPath $inventory -Destination $resources
   }
-  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'league-workbench-icon.ico') -Destination (Join-Path $resources 'icon.ico')
+  $icon = if ($Native) { Join-Path $standalone 'native-renderer/artwork/toolbox.ico' }
+    else { Join-Path $PSScriptRoot 'league-workbench-icon.ico' }
+  Copy-Item -LiteralPath $icon -Destination (Join-Path $resources 'icon.ico')
   [IO.File]::WriteAllText((Join-Path $scratch 'package.json'), ([ordered]@{
     name = $metadata.name
     version = $metadata.version
@@ -174,8 +184,10 @@ try {
       include = 'build/installer.nsh'
     }
   } | ConvertTo-Json -Depth 8), $encoding)
-  $launcher = Join-Path $PSScriptRoot 'league-standalone\run-league-nsis.cjs'
-  & $node $launcher $builder $scratch --projectDir $scratch --config $config --win nsis --x64 --prepackaged $unpacked --publish never
+  $launcher = Join-Path $standalone 'run-league-nsis.cjs'
+  $nativeShortcutArgs = @()
+  if ($Native) { $nativeShortcutArgs += '--native-shortcuts' }
+  & $node $launcher $builder $scratch @nativeShortcutArgs --projectDir $scratch --config $config --win nsis --x64 --prepackaged $unpacked --publish never
   $candidate = Join-Path $scratch "out\$installerName"
   if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $candidate -PathType Leaf)) {
     throw 'League NSIS repack failed.'

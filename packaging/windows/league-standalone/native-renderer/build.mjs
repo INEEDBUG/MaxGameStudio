@@ -4,10 +4,12 @@ import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { resgDisplayProgram } from '../../league-resg/resg-display.ts'
+import { artworkModule, logoComponents, useMitIconImports } from './artwork.mjs'
 
 const IPC_MODULE = 'virtual:mgs-league-native-ipc'
 const IPC_SOURCE = fileURLToPath(new URL('./tauri-ipc.ts', import.meta.url))
 const OPGG_COMPANION = new URL('./NativeOpggCompanion.vue', import.meta.url)
+const TOOLBOX_ICON = new URL('./artwork/toolbox.ico', import.meta.url)
 const GAME_ART_ORIGIN = 'http://league-art.localhost'
 const WINDOW_ENTRIES = {
   main: 'main-window.html',
@@ -214,10 +216,24 @@ onMounted(() => {`
 ]
 
 function nativeRendererPlugin(sourceRoot) {
+  const stagedSourcePrefix = sourceRoot.replaceAll('\\', '/') + '/'
   const ipcDirectory = join(sourceRoot, 'src/renderer-shared/shards/ipc').replaceAll('\\', '/')
   const transforms = new Map(
     Object.entries(IPC_TRANSFORMS).map(([file, patches]) => [`${ipcDirectory}/${file}`, patches])
   )
+  const autoGameflow = `${stagedSourcePrefix}src/renderer/src-main-window/views/automation/AutoGameflow.vue`
+  transforms.set(autoGameflow, [
+    ["import aramTeamSideMessageImage from '@renderer-shared/assets/automation/aram-team-side-message.webp'\n", ''],
+    [
+      `                  <img
+                    :src="aramTeamSideMessageImage"
+                    :alt="t('automation.gameflow.autoSendARAMTeamSideEnabled.tooltipImageAlt')"
+                    class="mb-2 aspect-[1680/935] w-90 max-w-full rounded border border-black/10 object-cover dark:border-white/10"
+                  />
+`,
+      ''
+    ]
+  ])
   const appCommon = join(sourceRoot, 'src/renderer-shared/shards/app-common').replaceAll('\\', '/')
   // The standalone logo has no upstream easter egg. Loading its preference
   // here would block startup on an IPC setting this app never uses.
@@ -290,8 +306,16 @@ const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}
     resolveId(id) {
       if (id === IPC_MODULE) return IPC_SOURCE
     },
+    load(id) {
+      const file = id.split('?', 1)[0].replaceAll('\\', '/')
+      if (file.startsWith(stagedSourcePrefix)) return artworkModule(file.slice(stagedSourcePrefix.length))
+    },
     transform(source, id) {
       const normalized = id.replaceAll('\\', '/')
+      if (normalized.startsWith(stagedSourcePrefix)) {
+        const logo = logoComponents.get(normalized.slice(stagedSourcePrefix.length))
+        if (logo) return { code: `<template>${logo}</template>`, map: null }
+      }
       if (normalized === opggView) {
         if (!source.includes('const { currentTab } = useOpgg()')) {
           throw new Error(`Unexpected OP.GG view in ${id}`)
@@ -299,13 +323,14 @@ const startNativeDrag = () => nativeWindowIpc.call('window-manager-main/${label}
         return { code: readFileSync(OPGG_COMPANION, 'utf8'), map: null }
       }
       const patches = transforms.get(normalized)
-      if (!patches) return
-
-      let code = source.replaceAll('\r\n', '\n')
-      for (const [anchor, replacement] of patches) {
-        code = replaceOnce(code, anchor, replacement, id)
+      let code = normalized.startsWith(`${stagedSourcePrefix}src/`) ? useMitIconImports(source) : source
+      if (patches) {
+        code = code.replaceAll('\r\n', '\n')
+        for (const [anchor, replacement] of patches) {
+          code = replaceOnce(code, anchor, replacement, id)
+        }
       }
-      return { code, map: null }
+      if (code !== source) return { code, map: null }
     },
     transformIndexHtml(html, { filename }) {
       const opgg = filename.replaceAll('\\', '/') === opggHtml
@@ -400,10 +425,7 @@ async function buildRenderer(args) {
 
   await vite.build(createNativeRendererConfig(loaded.default.renderer, sourceRoot, outDir))
   await Promise.all(Object.values(WINDOW_ENTRIES).map((filename) => stat(join(outDir, filename))))
-  await copyFile(
-    join(sourceRoot, 'src/renderer-shared/assets/ico/league.ico'),
-    join(outDir, 'league.ico')
-  )
+  await copyFile(TOOLBOX_ICON, join(outDir, 'league.ico'))
   await writeFile(join(outDir, 'resg-display.js'), resgDisplayProgram(), 'utf8')
   console.log(`Native League renderer built at ${outDir}`)
 }

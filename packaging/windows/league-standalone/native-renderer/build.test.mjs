@@ -9,6 +9,46 @@ import { createNativeRendererConfig } from './build.mjs'
 const stagedSource = resolve('staged-league-fixture')
 const outDir = resolve('native-webview-dist')
 
+test('the native renderer substitutes local vector artwork for bundled brand and game images', () => {
+  const plugin = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const shared = join(stagedSource, 'src/renderer-shared')
+  const launchers = ['league', 'riotclient', 'wegame'].map((name) =>
+    plugin.load?.(`${join(shared, 'assets/ico', `${name}.ico`)}?url`)
+  )
+  for (const launcher of launchers) {
+    assert.match(launcher ?? '', /^export default "data:image\/svg\+xml,/)
+  }
+  assert.equal(new Set(launchers).size, 3)
+
+  const oldArtwork = [
+    'assets/logo/maxgamestudio-logo.png',
+    'assets/ranked-icons/bronze.png',
+    'assets/ranked-icons-large/challenger.png',
+    'assets/champions/bravery-circle.png',
+    'components/match-card/map-images/12.png'
+  ]
+  for (const original of oldArtwork) {
+    assert.match(plugin.load?.(join(shared, original)) ?? '', /^export default "data:image\/svg\+xml,/)
+  }
+  assert.equal(plugin.load?.(join(shared, 'assets/champions/unrelated.png')), undefined)
+
+  const originalLogo = '<template><svg><path id="original-brand" /></svg></template>'
+  for (const logo of ['AkariLogo', 'OpggIcon']) {
+    const component = `${join(shared, 'assets/icon', logo)}.vue`
+    const result = plugin.transform(originalLogo, component)?.code ?? originalLogo
+    assert.match(result, /<svg/)
+    assert.doesNotMatch(result, /original-brand|assets\/logo\/|data:image\/png/)
+  }
+})
+
+test('native code keeps icon bindings while replacing the Font Awesome package', () => {
+  const plugin = createNativeRendererConfig({}, stagedSource, outDir).plugins[0]
+  const about = join(stagedSource, 'src/renderer/src-main-window/components/settings-modal/AboutPane.vue')
+  const original = "import { Github as GithubIcon, Star as StarIcon } from '@vicons/fa'\n"
+  const result = plugin.transform(original, about)?.code ?? original
+  assert.equal(result, "import { CodeSlashOutline as GithubIcon, StarOutline as StarIcon } from '@vicons/ionicons5'\n")
+})
+
 test('selects the three bundled windows and allows local Tauri IPC and game art in their CSP', () => {
   const vue = { name: 'vite:vue' }
   const devtools = { name: 'vite-plugin-vue-devtools' }

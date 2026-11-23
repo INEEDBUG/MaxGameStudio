@@ -11,7 +11,7 @@ function patchInstallerTemplate(template) {
   return template.replace(startup, (match) => match.replace('$INSTDIR', () => '$TEMP'))
 }
 
-function patchScopeTemplates(templates) {
+function patchScopeTemplates(templates, nativeShortcuts = false) {
   const section = join(templates, 'installSection.nsh')
   const original = readFileSync(section, 'utf8')
   const crossScopeUninstall = /^\$\{if\} \$installMode == "all"\r?\n  !insertmacro uninstallOldVersion HKEY_CURRENT_USER\r?\n  !insertmacro handleUninstallResult HKEY_CURRENT_USER\r?\n\$\{endIf\}\r?\n/gm
@@ -56,6 +56,7 @@ function patchScopeTemplates(templates) {
   patchInstallUtilities(join(templates, 'include', 'installUtil.nsh'))
   patchNativeUninstaller(join(templates, 'uninstaller.nsh'))
   patchExtractionRetries(join(templates, 'include', 'extractAppPackage.nsh'))
+  if (nativeShortcuts) patchNativeShellLinks(templates)
   for (const filename of ['installer.nsi', 'multiUserUi.nsh']) {
     const path = join(templates, filename)
     const text = readFileSync(path, 'utf8')
@@ -77,6 +78,28 @@ function patchScopeTemplates(templates) {
     }
     writeFileSync(path, localized, 'utf8')
   }
+}
+
+function patchNativeShellLinks(templates) {
+  const header = 'native-shell-links.nsh'
+  const files = [
+    ['include/installer.nsh', { SetLnkAUMI: 5, UninstShortcut: 2 }],
+    ['uninstaller.nsh', { UninstAppUserModelId: 1, UninstShortcut: 2 }],
+  ]
+  for (const [filename, operations] of files) {
+    const path = join(templates, filename)
+    let content = readFileSync(path, 'utf8')
+    for (const [operation, expected] of Object.entries(operations)) {
+      const call = 'WinShell::' + operation + ' '
+      if (content.split(call).length - 1 !== expected) {
+        throw new Error('Unexpected number of ' + call.trim() + ' calls in ' + filename)
+      }
+      content = content.replaceAll(call, '!insertmacro MgsLeague' + operation + ' ')
+    }
+    if (/WinShell::/i.test(content)) throw new Error('Unhandled WinShell call in ' + filename)
+    writeFileSync(path, '!include "' + header + '"\n' + content, 'utf8')
+  }
+  cpSync(join(__dirname, header), join(templates, 'include', header))
 }
 
 function patchInstallUtilities(path) {
@@ -129,6 +152,8 @@ function patchExtractionRetries(path) {
 
 if (require.main === module) {
   const [, , cli, scratch, ...cliArgs] = process.argv
+  const nativeShortcuts = cliArgs[0] === '--native-shortcuts'
+  if (nativeShortcuts) cliArgs.shift()
   const builder = resolve(cli)
   const pinned = createRequire(builder)
   if (pinned('electron-builder/package.json').version !== '26.15.6') {
@@ -141,7 +166,7 @@ if (require.main === module) {
   const patched = patchInstallerTemplate(readFileSync(join(nsis.nsisTemplatesDir, 'installer.nsi'), 'utf8'))
   cpSync(nsis.nsisTemplatesDir, templates, { recursive: true, force: false, errorOnExist: true })
   writeFileSync(join(templates, 'installer.nsi'), patched, 'utf8')
-  patchScopeTemplates(templates)
+  patchScopeTemplates(templates, nativeShortcuts)
   nsis.nsisTemplatesDir = templates
   process.argv = [process.argv[0], builder, ...cliArgs]
   require(builder)
