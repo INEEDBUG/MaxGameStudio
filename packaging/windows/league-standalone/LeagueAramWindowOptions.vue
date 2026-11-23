@@ -1,5 +1,5 @@
 <template>
-  <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+  <div class="league-aram-window-options grid grid-cols-1 gap-4 md:grid-cols-2">
     <SettingsSection :title="t('settings.multiWindow.opggWindow.title')">
       <SettingsRow :label="t('settings.multiWindow.opggWindow.enabled.label')">
         <NSwitch

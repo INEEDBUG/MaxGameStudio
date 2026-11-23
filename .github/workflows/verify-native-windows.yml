@@ -82,6 +82,7 @@ jobs:
           $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-baselines.json') -Encoding utf8
 
       - name: Verify native parsing on the pinned public Demo
+        id: native-parser
         if: ${{ !inputs.league_startup_only }}
         shell: pwsh
         run: |
@@ -161,7 +162,8 @@ jobs:
           ./packaging/windows/tests/verify-native-successors.ps1 -Phase Verify `
             -Directory (Join-Path $env:RUNNER_TEMP 'mgs-native-candidates') `
             -MainBaselineVersion $env:MAIN_PREDECESSOR_VERSION -LeagueBaselineVersion $env:LEAGUE_PREDECESSOR_VERSION `
-            -MainVersion $env:MAIN_VERSION -LeagueVersion $env:LEAGUE_VERSION
+            -MainVersion $env:MAIN_VERSION -LeagueVersion $env:LEAGUE_VERSION `
+            -FixturePythonExe (Join-Path $env:pythonLocation 'python.exe') -FixturePythonVersion $env:FIXTURE_PYTHON_VERSION
 
       - name: Verify personal and machine upgrades and measure both products
         if: ${{ !inputs.league_startup_only }}
@@ -178,11 +180,13 @@ jobs:
             BaselineInstaller=$main.path; BaselineVersion=$main.version; BaselineSha256=$main.hash
             LeagueBaselineInstaller=$league.path; LeagueBaselineVersion=$league.version; LeagueBaselineSha256=$league.hash
             ExpectedVersion=$env:MAIN_VERSION; NativePayloads=$true
-            FixturePythonExe=(Get-Command python.exe).Source; FixturePythonVersion=$env:FIXTURE_PYTHON_VERSION
+            FixturePythonExe=(Join-Path $env:pythonLocation 'python.exe'); FixturePythonVersion=$env:FIXTURE_PYTHON_VERSION
           }
           $pair.CandidateSha256 = (Get-FileHash -LiteralPath $pair.Installer -Algorithm SHA256).Hash.ToLowerInvariant()
           $pair.LeagueCandidateSha256 = (Get-FileHash -LiteralPath $pair.LeagueInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
           $parserHash = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mgs-native-parser-sha256.txt') -Raw).Trim()
+          node packaging/windows/tests/verify-native-updaters.mjs --signed-main-package $pair.Installer
+          if ($LASTEXITCODE -ne 0) { throw 'The Main candidate signature did not verify.' }
           ./packaging/windows/tests/verify-packaged-upgrade.ps1 @pair -ParserWorkerSha256 $parserHash
           ./packaging/windows/tests/verify-all-users-install.ps1 @pair
           foreach ($path in $pair.Installer, $pair.LeagueInstaller) {
@@ -191,3 +195,46 @@ jobs:
             if ($hash -cne $expected) { throw 'A verified installer changed during the run.' }
             Write-Host "NATIVE_SMOKE_PACKAGE_VERIFIED: $(Split-Path -Leaf $path) sha256=$hash source=$env:GITHUB_SHA"
           }
+
+      - name: Verify the native Main backend and owned media fixtures
+        if: ${{ !cancelled() && !inputs.league_startup_only && steps.native-parser.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $fixture = Join-Path $env:RUNNER_TEMP 'mgs-native-core-fixtures'
+          $null = New-Item -ItemType Directory -Path $fixture
+          $archive = Join-Path $fixture 'ffmpeg.zip'
+          Invoke-WebRequest -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip' -OutFile $archive -TimeoutSec 90
+          if ((Get-Item -LiteralPath $archive).Length -ne 109728040 -or
+              (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine 'db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec') {
+            throw 'FFmpeg fixture tool download did not match its pinned release.'
+          }
+          $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            foreach ($name in 'ffmpeg.exe', 'ffprobe.exe') {
+              $entries = @($zip.Entries | Where-Object { $_.FullName -clike "*/bin/$name" })
+              if ($entries.Count -ne 1) { throw "Unexpected FFmpeg archive entry: $name" }
+              [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], (Join-Path $fixture $name))
+            }
+          } finally { $zip.Dispose() }
+          [IO.File]::Delete($archive)
+          $source = Join-Path $fixture 'synthetic-playback.rs'
+          @'
+          use std::{fs, io, thread, time::Duration};
+          fn main() -> io::Result<()> {
+              fs::write("csgo/cfg/cs2_user.cfg", b"fixture profile changed")?;
+              thread::sleep(Duration::from_secs(30));
+              Ok(())
+          }
+          '@ | Set-Content -LiteralPath $source -Encoding utf8
+          rustc --edition 2021 $source -o (Join-Path $fixture 'synthetic-playback-fixture.exe')
+          $env:MGS_PLAYBACK_TEST_ROOT = $fixture
+          $env:MGS_QUEUE_TEST_FFMPEG = Join-Path $fixture 'ffmpeg.exe'
+          $env:MGS_LITECUT_VIDEO_TEST_FFMPEG = $env:MGS_QUEUE_TEST_FFMPEG
+          $env:MGS_LITECUT_VIDEO_TEST_SCRATCH = $fixture
+          $env:CARGO_TARGET_DIR = Join-Path (Get-Location).Path 'frontend/src-tauri/target'
+          $core = @('--release','--locked','--manifest-path','rust/Cargo.toml','-p','maxgamestudio-core','--features','native-http')
+          cargo test @core -- --test-threads=1
+          cargo test @core --test native_http cancelled_recording_queue_restores_fixture_player_data -- --exact --ignored
+          cargo test @core --lib ffmpeg_upper_video_uses_source_trim_layer_order_fades_and_copies_base_aac -- --ignored

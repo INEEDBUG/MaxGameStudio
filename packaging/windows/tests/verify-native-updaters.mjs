@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash, createPublicKey, verify } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -44,10 +45,23 @@ export function verifyMainSignatureComment(encodedSignature, encodedKey, filenam
   assert.deepEqual(comment.split('\t').filter(field => field.startsWith('file:')), [`file:${filename}`])
   const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex')
   const verificationKey = createPublicKey({ key: Buffer.concat([spkiPrefix, key.subarray(10)]), type: 'spki', format: 'der' })
-  // The global signature authenticates the signed comment and detached signature.
-  // Verifying that detached signature against installer bytes is download-time work.
   assert.ok(verify(null, Buffer.concat([record.subarray(10), Buffer.from(comment)]),
     verificationKey, base64(globalSignature, 64)), 'Main installer signature comment did not verify.')
+  return { record, verificationKey }
+}
+
+export async function verifyMainInstallerSignature(installer, publicKey) {
+  const signature = (await readFile(`${installer}.sig`, 'utf8')).trim()
+  const { record, verificationKey } = verifyMainSignatureComment(signature, publicKey, basename(installer))
+  let bytes
+  if (record.subarray(0, 2).toString('ascii') === 'ED') {
+    const hash = createHash('blake2b512')
+    for await (const chunk of createReadStream(installer)) hash.update(chunk)
+    bytes = hash.digest()
+  } else {
+    bytes = await readFile(installer)
+  }
+  assert.ok(verify(null, bytes, verificationKey, record.subarray(10)), 'Main installer bytes did not match the update signature.')
 }
 
 export function validateMainFeed(manifest, current, publicKey) {
@@ -428,6 +442,15 @@ export async function verifyLeagueNavigation(evaluate) {
     () => evaluate("window.location.hash === '#/overview' && !!document.querySelector('.league-overview')"))
   await click('[data-key="league-lookup"]')
   await expectPlayerLookup()
+
+  await click('[data-key="league-runes"]')
+  await waitFor('the installed League ARAM pick and ban options', 10_000, () => evaluate(`(() => {
+    const windows = document.querySelector('.league-aram-window-options')
+    const switches = [...(windows?.querySelectorAll('[role="switch"]') ?? [])]
+    return window.location.hash.split('?')[0].endsWith('/automation/auto-select') &&
+      /OP\\.?GG/i.test(windows?.textContent ?? '') && /RESG/i.test(windows?.textContent ?? '') &&
+      switches.length === 4 && switches.every(control => /^(true|false)$/.test(control.getAttribute('aria-checked')))
+  })()`))
 }
 
 export async function selectLeagueExit(evaluate) {
@@ -541,7 +564,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
       }), 'League returned unexpected update feed metadata.')
       await verifyLeagueNavigation(evaluate)
-      console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: both bundled game icons and both player lookup entries.')
+      console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: game icons, both player lookup entries, and ARAM window options.')
       await selectLeagueExit(evaluate)
     }
   } finally {
@@ -551,5 +574,12 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
 }
 
 if (import.meta.main) {
-  await verifyInstalled(...process.argv.slice(2))
+  const [mode, installer] = process.argv.slice(2)
+  if (mode === '--signed-main-package') {
+    const config = JSON.parse(await readFile(mainConfig, 'utf8'))
+    await verifyMainInstallerSignature(installer, config.plugins.updater.pubkey)
+    console.log(`MAIN_INSTALLER_SIGNATURE_VERIFIED: ${basename(installer)}`)
+  } else {
+    await verifyInstalled(...process.argv.slice(2))
+  }
 }

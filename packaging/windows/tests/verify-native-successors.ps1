@@ -257,7 +257,9 @@ function New-Profile {
 }
 
 if ($Phase -eq 'Verify') {
-  if (!$FixturePythonExe) { $FixturePythonExe = (Get-Command python.exe -CommandType Application).Source }
+  if (!$FixturePythonExe) {
+    $FixturePythonExe = (Get-Command python.exe -CommandType Application | Select-Object -First 1).Source
+  }
   $FixturePythonExe = (Get-Item -LiteralPath $FixturePythonExe).FullName
   if ($FixturePythonExe.StartsWith($fixture + '\', [StringComparison]::OrdinalIgnoreCase) -or
       $FixturePythonExe.StartsWith($Directory + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Use external fixture Python.' }
