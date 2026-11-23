@@ -91,20 +91,11 @@ impl<'a> Sources<'a> {
                 }
             }
         }
-        for track in tracks[..base.unwrap_or(tracks.len())]
-            .iter()
-            .rev()
-            .filter(|track| visible_video(track))
-        {
-            let mut clips: Vec<_> = list(&track["clips"]).iter().collect();
-            sort_timeline(&mut clips);
-            for clip in clips {
-                if clip["source_type"] == "file" {
-                    sources.add("overlay", &clip["file_path"]);
-                } else if let Some(id) = clip["source_id"].as_i64() {
-                    sources.recordings.insert(id);
-                    sources.add("overlay", &clip["file_path"]);
-                }
+        for clip in upper_clips(tracks, base.unwrap_or(tracks.len())) {
+            if let Some(id) = upper_recording_id(clip) {
+                sources.recordings.insert(id);
+            } else if clip["source_type"] == "file" || main_clip(clip) {
+                sources.add("overlay", &clip["file_path"]);
             }
         }
         let hidden: HashSet<_> = list(&project["overlay_tracks"])
@@ -191,6 +182,32 @@ pub(super) fn base_track(tracks: &[Value]) -> Option<usize> {
     tracks
         .iter()
         .rposition(|track| visible_video(track) && list(&track["clips"]).iter().any(main_clip))
+}
+
+pub(super) fn upper_clips(tracks: &[Value], base: usize) -> impl Iterator<Item = &Value> {
+    // The UI lists higher layers first. Render the nearest layer first, then
+    // the higher layers, preserving the order of clips with equal start times.
+    tracks[..base]
+        .iter()
+        .rev()
+        .filter(|track| visible_video(track))
+        .flat_map(|track| {
+            let mut clips: Vec<_> = list(&track["clips"]).iter().collect();
+            sort_timeline(&mut clips);
+            clips
+        })
+}
+
+pub(super) fn upper_file_path(clip: &Value) -> Option<&str> {
+    let path = text(&clip["file_path"]);
+    (!path.is_empty()).then_some(path)
+}
+
+pub(super) fn upper_recording_id(clip: &Value) -> Option<i64> {
+    if clip["source_type"] == "file" || upper_file_path(clip).is_some() {
+        return None;
+    }
+    clip["source_id"].as_i64()
 }
 
 fn visible_video(track: &Value) -> bool {

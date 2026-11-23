@@ -1,6 +1,8 @@
 use super::{
     audio_mix,
-    export_sources::{base_track, main_clip, media_path, sort_timeline},
+    export_sources::{
+        base_track, main_clip, media_path, sort_timeline, upper_clips, upper_recording_id,
+    },
     exports::{self, Read},
     ffmpeg::{command, find_ffprobe},
     fonts, has_table, json_reply, model_body, profile_disk,
@@ -355,7 +357,7 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         .filter(|clip| main_clip(clip))
         .collect();
     sort_timeline(&mut clips);
-    validate_effects(&body, base, &clips)?;
+    validate_base_effects(&clips)?;
     let track_gain = if track["muted"] == true
         || tracks
             .iter()
@@ -385,20 +387,29 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
         .iter()
         .filter(|clip| clip["source_type"] != "file")
         .filter_map(|clip| clip["source_id"].as_i64())
+        .chain(upper_clips(tracks, base).filter_map(upper_recording_id))
         .collect();
     let recordings = recorded_clips::output_paths(&database, &source_ids)
         .map_err(|_| Problem(StatusCode::INTERNAL_SERVER_ERROR, FAILED, None))?;
     let resolved = resolve_media(&clips, &recordings)?;
-    let audio = audio_mix::Plan::from_project(&body, |id| recordings.get(&id).map(PathBuf::from));
-    let overlays =
-        render::overlay::Plan::from_project(&body, |text| fonts::for_export(profile, text))
-            .map_err(|code| {
-                if code == render::overlay::UNAVAILABLE {
-                    unavailable_effect()
-                } else {
-                    Problem::input(code)
-                }
-            })?;
+    let recording_path = |id| {
+        recordings
+            .get(&id)
+            .map(|path| path.trim())
+            .filter(|path| !path.is_empty())
+            .map(media_path)
+    };
+    let audio = audio_mix::Plan::from_project(&body, recording_path);
+    let overlays = render::overlay::Plan::from_project(&body, base, recording_path, |text| {
+        fonts::for_export(profile, text)
+    })
+    .map_err(|code| {
+        if code == render::overlay::UNAVAILABLE {
+            unavailable_effect()
+        } else {
+            Problem::input(code)
+        }
+    })?;
     let mut source_lengths: HashMap<_, _> = resolved
         .iter()
         .map(|(path, bytes)| (path.clone(), *bytes))
@@ -456,11 +467,7 @@ fn prepare(profile: &ProfileState, input: ExportRequest) -> Result<Prepared, Pro
     })
 }
 
-fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<(), Problem> {
-    let tracks = list(&project["tracks"]);
-    let parallel = tracks[..base].iter().any(|track| {
-        track["hidden"] == false && track["type"] == "video" && !list(&track["clips"]).is_empty()
-    });
+fn validate_base_effects(clips: &[&Value]) -> Result<(), Problem> {
     let outer_transition = |transition: &Value| {
         transition["type"]
             .as_str()
@@ -479,7 +486,7 @@ fn validate_effects(project: &Value, base: usize, clips: &[&Value]) -> Result<()
                 .iter()
                 .any(|key| !list(&clip[*key]).is_empty())
     });
-    if parallel || background_transition || effects {
+    if background_transition || effects {
         return Err(unavailable_effect());
     }
     Ok(())
