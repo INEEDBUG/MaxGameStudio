@@ -714,7 +714,7 @@ mod tests {
             Err(Problem::Save)
         ));
         assert_eq!(fs::read(path).unwrap(), b"already there");
-        assert_eq!(db.query_row("SELECT count(*) FROM lite_cut_assets", [], |row| row.get::<_, u64>(0)).unwrap(), 3);
+        assert_eq!(db.query_row("SELECT count(*) FROM lite_cut_assets", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
         assert!(!fs::read_dir(legacy).unwrap().any(|entry| {
             entry.unwrap().file_name().to_string_lossy().starts_with(STAGING_PREFIX)
         }));

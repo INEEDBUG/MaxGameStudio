@@ -443,14 +443,52 @@ export async function verifyLeagueNavigation(evaluate) {
   await click('[data-key="league-lookup"]')
   await expectPlayerLookup()
 
-  await click('[data-key="league-runes"]')
-  await waitFor('the installed League ARAM pick and ban options', 10_000, () => evaluate(`(() => {
+  const expectAramOptions = () => waitFor('the installed League ARAM pick and ban options', 10_000, () => evaluate(`(() => {
     const windows = document.querySelector('.league-aram-window-options')
     const switches = [...(windows?.querySelectorAll('[role="switch"]') ?? [])]
     return window.location.hash.split('?')[0].endsWith('/automation/auto-select') &&
       /OP\\.?GG/i.test(windows?.textContent ?? '') && /RESG/i.test(windows?.textContent ?? '') &&
       switches.length === 4 && switches.every(control => /^(true|false)$/.test(control.getAttribute('aria-checked')))
   })()`))
+  await click('[data-key="league-runes"]')
+  await expectAramOptions()
+
+  const companionSettings = () => evaluate(`(async () => {
+    const switches = [...document.querySelectorAll('.league-aram-window-options [role="switch"]')]
+    const invoke = (namespace, method, args) => window.__TAURI__.core.invoke('league_call', { namespace, method, args })
+    const opgg = await invoke('setting-factory-main', 'get', ['window-manager-main/opgg-window', 'enabled'])
+    const resg = await invoke('window-manager-main/resg-window', 'getSnapshot', [])
+    if (!opgg.success || !resg.success || typeof opgg.data !== 'boolean' || typeof resg.data?.enabled !== 'boolean') return null
+    const ready = switches[0]?.getAttribute('aria-checked') === String(opgg.data) &&
+      switches[2]?.getAttribute('aria-checked') === String(resg.data.enabled)
+    return ready ? { opgg: opgg.data, resg: resg.data.enabled } : null
+  })()`)
+  const original = await waitFor('both saved League companion settings', 10_000, companionSettings)
+  const toggle = async index => {
+    assert.equal(await evaluate(`(() => {
+      const button = document.querySelectorAll('.league-aram-window-options [role="switch"]')[${index}]
+      if (!button || button.disabled) return false
+      button.click()
+      return true
+    })()`), true, 'An installed League companion switch could not be used.')
+  }
+  const expectSettings = expected => waitFor('the expected independent League companion settings', 10_000,
+    async () => isDeepStrictEqual(await companionSettings(), expected))
+
+  await toggle(0)
+  await expectSettings({ opgg: !original.opgg, resg: original.resg })
+  await toggle(2)
+  const changed = { opgg: !original.opgg, resg: !original.resg }
+  await expectSettings(changed)
+  await click('[data-key="league-overview"]')
+  await waitFor('the installed League Overview', 10_000, () => evaluate("window.location.hash === '#/overview'"))
+  await click('[data-key="league-runes"]')
+  await expectAramOptions()
+  await expectSettings(changed)
+  await toggle(2)
+  await expectSettings({ opgg: !original.opgg, resg: original.resg })
+  await toggle(0)
+  await expectSettings(original)
 }
 
 export async function selectLeagueExit(evaluate) {
@@ -564,7 +602,7 @@ async function verifyInstalled(role, executable, expectedHash, current, portText
         currentVersion: current, feed: { product: 'maxgamestudio-league', channel, url: feed }, availableVersion: expected,
       }), 'League returned unexpected update feed metadata.')
       await verifyLeagueNavigation(evaluate)
-      console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: game icons, both player lookup entries, and ARAM window options.')
+      console.log('NATIVE_LEAGUE_NAVIGATION_VERIFIED: game icons, both player lookup entries, and independent ARAM companion switches.')
       await selectLeagueExit(evaluate)
     }
   } finally {

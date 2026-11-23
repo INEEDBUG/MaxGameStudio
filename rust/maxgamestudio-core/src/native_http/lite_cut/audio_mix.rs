@@ -41,10 +41,10 @@ struct Clip {
     kind: Kind,
 }
 
-struct SpeedSegment {
-    start: f64,
-    end: f64,
-    speed: f64,
+pub(super) struct SpeedSegment {
+    pub(super) start: f64,
+    pub(super) end: f64,
+    pub(super) speed: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -258,46 +258,21 @@ impl Clip {
             .map_or(5.0, |end| (end - start).max(0.1));
         let end = start + source_duration;
         let speed = number(&clip["speed"]);
-        let mut points = keyframes(&clip["speed_keyframes"], "source_sec", "speed", start..=end);
-        let has_ramp = points.len() >= 2;
-        let segments = if !has_ramp {
-            vec![SpeedSegment { start, end, speed }]
-        } else {
-            if points[0].0 > start + EPSILON {
-                points.insert(0, (start, speed));
-            }
-            let (final_time, final_speed) = points[points.len() - 1];
-            if final_time < end - EPSILON {
-                points.push((end, final_speed));
-            }
-            points
-                .windows(2)
-                .map(|pair| SpeedSegment {
-                    start: pair[0].0,
-                    end: pair[1].0,
-                    speed: pair[0].1,
-                })
-                .collect::<Vec<_>>()
-        };
+        let mut segments = speed_ramp(clip, start, end);
+        let has_ramp = !segments.is_empty();
+        if !has_ramp {
+            segments.push(SpeedSegment { start, end, speed });
+        }
         let duration = segments
             .iter()
             .map(|part| (part.end - part.start) / part.speed)
             .sum::<f64>()
             .max(0.1)
             + number(&clip["freeze_frame_sec"]);
-        let gain = if force_muted || clip["muted"] == true {
+        let gain = if force_muted {
             "volume=0.000000".to_owned()
         } else {
-            let mut points = keyframes(
-                &clip["audio_keyframes"],
-                "time_sec",
-                "volume",
-                0.0..=duration,
-            );
-            for (_, gain) in &mut points {
-                *gain = (*gain * track_gain).min(2.0);
-            }
-            gain_filter((number(&clip["volume"]) * track_gain).min(5.0), &points)
+            clip_gain_filter(clip, track_gain, duration)
         };
         Self {
             path,
@@ -389,7 +364,7 @@ impl Clip {
 }
 
 impl SpeedSegment {
-    fn filters(&self, reverse: bool, preserve_pitch: bool, has_ramp: bool) -> Vec<String> {
+    pub(super) fn filters(&self, reverse: bool, preserve_pitch: bool, has_ramp: bool) -> Vec<String> {
         let mut filters = vec![
             format!("atrim=start={:.6}:end={:.6}", self.start, self.end),
             "asetpts=PTS-STARTPTS".to_owned(),
@@ -415,6 +390,23 @@ impl SpeedSegment {
         }
         filters
     }
+}
+
+pub(super) fn speed_ramp(clip: &Value, start: f64, end: f64) -> Vec<SpeedSegment> {
+    let mut points = keyframes(&clip["speed_keyframes"], "source_sec", "speed", start..=end);
+    if points.len() < 2 {
+        return Vec::new();
+    }
+    if points[0].0 > start + EPSILON {
+        points.insert(0, (start, number(&clip["speed"])));
+    }
+    let (last_time, last_speed) = points[points.len() - 1];
+    if last_time < end - EPSILON {
+        points.push((end, last_speed));
+    }
+    points.windows(2).map(|pair| SpeedSegment {
+        start: pair[0].0, end: pair[1].0, speed: pair[0].1,
+    }).collect()
 }
 
 fn source_path(value: &Value) -> Option<PathBuf> {
@@ -474,6 +466,17 @@ fn keyframes(
     points
 }
 
+pub(super) fn clip_gain_filter(clip: &Value, track_gain: f64, duration: f64) -> String {
+    if clip["muted"] == true {
+        return "volume=0.000000".to_owned();
+    }
+    let mut points = keyframes(&clip["audio_keyframes"], "time_sec", "volume", 0.0..=duration);
+    for (_, gain) in &mut points {
+        *gain = (*gain * track_gain).min(2.0);
+    }
+    gain_filter((number(&clip["volume"]) * track_gain).min(5.0), &points)
+}
+
 fn gain_filter(gain: f64, points: &[(f64, f64)]) -> String {
     let Some(&(first, initial)) = points.first() else {
         return format!("volume={gain:.6}");
@@ -482,27 +485,13 @@ fn gain_filter(gain: f64, points: &[(f64, f64)]) -> String {
     let mut expression = format!("{final_gain:.6}");
     if points.len() > 1 {
         // Keep expression recursion logarithmic even with the 500 legal keyframes.
-        let linear = gain_interpolation(points);
+        let linear = super::curve::interpolate(points, "t");
         expression = format!("if(lt(t,{last:.6}),{linear},{expression})");
     }
     if first > EPSILON {
         expression = format!("if(lt(t,{first:.6}),{initial:.6},{expression})");
     }
     format!("volume='{expression}':eval=frame")
-}
-
-fn gain_interpolation(points: &[(f64, f64)]) -> String {
-    if let [(start, before), (end, after)] = points {
-        let delta = (end - start).max(0.0001);
-        return format!("{before:.6}+({after:.6}-{before:.6})*(t-{start:.6})/{delta:.6}");
-    }
-    let mid = points.len() / 2;
-    format!(
-        "if(lt(t,{:.6}),{},{})",
-        points[mid].0,
-        gain_interpolation(&points[..=mid]),
-        gain_interpolation(&points[mid..])
-    )
 }
 
 fn mix_labels(parts: &mut Vec<String>, labels: &[String], output: &str) {

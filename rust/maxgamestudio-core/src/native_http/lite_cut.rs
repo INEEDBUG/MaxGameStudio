@@ -1,5 +1,6 @@
 mod assets;
 mod audio_mix;
+mod curve;
 mod export_job;
 mod export_sources;
 mod exports;

@@ -480,13 +480,7 @@ fn validate_base_effects(clips: &[&Value]) -> Result<(), Problem> {
         || clips
             .last()
             .is_some_and(|clip| outer_transition(&clip["transition_out"]));
-    let effects = clips.iter().any(|clip| {
-        !clip["transform"].is_null()
-            || ["keyframes", "speed_keyframes", "audio_keyframes"]
-                .iter()
-                .any(|key| !list(&clip[*key]).is_empty())
-    });
-    if background_transition || effects {
+    if background_transition {
         return Err(unavailable_effect());
     }
     Ok(())

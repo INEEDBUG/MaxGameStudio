@@ -1,7 +1,9 @@
+mod canvas;
 pub(super) mod overlay;
 mod text_overlay;
 mod transition;
 
+use super::audio_mix::{clip_gain_filter, speed_ramp, SpeedSegment};
 use super::ffmpeg::{command, inspect};
 use super::project_schema::list;
 use crate::profile_platform::path_text;
@@ -63,13 +65,13 @@ impl<'a> Timeline<'a> {
         }
     }
 
-    fn video(&self, clip: &Value) -> String {
+    fn video(&self, clip: &Value, input: &str, speed: f64) -> String {
         let (width, height, fps) = (self.width, self.height, self.fps);
         let fit = clip["canvas_fit"]
             .as_str()
             .filter(|fit| *fit != "inherit")
             .unwrap_or(self.fit);
-        let mut graph = vec!["[0:v:0]setpts=PTS-STARTPTS".to_owned()];
+        let mut graph = vec![format!("{input}setpts=PTS-STARTPTS")];
         let crop = &clip["crop"];
         if !crop.is_null() {
             let w = number(&crop["width"]).clamp(0.05, 1.0);
@@ -106,7 +108,6 @@ impl<'a> Timeline<'a> {
         if clip["reverse"] == true {
             graph.push("reverse".to_owned());
         }
-        let speed = number(&clip["speed"]);
         if (speed - 1.0).abs() > 1e-6 {
             graph.push(format!("setpts=PTS/{speed:.6}"));
         }
@@ -124,19 +125,23 @@ impl<'a> Timeline<'a> {
             let start = duration - fade_out;
             graph.push(format!("fade=t=out:st={start:.6}:d={fade_out:.6}"));
         }
-        format!("{}[vout]", graph.join(","))
+        let fitted = graph.join(",");
+        if clip["transform"].is_object() || !list(&clip["keyframes"]).is_empty() {
+            canvas::place(self, clip, &fitted, duration)
+        } else {
+            format!("{fitted}[vout]")
+        }
     }
 
-    fn audio(input: &Segment<'_>, has_audio: bool) -> String {
+    fn audio(input: &Segment<'_>, has_audio: bool, label: &str, speed: f64) -> String {
         let duration = length(input.clip);
         if !has_audio || input.clip["muted"] == true || input.track_gain <= 0.0 {
             return silence(duration);
         }
-        let mut graph = vec!["[0:a:0]asetpts=PTS-STARTPTS".to_owned()];
+        let mut graph = vec![format!("{label}asetpts=PTS-STARTPTS")];
         if input.clip["reverse"] == true {
             graph.push("areverse".to_owned());
         }
-        let speed = number(&input.clip["speed"]);
         if (speed - 1.0).abs() > 1e-6 {
             if input.clip["preserve_pitch"] == false {
                 graph.push(format!(
@@ -152,14 +157,51 @@ impl<'a> Timeline<'a> {
                 }
             }
         }
-        let volume = (number(&input.clip["volume"]) * input.track_gain).min(5.0);
+        let volume = clip_gain_filter(input.clip, input.track_gain, duration);
         graph.push(format!(
-            "volume={volume:.6},aformat=sample_rates=48000:channel_layouts=stereo"
+            "{volume},aformat=sample_rates=48000:channel_layouts=stereo"
         ));
         graph.push(format!(
             "apad=whole_dur={duration:.6},atrim=duration={duration:.6}"
         ));
         format!("{}[aout]", graph.join(","))
+    }
+
+    fn segment_filters(&self, input: &Segment<'_>, has_audio: bool) -> String {
+        let clip = input.clip;
+        let start = number(&clip["trim_in"]);
+        let ramp = speed_ramp(clip, start, start + source_duration(clip));
+        if ramp.is_empty() {
+            let speed = number(&clip["speed"]);
+            return format!("{};{}", self.video(clip, "[0:v:0]", speed), Self::audio(input, has_audio, "[0:a:0]", speed));
+        }
+
+        let mut filters = Vec::new();
+        let mut video = String::new();
+        let mut audio = String::new();
+        let use_audio = has_audio && clip["muted"] != true && input.track_gain > 0.0;
+        for (index, segment) in ramp.iter().enumerate() {
+            let SpeedSegment { start: absolute_start, end, speed } = *segment;
+            let start_time = absolute_start - start;
+            let end_time = end - start;
+            let label = format!("[rv{index}]");
+            filters.push(format!("[0:v:0]trim=start={start_time:.6}:end={end_time:.6},setpts=PTS-STARTPTS,setpts=PTS/{speed:.6}{label}"));
+            video.push_str(&label);
+            if use_audio {
+                let label = format!("[ra{index}]");
+                let take = SpeedSegment { start: start_time, end: end_time, speed };
+                let parts = take.filters(false, clip["preserve_pitch"] != false, true).join(",");
+                filters.push(format!("[0:a:0]{parts}{label}"));
+                audio.push_str(&label);
+            }
+        }
+        filters.push(format!("{video}concat=n={}:v=1:a=0[rampv]", ramp.len()));
+        if use_audio {
+            filters.push(format!("{audio}concat=n={}:v=0:a=1[rampa]", ramp.len()));
+        }
+        filters.push(self.video(clip, "[rampv]", 1.0));
+        filters.push(Self::audio(input, use_audio, "[rampa]", 1.0));
+        filters.join(";")
     }
 
     async fn write_segment(
@@ -181,11 +223,7 @@ impl<'a> Timeline<'a> {
                 .args(["-ss", &format!("{:.6}", number(&input.clip["trim_in"]))])
                 .args(["-t", &format!("{:.6}", source_duration(input.clip)), "-i"])
                 .arg(path_text(input.path));
-            format!(
-                "{};{}",
-                self.video(input.clip),
-                Self::audio(input, has_audio)
-            )
+            self.segment_filters(input, has_audio)
         } else {
             format!(
                 "color=c={}:s={}x{}:r={}:d={duration:.6},format=yuv420p[vout];{}",
@@ -331,7 +369,15 @@ impl<'a> Timeline<'a> {
 }
 
 pub(super) fn length(clip: &Value) -> f64 {
-    (source_duration(clip) / number(&clip["speed"])).max(0.1) + number(&clip["freeze_frame_sec"])
+    let start = number(&clip["trim_in"]);
+    let source = source_duration(clip);
+    let ramp = speed_ramp(clip, start, start + source);
+    let duration = if ramp.is_empty() {
+        source / number(&clip["speed"])
+    } else {
+        ramp.iter().map(|segment| (segment.end - segment.start) / segment.speed).sum()
+    };
+    duration.max(0.1) + number(&clip["freeze_frame_sec"])
 }
 
 fn source_duration(clip: &Value) -> f64 {
@@ -552,5 +598,49 @@ mod tests {
         })))
         .unwrap();
         assert_eq!(length(&body["tracks"][0]["clips"][0]), 0.35);
+    }
+
+    #[test]
+    #[ignore = "requires the pinned FFmpeg and FFprobe fixture executables"]
+    fn ffmpeg_base_speed_keyframes_keep_video_and_audio_in_the_same_timeline() {
+        let ffmpeg = PathBuf::from(std::env::var_os("MGS_LITECUT_VIDEO_TEST_FFMPEG").unwrap());
+        let ffprobe = super::super::ffmpeg::find_ffprobe(&ffmpeg).unwrap();
+        let scratch_root = PathBuf::from(std::env::var_os("MGS_LITECUT_VIDEO_TEST_SCRATCH").unwrap());
+        let scratch = tempfile::tempdir_in(scratch_root).unwrap();
+        let source = scratch.path().join("source.mp4");
+        let output = scratch.path().join("result.mp4");
+        let input = std::process::Command::new(&ffmpeg)
+            .args([
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "testsrc2=s=320x180:r=24:d=2", "-f", "lavfi", "-i", "sine=f=440:d=2",
+                "-c:v", "libx264", "-c:a", "aac", "-shortest",
+            ])
+            .arg(&source).output().unwrap();
+        assert!(input.status.success(), "{}", String::from_utf8_lossy(&input.stderr));
+        let body = normalize(Some(json!({
+            "output":{"width":320,"height":180,"fps":24},
+            "tracks":[{"id":"v1","type":"video","label":"V1","clips":[{
+                "id":"ramp","trim_in":0,"trim_out":2,
+                "speed_keyframes":[{"source_sec":0,"speed":1},{"source_sec":1,"speed":2}],
+                "audio_keyframes":[{"time_sec":0,"volume":0.3},{"time_sec":1.5,"volume":1}]
+            }]}]
+        }))).unwrap();
+        let timeline = Timeline::from_project(&body);
+        let clip = &body["tracks"][0]["clips"][0];
+        assert_eq!(length(clip), 1.5);
+        let source = Segment { path: &source, clip, track_gain: 1.0 };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let (_control, cancel) = watch::channel(false);
+            let media = Media { ffmpeg: &ffmpeg, ffprobe: &ffprobe, encoder: "libx264", cancel: &cancel };
+            timeline.write_segment(&media, Some(&source), length(clip), &output).await.unwrap();
+            let info = inspect(&ffprobe, &output, None).await.unwrap();
+            let streams = list(&info["streams"]);
+            for kind in ["video", "audio"] {
+                let stream = streams.iter().find(|stream| stream["codec_type"] == kind).unwrap();
+                let duration = stream["duration"].as_str().unwrap().parse::<f64>().unwrap();
+                assert!((1.45..=1.55).contains(&duration), "{kind} duration: {duration}");
+            }
+        });
     }
 }
