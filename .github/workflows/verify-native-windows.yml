@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
-        if: ${{ !inputs.backend_only }}
+        if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         with:
           version: '11.9.0'
           run_install: false
@@ -46,7 +46,7 @@ jobs:
         if: ${{ !inputs.backend_only }}
         with:
           node-version: '24'
-          cache: pnpm
+          cache: ${{ !inputs.league_startup_only && 'pnpm' || '' }}
           cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: actions/setup-python@v5
         if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
