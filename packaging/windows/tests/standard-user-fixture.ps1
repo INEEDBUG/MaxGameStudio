@@ -220,7 +220,7 @@ fn main() -> io::Result<()> {
     fs::write(directory.parent().unwrap().join(format!("{id}.txt")), b"launched")
 }
 '@)
-      & rustc --edition 2021 --crate-name mgs_league_launcher_fixture -C opt-level=1 $launchFixtureSource -o $launchFixture
+      & rustc --edition 2021 --crate-name mgs_league_launcher_fixture -C opt-level=1 -C strip=debuginfo $launchFixtureSource -o $launchFixture
       if ($LASTEXITCODE -ne 0) { throw 'The native League launcher fixture failed to compile.' }
       $key = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($User.SID)"
       $profilePath = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $key -Name ProfileImagePath))
@@ -333,10 +333,15 @@ exit $app.ExitCode
     try {
       if ($launcher) { Stop-CiFixtureProcess $launcher }
     } finally {
-      foreach ($file in @($launchScript, $launchFixtureSource, $launchFixture)) {
-        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file }
+      # The fixture linker may leave another file alongside its executable.
+      # This fresh probe directory holds only our own flat build inputs and outputs.
+      foreach ($file in (Get-ChildItem -LiteralPath $folder -Force)) {
+        if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+          throw 'Unexpected directory or redirect in the updater probe folder.'
+        }
+        Remove-Item -LiteralPath $file.FullName -Force
       }
-      Remove-Item -LiteralPath $folder
+      [IO.Directory]::Delete($folder)
     }
   }
 }
