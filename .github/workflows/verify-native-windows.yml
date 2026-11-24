@@ -267,6 +267,17 @@ jobs:
           $sha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
           ./packaging/windows/tests/verify-native-league-boot.ps1 -Installer $installer -Version $env:LEAGUE_VERSION -ExecutableSha256 $sha
 
+      - name: Retain the verified League installer for Windows acceptance
+        if: ${{ inputs.league_startup_only && inputs.league_sign_update && !inputs.backend_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: league-native-${{ inputs.league_version }}
+          path: |
+            ${{ runner.temp }}/mgs-native-candidates/MaxGameStudioLeague_${{ inputs.league_version }}_x64-setup.exe
+            ${{ runner.temp }}/mgs-native-candidates/MaxGameStudioLeague_${{ inputs.league_version }}_x64-setup.exe.sig
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify both native successors and their existing data
         if: ${{ !inputs.league_startup_only && !inputs.backend_only }}
         shell: pwsh
