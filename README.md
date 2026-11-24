@@ -13,7 +13,7 @@ Windows 10/11 · x64
 | App | Version | Installer | Download size |
 | --- | --- | --- | --- |
 | **MaxGameStudio** | 3.2.0-beta.2 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.2.0-beta.2/MaxGameStudio_3.2.0-beta.2_x64-setup.exe.sha256) | 40.3 MiB |
-| **MaxGameStudio League** | 1.0.0-beta.5 | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.5/MaxGameStudioLeague_1.0.0-beta.5_x64-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/league-v1.0.0-beta.5/MaxGameStudioLeague_1.0.0-beta.5_x64-setup.exe.sha256) | 102.1 MiB |
+| **HKsLGT (League Toolbox)** | Beta | [Download and SHA-256](https://github.com/INEEDBUG/HKsLGT/releases) | 6.7 MiB |
 | **MaxGameStudio stable** | 3.1.4 repair | [Download EXE](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/MaxGameStudio_3.1.4_x64-repair-setup.exe) · [SHA-256](https://github.com/INEEDBUG/MaxGameStudio/releases/download/v3.1.4/SHA256SUMS) | 137.4 MiB |
 
 Historical installed sizes were MaxGameStudio 3.2.0-beta.2 107–108 MiB and MaxGameStudio League 1.0.0-beta.2 335 MiB.
@@ -22,7 +22,7 @@ GitHub keeps one beta and up to three stable releases for each app, while Git ta
 
 Program sizes exclude user data and the main app's shared Windows WebView2 runtime. Stable 3.1.4 repair includes the League workspace. The two beta apps install separately and each checks its own beta update channel.
 
-[Main app release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.2) · [League release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/league-v1.0.0-beta.5) · [All releases](https://github.com/INEEDBUG/MaxGameStudio/releases)
+[Main app release notes](https://github.com/INEEDBUG/MaxGameStudio/releases/tag/v3.2.0-beta.2) · [League releases](https://github.com/INEEDBUG/HKsLGT/releases) · [All releases](https://github.com/INEEDBUG/MaxGameStudio/releases)
 
 [![MaxGameStudio 3.2 beta home page with the Steam account panel and shortcuts for CS2, LiteCut, VALORANT, and input tools](./docs/screenshots/main-beta-home.jpg)](./docs/screenshots/main-beta-home.jpg)
 
