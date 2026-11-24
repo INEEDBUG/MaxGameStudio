@@ -47,7 +47,7 @@ Exit your game and let Steam finish syncing before switching accounts. Steam may
 
 MaxGameStudio is a noncommercial derivative. **INEEDBUG** maintains the project. [Authors](./AUTHORS.md) · [Development setup](./docs/dev-setup.md) · [Contributing](./CONTRIBUTING_EN.md)
 
-The project uses PolyForm Noncommercial 1.0.0. Retain the applicable copyright and license notices when redistributing. [Project license](./LICENSE) · [Third-party licenses](./THIRD_PARTY_LICENSES.md)
+MaxGameStudio uses PolyForm Noncommercial 1.0.0. The first-party source for the standalone MaxGameStudio League toolbox uses MIT within the scope listed in its license file. Retain the applicable copyright and license notices when redistributing. [MaxGameStudio license](./LICENSE) · [League toolbox license](./LICENSE-LEAGUE-MIT.txt) · [Third-party licenses](./THIRD_PARTY_LICENSES.md)
 
 ## Reference projects and attribution
 

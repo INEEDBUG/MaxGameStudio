@@ -46,6 +46,12 @@ try {
   if ($record.DisplayVersion -cne $Version -or $installedLocation.Trim('"') -ine $root) {
     throw 'League setup did not register the planned native installation.'
   }
+  $license = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../LICENSE-LEAGUE-MIT.txt'))
+  $notices = [IO.File]::ReadAllText((Join-Path $root 'LeagueAkari-MIT.txt'))
+  if (!$notices.StartsWith($license, [StringComparison]::Ordinal)) {
+    throw 'The installed League notices do not include the scoped MIT license.'
+  }
+  Write-Host 'NATIVE_LEAGUE_LICENSE_VERIFIED: installed MIT notice matches source.'
   Assert-NsisShellPlugins (Join-Path $root 'Uninstall MaxGameStudioLeagueToolbox.exe')
   $shell = New-Object -ComObject Shell.Application
   $shortcutName = '英雄联盟工具箱.lnk'

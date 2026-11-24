@@ -83,4 +83,4 @@ git checkout -b fix/critical-bug main
 
 ## 许可证
 
-贡献即表示你同意在 [PolyForm Noncommercial 1.0.0](./LICENSE) 下授权你的改动。
+贡献即表示你同意对[英雄联盟工具箱许可文件](./LICENSE-LEAGUE-MIT.txt)列明范围内的改动采用 MIT，其余自有代码改动采用 [PolyForm Noncommercial 1.0.0](./LICENSE)。

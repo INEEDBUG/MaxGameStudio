@@ -34,4 +34,4 @@ See [developer.md](./docs/developer.md) for the development workflow and [dev-se
 
 ## Issues and license
 
-Use [MaxGameStudio GitHub Issues](https://github.com/INEEDBUG/MaxGameStudio/issues) for bugs and feature requests; search before filing. Report security concerns privately—do not post secrets or full configurations in public issues. By contributing, you license your changes under [PolyForm Noncommercial 1.0.0](./LICENSE).
+Use [MaxGameStudio GitHub Issues](https://github.com/INEEDBUG/MaxGameStudio/issues) for bugs and feature requests; search before filing. Report security concerns privately—do not post secrets or full configurations in public issues. By contributing, you license your changes under the [League toolbox MIT license](./LICENSE-LEAGUE-MIT.txt) for the locations it covers and under [PolyForm Noncommercial 1.0.0](./LICENSE) for the other first-party code.

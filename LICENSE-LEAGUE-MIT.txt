@@ -1,0 +1,43 @@
+MaxGameStudio League source license
+
+The MIT License below applies to the first-party MaxGameStudio League
+source in these paths:
+
+- rust/league-core/
+- rust/league-desktop/
+- packaging/windows/league-standalone/
+- packaging/windows/league-resg/
+- packaging/windows/build-league-installer.ps1
+- packaging/windows/stage-league-runtime.ps1
+- packaging/windows/stage-league-prewarm.ps1
+- packaging/windows/tests/verify-native-league-boot.ps1
+- frontend/src-tauri/windows/verify-webview2-bootstrapper.ps1
+- .github/workflows/release-league-windows.yml
+
+It also covers the League-specific code in
+packaging/windows/build-native-candidate.ps1 and
+.github/workflows/verify-native-windows.yml. The repository's LICENSE
+governs the other first-party code. LeagueAkari, the installer components,
+and the other third-party code and artwork retain their respective licenses.
+
+MIT License
+
+Copyright (c) 2026 MaxGameStudio League contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

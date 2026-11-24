@@ -114,6 +114,7 @@ try {
     $license = & git -C $source show HEAD:LICENSE
     if ($LASTEXITCODE -ne 0 -or !$license) { throw 'Cannot read the pinned League Akari MIT license.' }
     $nativeNotices = @(
+      [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../LICENSE-LEAGUE-MIT.txt'))
       $license -join [Environment]::NewLine
       [IO.File]::ReadAllText((Join-Path $standalone 'native-renderer/artwork/LUCIDE-LICENSE.txt'))
       [IO.File]::ReadAllText((Join-Path $standalone 'native-renderer/artwork/IONICONS-LICENSE.txt'))

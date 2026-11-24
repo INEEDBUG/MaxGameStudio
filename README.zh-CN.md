@@ -47,7 +47,7 @@ Windows 10/11 · x64
 
 MaxGameStudio 是非商业衍生项目，由 **INEEDBUG** 维护。[项目归属](./AUTHORS.md) · [开发环境](./docs/dev-setup.zh-CN.md) · [参与贡献](./CONTRIBUTING.md)
 
-项目采用 PolyForm Noncommercial 1.0.0。分发时请保留适用的版权和许可声明。[项目许可证](./LICENSE) · [第三方许可证](./THIRD_PARTY_LICENSES.md)
+MaxGameStudio 采用 PolyForm Noncommercial 1.0.0。独立英雄联盟工具箱的自有源码在许可文件列明的范围内采用 MIT。分发时请保留适用的版权和许可声明。[MaxGameStudio 许可证](./LICENSE) · [英雄联盟工具箱许可证](./LICENSE-LEAGUE-MIT.txt) · [第三方许可证](./THIRD_PARTY_LICENSES.md)
 
 ## 参考项目与致谢
 
