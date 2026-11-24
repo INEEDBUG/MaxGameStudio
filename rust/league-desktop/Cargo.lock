@@ -2143,6 +2143,7 @@ dependencies = [
  "minisign-verify",
  "reqwest",
  "rfd",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

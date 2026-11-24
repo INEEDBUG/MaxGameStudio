@@ -194,13 +194,10 @@ fn retains_stale_unsigned_behavior_and_rejects_signed_beta_on_stable() {
         "file:MaxGameStudioLeague_1.1.0_x64-setup.exe",
     );
     payload["signature"] = json!(STANDARD.encode(forged_comment));
-    let forged = parse_manifest(&serde_json::to_vec(&payload).unwrap(), "1.0.0", FIXTURE_KEY)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        verify_installer(&forged, INSTALLER),
+    assert!(matches!(
+        parse_manifest(&serde_json::to_vec(&payload).unwrap(), "1.0.0", FIXTURE_KEY),
         Err(CheckError::Signature)
-    );
+    ));
 }
 
 #[test]
@@ -240,14 +237,13 @@ fn rejects_wrong_key_tampered_bytes_and_wrong_checksum_without_a_saved_file() {
             .unwrap()
             .unwrap()
     };
-    let wrong_key = offer(OTHER_KEY_WITH_SAME_ID);
-    let target = scratch.path().join(&wrong_key.filename);
-    assert_eq!(
-        save_fixture(INSTALLER, &wrong_key, &target),
+    assert!(matches!(
+        parse_manifest(&fixture_manifest(), BETA_CURRENT, OTHER_KEY_WITH_SAME_ID),
         Err(CheckError::Signature)
-    );
+    ));
 
     let mut genuine = offer(FIXTURE_KEY);
+    let target = scratch.path().join(&genuine.filename);
     genuine.sha256 = Sha256::digest(b"modified").into();
     assert_eq!(
         save_fixture(b"modified", &genuine, &target),

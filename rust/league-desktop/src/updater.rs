@@ -8,6 +8,7 @@ use reqwest::{
     redirect::Policy,
     Client, ClientBuilder, RequestBuilder, Response, StatusCode, Url,
 };
+use ring::signature::{UnparsedPublicKey, ED25519};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -261,7 +262,7 @@ fn verify_installer(offer: &DownloadOffer, mut file: impl Read) -> Result<(), Ch
     if digest != offer.sha256 {
         return Err(CheckError::Checksum);
     }
-    // Finalizing checks the installer bytes and authenticates the comment matched at check time.
+    // Finalizing checks the installer bytes against the signature authenticated at check time.
     verifier.finalize().map_err(|_| CheckError::Signature)
 }
 
@@ -313,13 +314,12 @@ fn parse_manifest(
     };
     let key = decode_tauri_text(key.trim()).ok_or(CheckError::Configuration)?;
     let public_key = PublicKey::decode(&key).map_err(|_| CheckError::Configuration)?;
-    let signature = payload["signature"]
+    let signature_text = payload["signature"]
         .as_str()
         .and_then(decode_tauri_text)
         .ok_or(CheckError::Signature)?;
-    let signature = Signature::decode(&signature).map_err(|_| CheckError::Signature)?;
-    // This rejects legacy or incompatible records early. Verifying the artifact and trusted
-    // comment still requires the installer bytes.
+    let signature = Signature::decode(&signature_text).map_err(|_| CheckError::Signature)?;
+    // This rejects legacy or incompatible records early. Artifact verification also needs the bytes.
     public_key
         .verify_stream(&signature)
         .map_err(|_| CheckError::Signature)?;
@@ -334,6 +334,7 @@ fn parse_manifest(
     if fields.next() != Some(expected.as_str()) || fields.next().is_some() {
         return Err(CheckError::Signature);
     }
+    verify_signed_comment(&key, &signature_text, signature.trusted_comment())?;
     let mut sha256 = [0; 32];
     hex::decode_to_slice(payload["sha256"].as_str().unwrap_or_default(), &mut sha256)
         .map_err(|_| CheckError::Manifest(UpdateError::Manifest))?;
@@ -344,6 +345,27 @@ fn parse_manifest(
         signature,
         sha256,
     }))
+}
+
+fn verify_signed_comment(key: &str, signature: &str, comment: &str) -> Result<(), CheckError> {
+    fn record<const N: usize>(line: Option<&str>) -> Result<[u8; N], CheckError> {
+        STANDARD
+            .decode(line.ok_or(CheckError::Signature)?)
+            .map_err(|_| CheckError::Signature)?
+            .try_into()
+            .map_err(|_| CheckError::Signature)
+    }
+
+    let public_key = record::<42>(key.lines().nth(1))?;
+    let mut lines = signature.lines();
+    let file_signature = record::<74>(lines.nth(1))?;
+    let global_signature = record::<64>(lines.nth(1))?;
+    // Minisign signs the 64-byte file signature followed by the trusted comment.
+    let mut message = file_signature[10..].to_vec();
+    message.extend_from_slice(comment.as_bytes());
+    UnparsedPublicKey::new(&ED25519, &public_key[10..])
+        .verify(&message, &global_signature)
+        .map_err(|_| CheckError::Signature)
 }
 
 fn decode_tauri_text(value: &str) -> Option<String> {
