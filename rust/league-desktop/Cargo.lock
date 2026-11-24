@@ -2137,16 +2137,21 @@ dependencies = [
 name = "maxgamestudio-league-desktop"
 version = "1.0.0-beta.8"
 dependencies = [
+ "base64 0.22.1",
+ "hex",
  "maxgamestudio-league-core",
+ "minisign-verify",
  "reqwest",
  "rfd",
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -2171,6 +2176,12 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minisign-verify"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e"
 
 [[package]]
 name = "miniz_oxide"

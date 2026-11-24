@@ -195,13 +195,19 @@ async fn update_call(
             Ok(json!(check))
         }
         ("openDownload", [Value::String(version)]) => {
-            let url = updater
-                .download_url(version)
+            let directory = window
+                .app_handle()
+                .path()
+                .download_dir()
+                .map_err(|_| "无法访问系统下载目录。".to_owned())?;
+            let path = updater
+                .download(version, &directory)
+                .await
                 .map_err(|error| error.to_string())?;
             window
                 .opener()
-                .open_url(url, None::<&str>)
-                .map_err(|_| "无法打开 League 下载页面。".to_owned())?;
+                .reveal_item_in_dir(path)
+                .map_err(|_| "League 安装包已保存，但无法打开文件所在目录。".to_owned())?;
             Ok(Value::Null)
         }
         _ => Err("无效的 League 更新操作。".into()),

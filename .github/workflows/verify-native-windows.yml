@@ -6,7 +6,13 @@ on:
       main_version:
         required: true
         type: string
+      league_version:
+        type: string
+        default: '1.0.0-beta.10'
       league_startup_only:
+        type: boolean
+        default: false
+      league_sign_update:
         type: boolean
         default: false
       backend_only:
@@ -17,6 +23,8 @@ on:
         default: false
     secrets:
       main_signing_key:
+        required: false
+      league_signing_key:
         required: false
 
 jobs:
@@ -29,7 +37,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: '0'
       MAIN_VERSION: ${{ inputs.main_version }}
-      LEAGUE_VERSION: 1.0.0-beta.10
+      LEAGUE_VERSION: ${{ inputs.league_version }}
       LEAGUE_PREDECESSOR_VERSION: 1.0.0-beta.9
       LEAGUE_PIN: 14557723706ccc0e0a9d62c470141d4cb7190fcd
       FIXTURE_PYTHON_VERSION: '3.12.10'
@@ -207,9 +215,29 @@ jobs:
           }
           ./packaging/windows/build-native-candidate.ps1 -Product League -Version $env:LEAGUE_VERSION @argsForLeague
 
+      - name: Prepare the pinned League updater signing tool
+        if: ${{ inputs.league_startup_only && inputs.league_sign_update && !inputs.backend_only }}
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tool = Join-Path $env:RUNNER_TEMP 'league-tauri-signer'
+          npm.cmd install --prefix $tool --no-save --no-package-lock --ignore-scripts --no-audit --no-fund '@tauri-apps/cli@2.11.4'
+
+      - name: Sign the exact native League Beta installer for the updater
+        if: ${{ inputs.league_startup_only && inputs.league_sign_update && !inputs.backend_only }}
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.league_signing_key }}
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "mgs-native-candidates/MaxGameStudioLeague_$($env:LEAGUE_VERSION)_x64-setup.exe"
+          $cli = Join-Path $env:RUNNER_TEMP 'league-tauri-signer/node_modules/@tauri-apps/cli/tauri.js'
+          ./packaging/windows/league-standalone/sign-beta-update.ps1 -Installer $installer -TauriCli $cli
+
       - name: Verify the native League backend
         if: ${{ !inputs.backend_only }}
         shell: pwsh
+        env:
+          VERIFY_SIGNED_LEAGUE: ${{ inputs.league_startup_only && inputs.league_sign_update }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
@@ -218,6 +246,15 @@ jobs:
             version=$env:LEAGUE_VERSION; build=@{frontendDist=$renderer}; bundle=@{icon=@("$renderer/league.ico")}
           } | ConvertTo-Json -Depth 4 -Compress
           cargo test --release --locked --manifest-path rust/league-desktop/Cargo.toml --target x86_64-pc-windows-msvc -- --test-threads=1
+          if ($env:VERIFY_SIGNED_LEAGUE -eq 'true') {
+            $env:MGS_LEAGUE_SIGNED_UPDATE_INSTALLER = Join-Path $env:RUNNER_TEMP "mgs-native-candidates/MaxGameStudioLeague_$($env:LEAGUE_VERSION)_x64-setup.exe"
+            $env:MGS_LEAGUE_SIGNED_UPDATE_VERSION = $env:LEAGUE_VERSION
+            $signedTest = @(cargo test --release --locked --manifest-path rust/league-desktop/Cargo.toml --target x86_64-pc-windows-msvc signed_release_installer_matches_embedded_league_key -- --ignored)
+            $signedTest
+            if (!($signedTest -match 'signed_release_installer_matches_embedded_league_key \.\.\. ok$')) {
+              throw 'The exact signed League installer did not pass the updater verification.'
+            }
+          }
 
       - name: Verify installed League startup as an ordinary Windows user
         if: ${{ inputs.league_startup_only && !inputs.backend_only }}

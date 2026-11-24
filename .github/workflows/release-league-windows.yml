@@ -16,6 +16,10 @@ on:
         description: Verify the public RESG website in an isolated Electron profile
         type: boolean
         default: false
+      verify_native_update:
+        description: Build and verify a signed native League Beta without publishing
+        type: boolean
+        default: false
 
 concurrency:
   group: release-league-windows
@@ -25,7 +29,22 @@ permissions:
   contents: read
 
 jobs:
+  verify-native-update:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_native_update && github.repository == 'INEEDBUG/MaxGameStudio'
+    uses: ./.github/workflows/verify-native-windows.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      main_version: '3.2.0-beta.4'
+      league_version: ${{ inputs.version }}
+      league_startup_only: true
+      league_sign_update: true
+    secrets:
+      league_signing_key: ${{ secrets.LEAGUE_TAURI_SIGNING_PRIVATE_KEY }}
+
   build:
+    if: ${{ !inputs.verify_native_update }}
     runs-on: windows-latest
     timeout-minutes: 35
     outputs:
